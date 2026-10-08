@@ -38,8 +38,12 @@ struct Playback {
   SourcePtr source;
   FlatEventList events;  // sorted by start
   Ticks lengthTicks = 0; // loop length of the pattern
+  // A source is loaded (so chops can be auditioned) but no pattern exists yet: the input passes through
+  // unchanged and previews are mixed on top.
+  bool passThrough = false;
 };
 Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks);
+Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source);
 
 struct Config {
   double sampleRate = 48000.0;

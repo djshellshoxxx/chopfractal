@@ -84,6 +84,14 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
   return std::shared_ptr<const Playback>(std::move(pb));
 }
 
+Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source) {
+  auto base = makePlayback(std::move(source), {}, kTicksPerWhole);
+  if (!base.ok()) return base.error();
+  auto pb = std::make_shared<Playback>(*base.value());
+  pb->passThrough = true;
+  return std::shared_ptr<const Playback>(std::move(pb));
+}
+
 struct Renderer::Impl {
   Config cfg;
   bool prepared = false;
@@ -328,6 +336,27 @@ struct Renderer::Impl {
     std::fill(mixL.begin(), mixL.begin() + frames, 0.f);
     std::fill(mixR.begin(), mixR.begin() + frames, 0.f);
     triggers.clear();
+
+    if (pb->passThrough) {
+      // Source loaded for audition but no pattern yet: input passes through, previews play on top.
+      if (wasPlaying) releaseAll();
+      wasPlaying = false;
+      haveExpected = false;
+      renderVoices(0, frames);
+      for (int i = 0; i < frames; ++i) {
+        const float x0 = (in && in[0]) ? in[0][i] : 0.f;
+        const float x1 = (nch > 1 && in && in[1]) ? in[1][i] : x0;
+        const float l = mixL[static_cast<std::size_t>(i)];
+        const float r = mixR[static_cast<std::size_t>(i)];
+        float o0 = nch == 2 ? x0 + l : x0 + 0.5f * (l + r);
+        float o1 = x1 + r;
+        if (!std::isfinite(o0)) o0 = 0.f;
+        if (!std::isfinite(o1)) o1 = 0.f;
+        out[0][i] = o0;
+        if (nch == 2) out[1][i] = o1;
+      }
+      return;
+    }
 
     double bpm = tb.bpm;
     if (!std::isfinite(bpm) || bpm <= 0.0) bpm = 120.0;

@@ -304,6 +304,50 @@ class Gen {
     }
   }
 
+  // Hard rules must hold for every generated event, including ones copied from another beat or bar (a
+  // copy can land in a position the original never occupied). Walks the bar in time order; a copied or
+  // fresh event the policy now rejects is swapped for an allowed chop, or removed if none is allowed.
+  void enforceHard(Pattern& p, int bar, const std::unordered_set<std::uint64_t>& fresh) {
+    if (!policy_) return;
+    Bar& B = p.bars[static_cast<std::size_t>(bar)];
+    std::vector<std::pair<Ticks, std::uint64_t>> order;
+    for (const Beat& bt : B.beats)
+      for (const Event& e : bt.events)
+        if (fresh.count(e.id.value)) order.push_back({e.start, e.id.value});
+    std::sort(order.begin(), order.end());
+    for (const auto& [start, idv] : order) {
+      Beat* holder = nullptr;
+      std::size_t index = 0;
+      for (Beat& bt : B.beats)
+        for (std::size_t i = 0; i < bt.events.size(); ++i)
+          if (bt.events[i].id.value == idv) {
+            holder = &bt;
+            index = i;
+          }
+      if (!holder) continue;
+      Event& e = holder->events[index];
+      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop));
+      if (d.allowed) continue;
+      std::vector<ChopId> allowed;
+      std::vector<double> weights;
+      for (const ChopInfo& c : chops_.chops) {
+        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id));
+        if (dc.allowed) {
+          allowed.push_back(c.id);
+          weights.push_back(dc.weight);
+        }
+      }
+      if (allowed.empty()) {
+        note(Note::Kind::BlockedByRule, d.blockedBy, bar, static_cast<int>(std::min<Ticks>(beats_ - 1, e.start / beatT_)));
+        holder->events.erase(holder->events.begin() + static_cast<std::ptrdiff_t>(index));
+        continue;
+      }
+      Rng r(deriveKey(seed_, kStreamEvent + 100, static_cast<std::uint64_t>(bar), idv));
+      e.chop = allowed[pickByU(weights, r.uniform01())];
+      e.region = {};
+    }
+  }
+
   Event copyOfEvent(Pattern& p, const Event& src, Ticks shift) const {
     Event e = src;
     e.id = EventId{p.nextId++};
@@ -374,6 +418,7 @@ class Gen {
       fillBeat(p, bar, 0, 1, fresh, true);
       enforceRequired(p, bar, 0, fresh);
     }
+    enforceHard(p, bar, fresh);
     detail::assignDurations(p, bar, &fresh);
   }
 
@@ -434,7 +479,10 @@ class Gen {
       enforceRequired(work, tg.bar, tg.beat, fresh);
       touched.insert(tg.bar);
     }
-    for (int bar : touched) detail::assignDurations(work, bar, &fresh);
+    for (int bar : touched) {
+      enforceHard(work, bar, fresh);
+      detail::assignDurations(work, bar, &fresh);
+    }
     return work;
   }
 

@@ -130,6 +130,11 @@ void PatternSession::reset() {
   slots_ = {};
 }
 
+void PatternSession::restore(Pattern p) {
+  history_.reset(std::make_shared<const Pattern>(std::move(p)));
+  slots_ = {};
+}
+
 Status PatternSession::storeSnapshot(std::size_t slot) {
   if (slot >= 2) return makeError(ErrorCode::OutOfRange, "snapshot slot must be 0 (A) or 1 (B)");
   if (!hasPattern()) return makeError(ErrorCode::InvalidArgument, "there is no pattern to store");

@@ -24,6 +24,7 @@ class PatternSession {
   // Replace the current pattern (e.g. when restoring a history node or loading state) as one undo step.
   void adopt(Pattern p);
   void reset();  // new source: drops pattern and undo history
+  void restore(Pattern p);  // project load: the pattern becomes the only history entry; A/B slots are cleared
 
   bool canUndo() const { return history_.canUndo(); }
   bool canRedo() const { return history_.canRedo(); }

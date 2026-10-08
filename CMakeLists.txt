@@ -21,9 +21,10 @@ endif()
 
 # Dependency order: contracts first, generic modules, domain modules, features, renderer, adapters.
 foreach(m chop_contracts state_codec variation_history source_chop pattern_engine
-          recursive_hit_zoom chop_roles_grammar audio_renderer)
+          recursive_hit_zoom chop_roles_grammar audio_renderer plugin_host_adapter plugin_ui_adapter)
   add_subdirectory(modules/${m})
 endforeach()
+add_subdirectory(composition)
 
 if(CHOPFRACTAL_BUILD_PLUGIN)
   add_subdirectory(plugin)

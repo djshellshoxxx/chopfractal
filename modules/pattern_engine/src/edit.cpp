@@ -89,7 +89,7 @@ Status validate(const Pattern& p) {
   if (dup) return makeError(ErrorCode::Corrupt, "duplicate event ids");
   if (total > static_cast<std::size_t>(p.settings.maxEvents)) return makeError(ErrorCode::LimitExceeded, "pattern exceeds its event cap", p.settings.maxEvents);
   for (std::uint64_t id : ids)
-    if (id >= p.nextId) return makeError(ErrorCode::Corrupt, "id counter is behind an existing id");
+    if (!isDerivedId(id) && id >= p.nextId) return makeError(ErrorCode::Corrupt, "id counter is behind an existing id");
   return {};
 }
 

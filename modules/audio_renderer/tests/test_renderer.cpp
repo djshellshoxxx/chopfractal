@@ -24,6 +24,15 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void* operator new[](std::size_t n) { return operator new(n); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+// Every form must be replaced together (std::stable_sort uses the nothrow form), or sanitizers report a
+// new/free mismatch.
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+  if (gCountAllocs.load(std::memory_order_relaxed)) gAllocs.fetch_add(1, std::memory_order_relaxed);
+  return std::malloc(n ? n : 1);
+}
+void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return operator new(n, std::nothrow); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
 
 using namespace chopfractal;
 using namespace chopfractal::render;
@@ -260,6 +269,30 @@ CHOP_TEST(pass_through_without_a_source_and_when_disabled) {
   inplace = a;
   r.process(tb, params, in1, out1, 1, 256);
   CHECK_NEAR(inplace[200], a[200], 1e-5);
+}
+
+CHOP_TEST(pass_through_playback_keeps_the_input_and_allows_audition) {
+  Renderer r;
+  r.prepare(Config{});
+  auto pt = makePassThroughPlayback(makeSource(1, 48000, 24000, dc));
+  CHECK(pt.ok() && pt.value()->passThrough && pt.value()->events.empty());
+  CHECK(!makePassThroughPlayback(nullptr).ok());
+  r.mailbox().publish(pt.value());
+  std::vector<float> x(512), oL(512), oR(512);
+  for (std::size_t i = 0; i < x.size(); ++i) x[i] = 0.25f * std::sin(static_cast<float>(i) * 0.05f);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  r.process(tb, RenderParams{}, in, out, 2, 512);
+  CHECK(oL == x && oR == x);  // heard unchanged before any pattern exists
+  PreviewRequest req;
+  req.region = {0, 4000};
+  CHECK(r.requestPreview(req));
+  r.process(tb, RenderParams{}, in, out, 2, 512);
+  CHECK_NEAR(oL[300], x[300] + 1.0, 1e-5);  // the audition (DC 1.0) is mixed over the passing-through input
+  CHECK_EQ(r.activeVoices(), 0);
 }
 
 CHOP_TEST(dry_mix_and_output_gain_apply_to_the_whole_output) {

@@ -49,11 +49,15 @@ const Event* firstEventOf(const Pattern& p, int bar) {
 
 struct TestPolicy : ICandidatePolicy {
   ChopId forbidden;
+  int forbidFromBar = 0;      // the forbid rule applies from this bar onwards
+  bool noAdjacentRepeat = false;
   ChopId requiredChop;
   bool preserveFirst = false;
   Decision evaluate(const CandidateQuery& q) const override {
     Decision d;
-    if (forbidden.valid() && q.chop == forbidden) {
+    const bool forbid = forbidden.valid() && q.chop == forbidden && q.scope.bar >= forbidFromBar;
+    const bool repeat = noAdjacentRepeat && !q.recent.empty() && q.recent.back() == q.chop;
+    if (forbid || repeat) {
       d.allowed = false;
       d.blockedBy = 7;
       d.trace.push_back({7, TraceEntry::Effect::Rejected});
@@ -366,6 +370,47 @@ CHOP_TEST(policy_forbid_require_preserve_and_conflict_reporting) {
     for (std::uint64_t id : firsts) CHECK(findEvent(m.value(), EventId{id}) != nullptr);
 }
 
+CHOP_TEST(hard_rules_also_hold_for_copied_beats_and_bars) {
+  const ChopSnapshot c = makeChops();
+  // Phrase variation 0 makes every bar after the first a copy of an earlier bar (the path that used to
+  // bypass the policy); beat variation 1 keeps the beats of bar 0 freshly generated so it holds every chop.
+  Settings s = baseSettings();
+  s.density = 1.0;
+  s.variation = {0, 0, 1, 0};
+
+  TestPolicy positional;
+  positional.forbidden = ChopId{3};
+  positional.forbidFromBar = 1;  // allowed in bar 0 only
+  for (std::uint64_t seed = 1; seed <= 8; ++seed) {
+    s.seed = seed;
+    Pattern p = gen(c, s, &positional);
+    bool bar0Has = false;
+    for (const Beat& bt : p.bars[0].beats)
+      for (const Event& e : bt.events) bar0Has = bar0Has || e.chop == ChopId{3};
+    CHECK(bar0Has);  // the rule really is positional, so the original content is untouched
+    for (std::size_t b = 1; b < p.bars.size(); ++b)
+      for (const Beat& bt : p.bars[b].beats)
+        for (const Event& e : bt.events) CHECK(e.chop != ChopId{3});
+  }
+
+  TestPolicy noRepeat;
+  noRepeat.noAdjacentRepeat = true;
+  s.variation = {0.3, 0.3, 0.0, 0.2};
+  for (std::uint64_t seed = 1; seed <= 12; ++seed) {
+    s.seed = seed;
+    Pattern p = gen(c, s, &noRepeat);
+    auto flat = flatten(p, c);
+    CHECK(flat.ok());
+    if (!flat.ok()) continue;
+    for (std::size_t i = 1; i < flat.value().size(); ++i) CHECK(flat.value()[i].chop != flat.value()[i - 1].chop);
+    MutateOptions o;
+    o.seed = seed + 100;
+    o.amount = 1.0;
+    auto m = mutate(p, c, o, &noRepeat);
+    CHECK(m.ok());
+  }
+}
+
 CHOP_TEST(edit_commands_validate_and_respect_locks) {
   const ChopSnapshot c = makeChops();
   Settings s = baseSettings();
@@ -489,17 +534,16 @@ CHOP_TEST(nested_child_patterns_attach_collapse_and_obey_limits) {
   const ChopInfo* info = c.find(parentCopy.chop);
   const Ticks half = parentCopy.duration / 2;
   Event a, b;
-  a.id = EventId{1000001};
+  a.id = EventId{kDerivedIdBit | 1};
   a.chop = parentCopy.chop;
   a.start = 0;
   a.duration = half;
   a.region = {info->range.start, info->range.start + 100};
   b = a;
-  b.id = EventId{1000002};
+  b.id = EventId{kDerivedIdBit | 2};
   b.start = half;
   b.duration = parentCopy.duration - half;
-  child->events = {a, b};
-  p.nextId = std::max<std::uint64_t>(p.nextId, 1000003);
+  child->events = {a, b};  // derived ids need no change to the pattern's id counter
 
   auto with = setChild(p, parentCopy.id, child, c);
   CHECK(with.ok());
@@ -534,13 +578,12 @@ CHOP_TEST(nested_child_patterns_attach_collapse_and_obey_limits) {
   three->windowDuration = fp->duration;
   for (int i = 0; i < 3; ++i) {
     Event e;
-    e.id = EventId{full.nextId + 10 + static_cast<std::uint64_t>(i)};
+    e.id = EventId{kDerivedIdBit | (10 + static_cast<std::uint64_t>(i))};
     e.chop = fp->chop;
     e.start = fp->duration / 3 * i;
     e.duration = fp->duration / 3;
     three->events.push_back(e);
   }
-  full.nextId += 20;
   auto over = setChild(full, fp->id, three, c);
   CHECK(!over.ok() && over.error().code == ErrorCode::LimitExceeded);
 }

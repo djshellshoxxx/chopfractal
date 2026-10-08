@@ -29,6 +29,12 @@ using ChopId = Id<ChopTag>;      // owned by source_chop
 using EventId = Id<EventTag>;    // owned by pattern_engine (top level) or derived for children
 using ScopeId = Id<ScopeTag>;    // phrase / bar / beat scope nodes, owned by pattern_engine
 
+// Derived IDs: nested child events get IDs computed from (parent id, child index) so they stay stable
+// across reseeds. They always have the top bit set, so they can never collide with IDs handed out by the
+// owning module's sequential counter, and validators must not compare them against that counter.
+constexpr std::uint64_t kDerivedIdBit = 1ull << 63;
+constexpr bool isDerivedId(std::uint64_t value) { return (value & kDerivedIdBit) != 0; }
+
 }  // namespace chopfractal
 
 namespace std {

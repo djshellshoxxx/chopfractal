@@ -12,10 +12,9 @@ constexpr int kAllowed[] = {2, 3, 4, 5, 6, 8};
 
 bool allowedSubdivision(int n) { return std::find(std::begin(kAllowed), std::end(kAllowed), n) != std::end(kAllowed); }
 
-// Derived child ids live in the upper half of the id space so they cannot collide with the pattern
-// engine's sequential counter. They depend only on (parent id, child index): stable across reseeds.
+// Derived child ids (see kDerivedIdBit) depend only on (parent id, child index): stable across reseeds.
 EventId childId(EventId parent, int index) {
-  return EventId{hashCombine(parent.value, static_cast<std::uint64_t>(index) + 1) | (1ull << 63)};
+  return EventId{hashCombine(parent.value, static_cast<std::uint64_t>(index) + 1) | kDerivedIdBit};
 }
 
 double densityOf(const Settings& s) {
