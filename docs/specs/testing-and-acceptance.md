@@ -69,3 +69,14 @@ A release candidate must have:
 - Clean plugin validation.
 - Installation, uninstallation, and project recall verified on each supported OS.
 - Versioned release notes and a reproducible build record.
+## Module portability acceptance
+
+Every module must build and test independently from the plugin target. CI must configure each module target without the VST3 SDK or GUI where its contract says those are not dependencies. Verify:
+- dependency graph is acyclic and matches the manifest;
+- public headers compile in a minimal consumer target;
+- module tests pass without the plugin shell;
+- migration guide commands work in a clean temporary consumer project;
+- state schema and version migration tests pass for stateful modules;
+- no host, UI, file dialog, or global singleton leaks into portable behavior modules.
+
+A component is not complete until its standalone test gate and one integration smoke test pass. The plugin release gates remain in force in addition to these module gates.
