@@ -1,0 +1,53 @@
+{
+  "id": "chop_contracts",
+  "name": "Chop contracts",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::chop_contracts",
+  "public_headers": [
+    "include/chopfractal/chop_contracts/ids.hpp",
+    "include/chopfractal/chop_contracts/time.hpp",
+    "include/chopfractal/chop_contracts/result.hpp",
+    "include/chopfractal/chop_contracts/bytes.hpp",
+    "include/chopfractal/chop_contracts/rng.hpp",
+    "include/chopfractal/chop_contracts/chop.hpp",
+    "include/chopfractal/chop_contracts/event.hpp",
+    "include/chopfractal/chop_contracts/limits.hpp",
+    "include/chopfractal/chop_contracts/policy.hpp",
+    "include/chopfractal/chop_contracts/undo.hpp"
+  ],
+  "dependencies": [],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "Value types and pure functions; thread-safe for distinct data. flatten() and the codecs allocate, so they are not real-time safe.",
+  "platforms": "Any C++17 compiler (GCC, Clang, MSVC). Assumes IEEE-754 floats and two's-complement integers.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/chop_contracts -B build/chop_contracts && cmake --build build/chop_contracts && ctest --test-dir build/chop_contracts",
+  "summary": "The small shared vocabulary every other module speaks: typed IDs, musical ticks, results/errors, a bounds-checked byte codec, a specified RNG, the chop snapshot, the nested event model with its single canonical flatten(), the candidate-policy interface, and an undo stack.",
+  "public_api": [
+    "`Id<Tag>` IDs (`SourceId`, `ChopId`, `EventId`, `ScopeId`); IDs are never reused, 0 is invalid, derived child IDs set `kDerivedIdBit`",
+    "`Ticks` (960 per quarter), `TimeSignature`, `Grid`, `gridTicks()`, `ticksPerBar()`: exact integer musical time",
+    "`Result<T>`, `Status`, `Error{code,message,hint}`: core modules return errors, they never present UI",
+    "`bytes::Writer/Reader`: little-endian, bounds-checked, rejects non-finite floats, bounds allocations by remaining input",
+    "`Rng` (SplitMix64), `deriveKey()`: platform-independent, independent streams per scope",
+    "`ChopSnapshot`/`ChopInfo`: read-only chop list handed to pattern modules",
+    "`Event`, `NestedPattern`, `FlatEvent`, `flattenInto()`, `validateEvent()`, `writeEvent()/readEvent()`",
+    "`ICandidatePolicy`, `CandidateQuery`, `Decision`: how an optional rule provider guides generation",
+    "`SnapshotStack<T>`: bounded undo/redo"
+  ],
+  "limits": [
+    "512 flattened events per pattern, 8 voices, 8 bars, 256 chops, nesting depth 2 by default / 3 hard maximum (see `limits.hpp`)",
+    "flatten() never truncates: exceeding a limit returns `LimitExceeded` with the permitted value in `hint`"
+  ],
+  "adapters": [
+    "None. Map your own ID and time types to these at one boundary."
+  ],
+  "adapter_notes": "Convert your host's time and ID types to `Ticks` and the `Id<>` types in one adapter; do not edit this module for another project's naming.",
+  "removal": "Every other ChopFractal module depends on this one; remove those first.",
+  "example": "examples/minimal.cpp"
+}

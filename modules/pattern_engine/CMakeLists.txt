@@ -17,6 +17,8 @@ endif()
 file(GLOB PATTERN_ENGINE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(pattern_engine STATIC ${PATTERN_ENGINE_SOURCES})
 add_library(chopfractal::pattern_engine ALIAS pattern_engine)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(pattern_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(pattern_engine PUBLIC cxx_std_17)
 target_include_directories(pattern_engine PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 target_link_libraries(pattern_engine PUBLIC chopfractal::chop_contracts)

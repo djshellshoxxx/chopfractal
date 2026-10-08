@@ -17,6 +17,8 @@ endif()
 file(GLOB CHOP_ROLES_GRAMMAR_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(chop_roles_grammar STATIC ${CHOP_ROLES_GRAMMAR_SOURCES})
 add_library(chopfractal::chop_roles_grammar ALIAS chop_roles_grammar)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(chop_roles_grammar PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(chop_roles_grammar PUBLIC cxx_std_17)
 target_include_directories(chop_roles_grammar PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 target_link_libraries(chop_roles_grammar PUBLIC chopfractal::chop_contracts)

@@ -15,6 +15,8 @@ endif()
 file(GLOB VARIATION_HISTORY_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(variation_history STATIC ${VARIATION_HISTORY_SOURCES})
 add_library(chopfractal::variation_history ALIAS variation_history)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(variation_history PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(variation_history PUBLIC cxx_std_17)
 target_include_directories(variation_history PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 

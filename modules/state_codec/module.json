@@ -1,0 +1,39 @@
+{
+  "id": "state_codec",
+  "name": "State codec",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::state_codec",
+  "public_headers": [
+    "include/chopfractal/state_codec/codec.hpp",
+    "include/chopfractal/state_codec/result.hpp"
+  ],
+  "dependencies": [],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe (allocates).",
+  "platforms": "Any C++17 compiler. No dependencies, not even `chop_contracts` (it carries its own private `Result` type).",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/state_codec -B build/state_codec && cmake --build build/state_codec && ctest --test-dir build/state_codec",
+  "summary": "Versioned project container. Each stateful module serializes its own payload; this module composes them under module ID + schema version with a CRC, validates every size before allocating, and chains registered migrations.",
+  "public_api": [
+    "`encode(ProjectState, CodecLimits)` / `decode(bytes, CodecLimits)`",
+    "`ProjectState{projectVersion, modules: id -> {schemaVersion, bytes}}`",
+    "`MigrationRegistry::add(moduleId, fromVersion, step)` and `migrate(moduleId, payload, targetVersion)`",
+    "`crc32()`"
+  ],
+  "limits": [
+    "64 MiB total, 48 MiB per payload, 32 modules, 64-character module IDs (implementation defaults; the maximum serialized source size is an open spec decision)"
+  ],
+  "adapters": [
+    "Your host's save/restore callbacks hand the byte blob to `decode()` / receive it from `encode()`."
+  ],
+  "adapter_notes": "Keep file dialogs and host project callbacks in your application; this module only sees byte vectors.",
+  "removal": "Delete the folder; callers lose project-state composition only.",
+  "example": "examples/minimal.cpp"
+}

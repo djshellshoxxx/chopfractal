@@ -192,7 +192,7 @@ class Gen {
     if (s_.allowPitch && s_.pitchRange > 0 && dPitch < 0.2 * ev) e.tx.pitchSemitones = static_cast<float>(static_cast<int>(vPitch) - s_.pitchRange);
     if (s_.allowRetrigger && dRet < 0.15 * ev) e.tx.retrigger = static_cast<std::uint8_t>(2 + vRet);
     if (!s_.grid.triplet && s_.grid.division >= 8 && (slotIdx % 2 == 1)) {
-      const std::int64_t permille = static_cast<std::int64_t>(s_.swing * 1000.0 + 0.5);
+      const std::int64_t permille = std::llround(s_.swing * 1000.0);  // single rounding, no fusable multiply-add
       t += g_ * permille / 3000;
     }
     if (s_.maxShiftTicks > 0 && dShift < ev) t += static_cast<Ticks>(vShift) - s_.maxShiftTicks;

@@ -15,6 +15,8 @@ endif()
 file(GLOB STATE_CODEC_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(state_codec STATIC ${STATE_CODEC_SOURCES})
 add_library(chopfractal::state_codec ALIAS state_codec)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(state_codec PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(state_codec PUBLIC cxx_std_17)
 target_include_directories(state_codec PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 

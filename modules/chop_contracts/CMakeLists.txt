@@ -15,6 +15,8 @@ endif()
 file(GLOB CHOP_CONTRACTS_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(chop_contracts STATIC ${CHOP_CONTRACTS_SOURCES})
 add_library(chopfractal::chop_contracts ALIAS chop_contracts)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(chop_contracts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(chop_contracts PUBLIC cxx_std_17)
 target_include_directories(chop_contracts PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 

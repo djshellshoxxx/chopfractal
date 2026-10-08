@@ -24,6 +24,7 @@ endforeach()
 file(GLOB COMPOSITION_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(composition STATIC ${COMPOSITION_SOURCES})
 add_library(chopfractal::composition ALIAS composition)
+set_target_properties(composition PROPERTIES POSITION_INDEPENDENT_CODE ON)  # linked into the plugin shared module
 target_compile_features(composition PUBLIC cxx_std_17)
 target_include_directories(composition PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 foreach(dep ${CHOPFRACTAL_COMPOSITION_DEPS})

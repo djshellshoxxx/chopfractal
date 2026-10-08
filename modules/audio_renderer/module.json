@@ -1,0 +1,46 @@
+{
+  "id": "audio_renderer",
+  "name": "Audio renderer",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::audio_renderer",
+  "public_headers": [
+    "include/chopfractal/audio_renderer/renderer.hpp",
+    "include/chopfractal/audio_renderer/mailbox.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "flat event and time contracts, Result"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "`process()`, `reset()` and `Mailbox::acquire()` are real-time safe (no allocation, locks, I/O). `prepare()`, `makePlayback()`, `Mailbox::publish()` and `renderOffline()` are non-real-time. `requestPreview()` is for one producer thread.",
+  "platforms": "Any C++17 compiler. The test suite replaces global `operator new` to prove zero allocation in `process()`.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/audio_renderer -B build/audio_renderer && cmake --build build/audio_renderer && ctest --test-dir build/audio_renderer",
+  "summary": "Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.",
+  "public_api": [
+    "`makePlayback(source, flatEvents, lengthTicks)` validates and prepares immutable data; `makePassThroughPlayback(source)`",
+    "`Renderer::prepare/process/reset/requestPreview/activeVoices` and `mailbox().publish()`",
+    "`renderOffline(playback, settings)`",
+    "`Mailbox<T>`: wait-free reader, reclaims only after the reader acknowledges a newer object"
+  ],
+  "limits": [
+    "8 voices (plus fading voices), 4096 prepared events after retrigger expansion, host blocks of any size (chunked above the prepared maximum)",
+    "Transform order is fixed: region, reverse, rate/pitch, gate/fades, level/pan, voice sum, dry mix and output gain. Pan is a balance law; mono output is (L+R)/2; interpolation is linear"
+  ],
+  "adapters": [
+    "The plugin shell owns bus negotiation, host bypass, and transport translation (`plugin_host_adapter`)."
+  ],
+  "adapter_notes": "Map your source and event types to `SourceData` and `FlatEvent`, set sample rate and maximum block in `Config`, publish prepared playback from a non-real-time thread.",
+  "removal": "Remove the composition root and host adapter first.",
+  "example": "examples/minimal.cpp"
+}

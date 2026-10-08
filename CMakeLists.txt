@@ -27,5 +27,6 @@ endforeach()
 add_subdirectory(composition)
 
 if(CHOPFRACTAL_BUILD_PLUGIN)
+  enable_language(C)  # JUCE compiles a few C sources
   add_subdirectory(plugin)
 endif()

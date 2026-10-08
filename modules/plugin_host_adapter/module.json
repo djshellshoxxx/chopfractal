@@ -1,0 +1,49 @@
+{
+  "id": "plugin_host_adapter",
+  "name": "Plugin host adapter (portable part)",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::plugin_host_adapter",
+  "public_headers": [
+    "include/chopfractal/plugin_host_adapter/parameters.hpp",
+    "include/chopfractal/plugin_host_adapter/host_time.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "time types"
+    },
+    {
+      "id": "audio_renderer",
+      "version": "^0.1",
+      "reason": "RenderParams and TransportBlock are the outputs of the translation"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. `translateHostTime` and `toRenderParams` are allocation-free and safe on the audio thread.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/plugin_host_adapter -B build/plugin_host_adapter && cmake --build build/plugin_host_adapter && ctest --test-dir build/plugin_host_adapter",
+  "summary": "Everything about the VST3 host boundary that needs no JUCE: the append-only automation parameter manifest (golden-pinned), normalization, host playhead validation with visible tempo/meter fallbacks, and bus-layout rules. The JUCE processor in `plugin/` is a thin shell over this.",
+  "public_api": [
+    "`parameterManifest()`, `findParam()`, `normalize/denormalize/snapValue`, `ParamValues`, `toRenderParams()`",
+    "`translateHostTime(HostTimeInfo, manualBpm, fallbackMeter)` -> transport block + fallback flags",
+    "`isSupportedBusLayout(in, out)`"
+  ],
+  "limits": [
+    "Parameter IDs are permanent and append-only; the seed is deliberately not a parameter"
+  ],
+  "adapters": [
+    "The JUCE `AudioProcessor`/`AudioProcessorValueTreeState` glue (see `plugin/`)."
+  ],
+  "adapter_notes": "Build your framework's parameter tree from `parameterManifest()` using each entry's `id` and `sinceVersion` as the stable identity and version hint.",
+  "removal": "Delete the folder and rebuild your parameter tree by hand.",
+  "example": "examples/minimal.cpp"
+}

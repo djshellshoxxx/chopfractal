@@ -1,0 +1,46 @@
+{
+  "id": "recursive_hit_zoom",
+  "name": "Recursive hit zoom",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::recursive_hit_zoom",
+  "public_headers": [
+    "include/chopfractal/recursive_hit_zoom/zoom.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "event model, chop snapshot, flatten(), RNG, byte codec"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/recursive_hit_zoom -B build/recursive_hit_zoom && cmake --build build/recursive_hit_zoom && ctest --test-dir build/recursive_hit_zoom",
+  "summary": "Creates a nested child pattern inside one event's exact time window and source bounds. Children never read outside their ancestor's source range unless an explicit source replacement is requested.",
+  "public_api": [
+    "`createChildPattern(parent, context, settings, seed)`",
+    "`mutateChildren(parentWithChild, context, settings, seed)` keeps locked child events",
+    "`collapse(parent)`, `flatten(parent, windowStart, chops)`",
+    "`serialize()` / `deserialize()` (schema 1)",
+    "`nearestPermittedSubdivision(budget)`"
+  ],
+  "limits": [
+    "Subdivisions 2, 3, 4, 5, 6 or 8; minimum 15 ticks per child",
+    "Depth 2 by default, 3 hard maximum; exceeding the event budget returns `LimitExceeded` with the nearest permitted subdivision, never a truncation"
+  ],
+  "adapters": [
+    "Your UI chooses the parent event and shows the breadcrumb; the composition root supplies `Context` (source bounds, depth, event budget)."
+  ],
+  "adapter_notes": "If your project has no nested pattern model, store the returned child tree as module-owned state and call this module's `flatten()` before playback.",
+  "removal": "Delete the folder; events simply lose the optional child tree.",
+  "example": "examples/minimal.cpp"
+}

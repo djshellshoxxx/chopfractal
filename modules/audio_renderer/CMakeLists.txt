@@ -17,6 +17,8 @@ endif()
 file(GLOB AUDIO_RENDERER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(audio_renderer STATIC ${AUDIO_RENDERER_SOURCES})
 add_library(chopfractal::audio_renderer ALIAS audio_renderer)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(audio_renderer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(audio_renderer PUBLIC cxx_std_17)
 target_include_directories(audio_renderer PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 target_link_libraries(audio_renderer PUBLIC chopfractal::chop_contracts)

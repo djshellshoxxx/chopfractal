@@ -17,6 +17,8 @@ endif()
 file(GLOB RECURSIVE_HIT_ZOOM_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(recursive_hit_zoom STATIC ${RECURSIVE_HIT_ZOOM_SOURCES})
 add_library(chopfractal::recursive_hit_zoom ALIAS recursive_hit_zoom)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(recursive_hit_zoom PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(recursive_hit_zoom PUBLIC cxx_std_17)
 target_include_directories(recursive_hit_zoom PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 target_link_libraries(recursive_hit_zoom PUBLIC chopfractal::chop_contracts)

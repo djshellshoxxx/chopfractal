@@ -690,3 +690,54 @@ CHOP_TEST(sanitize_drops_vanished_chops_and_stray_regions) {
     for (const Beat& bt : b.beats)
       for (const Event& e : bt.events) CHECK(fewer.find(e.chop) != nullptr);
 }
+
+// Cross-platform determinism pin: "the same source/settings/seed produce the same event pattern across
+// sessions and supported platforms". These hashes were produced by GCC and by Clang (gcc-built and
+// clang-built libraries agree). If this test fails on a new platform or compiler, generation has become
+// platform dependent; if it fails after an intentional algorithm change, bump kEngineVersion and re-pin.
+namespace {
+std::uint64_t fnv1a(const std::vector<std::uint8_t>& v) {
+  std::uint64_t h = 0xCBF29CE484222325ull;
+  for (std::uint8_t b : v) {
+    h ^= b;
+    h *= 0x100000001B3ull;
+  }
+  return h;
+}
+}  // namespace
+
+CHOP_TEST(golden_output_is_pinned_across_compilers_and_platforms) {
+  const ChopSnapshot c = makeChops();
+  Settings a;
+  a.bars = 4;
+  a.density = 0.7;
+  a.seed = 1;
+
+  Settings b = a;
+  b.seed = 20260707;
+  b.bars = 8;
+  b.density = 0.85;
+  b.variation = {0.6, 0.6, 0.6, 0.8};
+  b.swing = 0.37;
+  b.allowReverse = b.allowPitch = b.allowRetrigger = true;
+  b.maxShiftTicks = 20;
+  b.grid = {16, false};
+
+  Settings t = a;
+  t.timeSignature = {7, 8};
+  t.grid = {16, true};
+  t.seed = 5;
+  t.variation = {0.5, 0.5, 0.5, 0.9};
+
+  const Pattern pa = gen(c, a), pb = gen(c, b), pt = gen(c, t);
+  MutateOptions mo;
+  mo.seed = 99;
+  mo.amount = 0.6;
+  auto pm = mutate(pb, c, mo);
+  CHECK(pm.ok());
+
+  CHECK_EQ(fnv1a(serialize(pa)), 2397844821793184813ull);
+  CHECK_EQ(fnv1a(serialize(pb)), 12084884237330071892ull);
+  CHECK_EQ(fnv1a(serialize(pt)), 13710596758976548913ull);
+  if (pm.ok()) CHECK_EQ(fnv1a(serialize(pm.value())), 18237151833431327128ull);
+}

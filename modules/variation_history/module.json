@@ -1,0 +1,41 @@
+{
+  "id": "variation_history",
+  "name": "Variation family tree",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::variation_history",
+  "public_headers": [
+    "include/chopfractal/variation_history/history.hpp",
+    "include/chopfractal/variation_history/result.hpp"
+  ],
+  "dependencies": [],
+  "license": "LicenseRef-ChopFractal-TBD",
+  "notices": [],
+  "third_party": [],
+  "threading": "Not thread-safe: own it from one thread. Not real-time safe.",
+  "platforms": "Any C++17 compiler. No dependencies.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/variation_history -B build/variation_history && cmake --build build/variation_history && ctest --test-dir build/variation_history",
+  "summary": "Generic immutable snapshot branch graph. Stores opaque payload bytes plus metadata; it knows nothing about audio, UI, hosts, or ChopFractal. Usable for presets, scenes, or any branching creative history.",
+  "public_api": [
+    "`VariationTree::addSnapshot(parent, payload, metadata)` -> id (+ any pruned ids)",
+    "`getSnapshot(id)` verifies the payload hash (Corrupt error names the node)",
+    "`listChildren`, `listAll`, `ancestors`, `setActive`, `rename`, `setFavorite`",
+    "`deleteBranch(id, policy)`; `compare(a, b, diffFn)`",
+    "`serialize()` / `deserialize()` (schema 1)"
+  ],
+  "limits": [
+    "64 nodes by default, 128 hard maximum; 1 MiB payload per node by default",
+    "When full, the oldest unprotected leaf is pruned and reported; the active node, its ancestors and favorites are never pruned, and a full tree of protected nodes refuses the new snapshot"
+  ],
+  "adapters": [
+    "Your serializer produces/consumes the payload bytes; your UI renders the tree."
+  ],
+  "adapter_notes": "Supply payload bytes from your own serializer and keep `payloadSchema` in the metadata so old snapshots can be migrated.",
+  "removal": "Delete the folder; nothing else depends on its internals.",
+  "example": "examples/minimal.cpp"
+}

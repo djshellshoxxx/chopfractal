@@ -17,6 +17,10 @@
 | [Testing and acceptance](testing-and-acceptance.md) | Functional, audio, host, performance, and release gates |
 | [Build plan](build-plan.md) | Ordered delivery stages, dependencies, and exit criteria |
 
+## Implementation status
+
+What has been built against these specs, what was verified, and what remains: [`../BUILD_STATUS.md`](../BUILD_STATUS.md).
+
 ## Review rules
 
 These documents define intended behavior, not permission to implement it. Review the specs as a set and resolve open decisions before detailed engineering tasks or production code are started. The build plan is a product delivery roadmap; a code-level implementation plan should follow spec review.

@@ -20,6 +20,8 @@ endif()
 file(GLOB PLUGIN_HOST_ADAPTER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
 add_library(plugin_host_adapter STATIC ${PLUGIN_HOST_ADAPTER_SOURCES})
 add_library(chopfractal::plugin_host_adapter ALIAS plugin_host_adapter)
+# Position independent so the module can be linked into a plugin (a shared module) in any project.
+set_target_properties(plugin_host_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(plugin_host_adapter PUBLIC cxx_std_17)
 target_include_directories(plugin_host_adapter PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>")
 target_link_libraries(plugin_host_adapter PUBLIC chopfractal::chop_contracts chopfractal::audio_renderer)
