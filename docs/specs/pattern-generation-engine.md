@@ -80,3 +80,10 @@ When host tempo is absent, use a manual tempo. If time signature is absent, assu
 - Undo restores the exact pre-generation pattern and seed.
 - Tempo changes alter timing, not event ordering or generated random choices.
 - Randomized patterns can be inspected and edited without rerolling unrelated sections.
+## Module boundary and migration
+
+The deterministic model and generator live in `pattern_engine`. It owns pattern nodes, event identities, seed interpretation, generation/mutation, lock semantics, edit commands, and conversion of nested patterns to a bounded flat event list. It has no editor, file path, host playhead, audio buffer, or JUCE dependency.
+
+Feature modules may extend the pattern using stable contracts, but the base engine must not call feature-specific implementations directly. The composition layer supplies optional rule/transform providers and validates their outputs. Keep the pattern schema versioned, with explicit migrations for persisted projects.
+
+**Transfer guide:** copy `modules/pattern_engine/` plus its declared dependency `chop_contracts`; link its CMake target; provide source chop snapshots through the public interface; choose a deterministic seed source; consume flattened events in the destination scheduler; run standalone tests and the receiving host's transport tests. Retain the schema version and migration functions when moving saved patterns. See `modules/pattern_engine/MIGRATION.md`.
