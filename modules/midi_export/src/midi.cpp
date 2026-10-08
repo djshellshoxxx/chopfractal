@@ -165,6 +165,7 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
       else if (type == 0x03) spec.trackName.assign(reinterpret_cast<const char*>(d + p), ml);
       else if (type == 0x51 && ml == 3) spec.bpm = 60000000.0 / static_cast<double>((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
       else if (type == 0x58 && ml >= 2) {
+        if (d[p + 1] > 5) return bad("invalid time signature");
         spec.numerator = d[p];
         spec.denominator = 1 << d[p + 1];
       }
