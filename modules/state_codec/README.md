@@ -25,7 +25,7 @@ Public headers:
 
 ## Limits
 
-- 64 MiB total, 48 MiB per payload, 32 modules, 64-character module IDs (implementation defaults; the maximum serialized source size is an open spec decision)
+- 256 MiB total, 192 MiB per payload, 32 modules, 64-character module IDs (sized for the 128 MiB default embedded-source cap plus pattern and history data)
 
 ## Dependencies
 
@@ -41,4 +41,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

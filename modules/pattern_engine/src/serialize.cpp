@@ -51,6 +51,12 @@ std::vector<std::uint8_t> serialize(const Pattern& p) {
       for (const Event& e : bt.events) writeEvent(w, e);
     }
   }
+  // Optional trailing effect settings: absent unless an effect is enabled, so effect-free patterns
+  // keep their exact earlier encoding and old files load unchanged.
+  if (s.allowFilter || s.allowGlide || s.allowCrunch) {
+    w.u8(static_cast<std::uint8_t>((s.allowFilter ? 1 : 0) | (s.allowGlide ? 2 : 0) | (s.allowCrunch ? 4 : 0)));
+    w.f64(s.fxIntensity);
+  }
   return out;
 }
 
@@ -109,6 +115,15 @@ Result<Pattern> deserialize(const std::uint8_t* data, std::size_t size) {
       b.beats.push_back(std::move(bt));
     }
     p.bars.push_back(std::move(b));
+  }
+  if (r.ok() && r.remaining() == 9) {
+    const std::uint8_t f = r.u8();
+    if (f == 0 || f > 7) return makeError(ErrorCode::Corrupt, "effect settings are invalid");
+    s.allowFilter = (f & 1) != 0;
+    s.allowGlide = (f & 2) != 0;
+    s.allowCrunch = (f & 4) != 0;
+    s.fxIntensity = r.f64();
+    if (!(s.fxIntensity >= 0.0 && s.fxIntensity <= 1.0)) return makeError(ErrorCode::Corrupt, "effect intensity is invalid");
   }
   if (!r.ok() || r.remaining() != 0) return makeError(ErrorCode::Corrupt, "pattern state has trailing or missing bytes");
   Status v = validate(p);

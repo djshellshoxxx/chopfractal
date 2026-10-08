@@ -11,7 +11,7 @@
     "include/chopfractal/variation_history/result.hpp"
   ],
   "dependencies": [],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "Not thread-safe: own it from one thread. Not real-time safe.",

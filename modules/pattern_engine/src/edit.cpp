@@ -242,6 +242,56 @@ Result<Pattern> setEventTransform(const Pattern& p, EventId id, const EventTrans
   return q;
 }
 
+Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (locationLocked(p, *loc)) return blocked("this event");
+  Pattern q = p;
+  Event& e = at(q, *loc);
+  e.fx = fx;
+  e.userOwned = true;
+  Status v = validateEvent(e);
+  if (!v.ok()) return v.error();
+  return q;
+}
+
+std::pair<Pattern, EventId> reserveIds(const Pattern& p, std::uint64_t count) {
+  Pattern q = p;
+  const EventId first{q.nextId};
+  q.nextId += count;
+  return {std::move(q), first};
+}
+
+Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> events, const ChopSnapshot& chops) {
+  if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return makeError(ErrorCode::OutOfRange, "bar index out of range");
+  const Bar& old = p.bars[static_cast<std::size_t>(bar)];
+  if (p.phraseLocked || old.locked) return blocked("this bar");
+  for (const Beat& bt : old.beats)
+    if (bt.locked) return blocked("a beat in this bar");
+  const Ticks bt = barTicks(p.settings);
+  Pattern q = p;
+  Bar& dst = q.bars[static_cast<std::size_t>(bar)];
+  const Ticks beatT = ticksPerBeat(p.settings.timeSignature);
+  for (Beat& b : dst.beats) b.events.clear();
+  std::size_t count = eventCount(q);
+  if (count + events.size() > static_cast<std::size_t>(p.settings.maxEvents))
+    return makeError(ErrorCode::LimitExceeded, "too many events for the pattern", p.settings.maxEvents);
+  for (Event& e : events) {
+    Status v = validateEvent(e);
+    if (!v.ok()) return v.error();
+    if (e.start + e.duration > bt || !chops.find(e.chop)) return makeError(ErrorCode::OutOfRange, "event lies outside the bar or its chop is unknown");
+    if (e.id.value >= p.nextId && !isDerivedId(e.id.value)) return makeError(ErrorCode::InvalidArgument, "event id was not reserved");
+    const std::size_t bi = std::min<std::size_t>(dst.beats.size() - 1, static_cast<std::size_t>(e.start / beatT));
+    dst.beats[bi].events.push_back(std::move(e));
+  }
+  for (Beat& b : dst.beats) b.userOwned = true;
+  dst.userOwned = true;
+  dst.copyOf = -1;
+  Status v = validate(q);
+  if (!v.ok()) return v.error();
+  return q;
+}
+
 Result<Pattern> duplicateBar(const Pattern& p, int fromBar, int toBar) {
   const int n = static_cast<int>(p.bars.size());
   if (fromBar < 0 || fromBar >= n || toBar < 0 || toBar >= n || fromBar == toBar) return makeError(ErrorCode::OutOfRange, "invalid bar indices");

@@ -93,6 +93,18 @@ def main():
                 elif kind == '"' and (target.startswith("..") or "/src/" in target):
                     err("%s: quoted include '%s' escapes the module or reaches into private sources" % (rel, target))
 
+    # One license identifier, shared by every manifest (change it with tools/set_license.py).
+    try:
+        ident = open(os.path.join(ROOT, "LICENSE_ID")).read().strip()
+    except OSError:
+        ident = None
+        err("LICENSE_ID is missing")
+    if not os.path.isfile(os.path.join(ROOT, "LICENSE")):
+        err("LICENSE is missing")
+    for mid, m in mods.items():
+        if ident and m.get("license") != ident:
+            err("%s: module.json license '%s' differs from LICENSE_ID '%s' (run tools/set_license.py)" % (mid, m.get("license"), ident))
+
     # Acyclic dependency graph.
     state = {}
 

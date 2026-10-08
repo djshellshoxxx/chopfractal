@@ -27,10 +27,10 @@ struct ProjectState {
   std::map<std::string, ModulePayload> modules;  // keyed by module id
 };
 
-// Defaults are implementation constants pending spec review (maximum serialized source size is open).
+// Defaults sized for a 128 MiB embedded source plus pattern and history data.
 struct CodecLimits {
-  std::size_t maxTotalBytes = 64u * 1024u * 1024u;
-  std::size_t maxPayloadBytes = 48u * 1024u * 1024u;
+  std::size_t maxTotalBytes = 256u * 1024u * 1024u;
+  std::size_t maxPayloadBytes = 192u * 1024u * 1024u;
   std::uint32_t maxModules = 32;
   std::size_t maxModuleIdLength = 64;
 };

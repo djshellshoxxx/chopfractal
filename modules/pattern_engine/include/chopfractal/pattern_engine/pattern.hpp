@@ -45,6 +45,10 @@ struct Settings {
   int pitchRange = 7;        // semitones, 0..24
   int maxRetrigger = 4;      // 2..8
   Ticks maxShiftTicks = 0;   // micro-shift bound, at most grid/8
+  bool allowFilter = false;  // per-event effects (docs/specs/effects-filter-glide-crunch.md)
+  bool allowGlide = false;
+  bool allowCrunch = false;
+  double fxIntensity = 0.5;  // 0..1 magnitude scale for generated effects
 };
 
 struct Beat {
@@ -127,6 +131,12 @@ Result<Pattern> deleteEvent(const Pattern& p, EventId id);
 Result<Pattern> moveEvent(const Pattern& p, EventId id, int newBar, Ticks newStartInBar);
 Result<Pattern> setEventChop(const Pattern& p, EventId id, ChopId chop, const ChopSnapshot& chops);
 Result<Pattern> setEventTransform(const Pattern& p, EventId id, const EventTransform& tx);
+Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx);
+// Replaces every event of one bar (e.g. a generated Fractal Rhythm bar). Refused in locked scopes; the
+// bar becomes user-owned. Events must already be valid, with unique ids not used elsewhere.
+Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> events, const ChopSnapshot& chops);
+// Allocates `count` fresh ids from the pattern's counter (for externally built events).
+std::pair<Pattern, EventId> reserveIds(const Pattern& p, std::uint64_t count);
 Result<Pattern> duplicateBar(const Pattern& p, int fromBar, int toBar);
 Result<Pattern> restoreSourceOrder(const Pattern& p, const ChopSnapshot& chops);  // also clears all locks
 Result<Pattern> setChild(const Pattern& p, EventId id, std::shared_ptr<const NestedPattern> child, const ChopSnapshot& chops);

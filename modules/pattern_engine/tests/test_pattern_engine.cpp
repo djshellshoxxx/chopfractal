@@ -742,3 +742,127 @@ CHOP_TEST(golden_output_is_pinned_across_compilers_and_platforms) {
   CHECK_EQ(fnv1a(serialize(pt)), 13710596758976548913ull);
   if (pm.ok()) CHECK_EQ(fnv1a(serialize(pm.value())), 18237151833431327128ull);
 }
+
+// ---- event effects and setBarEvents ----
+CHOP_TEST(effects_generate_only_when_enabled_and_are_deterministic) {
+  const auto chops = makeChops();
+  Settings s = baseSettings();
+  s.variation.event = 1.0;
+  s.density = 1.0;
+  const Pattern off = gen(chops, s);
+  for (const Bar& b : off.bars)
+    for (const Beat& bt : b.beats)
+      for (const Event& e : bt.events) CHECK(!e.fx.active());
+
+  Settings f = s;
+  f.allowFilter = f.allowGlide = f.allowCrunch = true;
+  f.fxIntensity = 1.0;
+  const Pattern a = gen(chops, f), b = gen(chops, f);
+  CHECK(serialize(a) == serialize(b));
+  int filt = 0, glide = 0, crush = 0, down = 0, up = 0;
+  for (const Bar& bar : a.bars)
+    for (const Beat& bt : bar.beats)
+      for (const Event& e : bt.events) {
+        CHECK(validateEvent(e).ok());
+        filt += e.fx.filter != FilterType::Off;
+        crush += e.fx.crush > 0.f;
+        if (e.fx.glideSemitones != 0.f) {
+          ++glide;
+          (e.fx.glideSemitones < 0.f ? down : up)++;
+        }
+      }
+  CHECK(filt > 0 && glide > 0 && crush > 0);
+  CHECK(down >= up);  // tape stops dominate
+  // Everything but the effects matches the effect-free pattern: the new draws are appended to each stream.
+  const auto fa = flatten(a, chops), fo = flatten(off, chops);
+  CHECK(fa.ok() && fo.ok() && fa.value().size() == fo.value().size());
+  if (fa.ok() && fo.ok())
+    for (std::size_t i = 0; i < fa.value().size(); ++i)
+      CHECK(fa.value()[i].start == fo.value()[i].start && fa.value()[i].chop == fo.value()[i].chop && fa.value()[i].tx == fo.value()[i].tx);
+  // Round trip and old-format compatibility.
+  auto back = deserialize(serialize(a).data(), serialize(a).size());
+  CHECK(back.ok() && serialize(back.value()) == serialize(a));
+  CHECK(back.ok() && back.value().settings.allowGlide && back.value().settings.fxIntensity == 1.0);
+  auto offBack = deserialize(serialize(off).data(), serialize(off).size());
+  CHECK(offBack.ok() && !offBack.value().settings.allowFilter);
+  auto bytes = serialize(a);
+  bytes.back() ^= 0x7F;  // corrupt the trailing intensity
+  CHECK(!deserialize(bytes.data(), bytes.size()).ok());
+  Settings bad = s;
+  bad.fxIntensity = 1.5;
+  CHECK(!validateSettings(bad).ok());
+}
+
+CHOP_TEST(set_event_fx_edits_one_hit_and_respects_locks) {
+  const auto chops = makeChops();
+  Pattern p = gen(chops, baseSettings());
+  const Event* e = firstEventOf(p, 0);
+  CHECK(e != nullptr);
+  if (!e) return;
+  EventFx fx;
+  fx.filter = FilterType::HighPass;
+  fx.cutoff = 0.5f;
+  auto q = setEventFx(p, e->id, fx);
+  CHECK(q.ok() && findEvent(q.value(), e->id)->fx == fx && findEvent(q.value(), e->id)->userOwned);
+  CHECK(!findEvent(p, e->id)->fx.active());  // pure: the input is unchanged
+  EventFx bad;
+  bad.crush = 3.f;
+  CHECK(!setEventFx(p, e->id, bad).ok());
+  CHECK(!setEventFx(p, EventId{999999}, fx).ok());
+  auto locked = setLock(p, ScopeRef{ScopeLevel::Event, 0, 0, e->id}, true);
+  CHECK(locked.ok());
+  auto blocked = setEventFx(locked.value(), e->id, fx);
+  CHECK(!blocked.ok() && blocked.error().code == ErrorCode::Blocked);
+  // Effects survive the full serialize round trip on an edited event.
+  auto rt = deserialize(serialize(q.value()).data(), serialize(q.value()).size());
+  CHECK(rt.ok() && findEvent(rt.value(), e->id)->fx == fx);
+}
+
+CHOP_TEST(set_bar_events_replaces_a_bar_and_marks_it_user_owned) {
+  const auto chops = makeChops();
+  const Pattern p = gen(chops, baseSettings());
+  std::vector<Event> evs;
+  for (int i = 0; i < 4; ++i) {
+    Event e;
+    e.id = EventId{kDerivedIdBit | static_cast<std::uint64_t>(100 + i)};
+    e.chop = ChopId{static_cast<std::uint64_t>(i + 1)};
+    e.start = i * 960;
+    e.duration = 480;
+    evs.push_back(e);
+  }
+  auto q = setBarEvents(p, 1, evs, chops);
+  CHECK(q.ok());
+  if (!q.ok()) return;
+  CHECK(q.value().bars[1].userOwned && q.value().bars[0].userOwned == p.bars[0].userOwned);
+  std::size_t n = 0;
+  for (const Beat& bt : q.value().bars[1].beats) n += bt.events.size();
+  CHECK_EQ(n, 4u);
+  CHECK(barBytes(q.value(), 0) == barBytes(p, 0) && barBytes(q.value(), 2) == barBytes(p, 2));  // other bars untouched
+  CHECK(flatten(q.value(), chops).ok());
+  // Mutate keeps a user-owned bar.
+  MutateOptions mo;
+  mo.amount = 1.0;
+  auto m = mutate(q.value(), chops, mo);
+  CHECK(m.ok() && barBytes(m.value(), 1) == barBytes(q.value(), 1));
+  // Failures leave the input alone.
+  auto badChop = evs;
+  badChop[0].chop = ChopId{999};
+  CHECK(!setBarEvents(p, 1, badChop, chops).ok());
+  auto late = evs;
+  late[0].start = 4000;
+  CHECK(!setBarEvents(p, 1, late, chops).ok());
+  CHECK(!setBarEvents(p, 9, evs, chops).ok());
+  auto reserved = evs;
+  reserved[0].id = EventId{p.nextId + 50};  // an un-reserved plain id
+  CHECK(!setBarEvents(p, 1, reserved, chops).ok());
+  auto dup = evs;
+  dup[1].id = dup[0].id;
+  CHECK(!setBarEvents(p, 1, dup, chops).ok());
+  auto lockedBar = setLock(p, ScopeRef{ScopeLevel::Bar, 1, 0, EventId{}}, true);
+  CHECK(lockedBar.ok() && !setBarEvents(lockedBar.value(), 1, evs, chops).ok());
+  Settings tight = baseSettings();
+  tight.maxEvents = 4;
+  tight.density = 0.05;
+  const Pattern small = gen(chops, tight);
+  CHECK(!setBarEvents(small, 0, evs, chops).ok() || eventCount(small) <= 4);
+}

@@ -34,6 +34,7 @@ Status validateSettings(const Settings& s) {
     return makeError(ErrorCode::OutOfRange, "event cap out of range", static_cast<std::int64_t>(limits::kMaxEventsPerPattern));
   if (s.pitchRange < 0 || s.pitchRange > static_cast<int>(limits::kMaxPitchSemitones)) return makeError(ErrorCode::OutOfRange, "pitch range out of range");
   if (s.maxRetrigger < 2 || s.maxRetrigger > limits::kMaxRetrigger) return makeError(ErrorCode::OutOfRange, "retrigger bound out of range");
+  if (!in01(s.fxIntensity)) return makeError(ErrorCode::OutOfRange, "effect intensity must lie in [0, 1]");
   if (s.maxShiftTicks < 0 || s.maxShiftTicks > g / 8) return makeError(ErrorCode::OutOfRange, "micro-shift exceeds one eighth of a grid cell", g / 8);
   return {};
 }
@@ -178,6 +179,10 @@ class Gen {
     const double dShift = er.uniform01();
     const std::uint64_t vShift = er.uniform(static_cast<std::uint64_t>(2 * s_.maxShiftTicks + 1));
     const double dSub = er.uniform01();
+    // Effect draws are appended so streams of effect-free settings are unchanged.
+    const double dFilt = er.uniform01(), dFType = er.uniform01(), dCut = er.uniform01(), dRes = er.uniform01();
+    const double dGlide = er.uniform01(), dGDir = er.uniform01(), dGMag = er.uniform01();
+    const double dCrush = er.uniform01(), dCMag = er.uniform01();
 
     Ticks t = static_cast<Ticks>(slotIdx) * g_;
     const Ticks gridStart = t;
@@ -191,6 +196,21 @@ class Gen {
     if (s_.allowReverse && dRev < 0.15 * ev) e.tx.reverse = true;
     if (s_.allowPitch && s_.pitchRange > 0 && dPitch < 0.2 * ev) e.tx.pitchSemitones = static_cast<float>(static_cast<int>(vPitch) - s_.pitchRange);
     if (s_.allowRetrigger && dRet < 0.15 * ev) e.tx.retrigger = static_cast<std::uint8_t>(2 + vRet);
+    {
+      const double fi = s_.fxIntensity;
+      if (s_.allowFilter && dFilt < 0.3 * ev) {
+        const bool low = dFType < 0.6;
+        e.fx.filter = low ? FilterType::LowPass : FilterType::HighPass;
+        e.fx.cutoff = static_cast<float>(low ? 1.0 - (1.0 - 0.35) * fi * dCut : 0.65 * fi * dCut);
+        e.fx.resonance = static_cast<float>(0.6 * fi * dRes);
+      }
+      if (s_.allowGlide && dGlide < 0.2 * ev) {
+        const double mag = (1.0 + 11.0 * dGMag) * fi;
+        e.fx.glideSemitones = static_cast<float>(dGDir < 0.7 ? -mag : mag);
+        if (e.fx.glideSemitones == 0.f) e.fx.glideSemitones = -0.5f;
+      }
+      if (s_.allowCrunch && dCrush < 0.2 * ev) e.fx.crush = static_cast<float>(std::max(0.05, 0.9 * fi * dCMag));
+    }
     if (!s_.grid.triplet && s_.grid.division >= 8 && (slotIdx % 2 == 1)) {
       const std::int64_t permille = std::llround(s_.swing * 1000.0);  // single rounding, no fusable multiply-add
       t += g_ * permille / 3000;

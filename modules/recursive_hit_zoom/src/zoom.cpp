@@ -126,6 +126,7 @@ Result<std::shared_ptr<const NestedPattern>> createChildPattern(const Event& par
     c.duration = cellEnd - cellStart;
     c.start = cellStart;
     c.tx = tx;
+    c.fx = parent.fx;  // children inherit the parent's effects
     if (s.shuffleTicks > 0) {
       const Ticks bound = std::min<Ticks>(s.shuffleTicks, c.duration / 2);
       const Ticks delta = static_cast<Ticks>(shuffleDraw[si] % static_cast<std::uint64_t>(2 * bound + 1)) - bound;

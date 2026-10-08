@@ -5,8 +5,8 @@ cmake_minimum_required(VERSION 3.22)
 #   -DCHOPFRACTAL_JUCE_DIR=/path/to/JUCE   use a local checkout instead of fetching
 #   -DCHOPFRACTAL_JUCE_TAG=8.0.15          JUCE release to fetch (default pinned below)
 #
-# Licensing: JUCE is AGPLv3 / commercial and bundles the VST3 SDK. The project license policy is an open
-# decision (see docs/BUILD_STATUS.md) and must be settled before distributing a built plugin.
+# Licensing: JUCE is AGPLv3 / commercial and bundles the VST3 SDK. ChopFractal itself is all rights reserved
+# for now; a closed-source release needs a JUCE commercial license. See docs/LICENSING.md before distributing.
 include(FetchContent)
 set(CHOPFRACTAL_JUCE_TAG "8.0.15" CACHE STRING "JUCE release tag to fetch")
 if(CHOPFRACTAL_JUCE_DIR)

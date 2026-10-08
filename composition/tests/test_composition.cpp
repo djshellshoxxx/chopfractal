@@ -310,11 +310,15 @@ CHOP_TEST(embedding_is_capped_and_reports_its_size) {
   CHECK(s.saveState(true).ok());
   auto big = std::make_shared<render::SourceData>();
   big->channels = 2;
-  big->sampleRate = 96000;  // 60 s stereo at 96 kHz is 46 MB, over the 32 MiB embed cap
+  big->sampleRate = 96000;  // 60 s stereo at 96 kHz is 46 MB, over a 32 MiB cap set for the test
   big->frames = 96000 * 60;
   big->samples.assign(static_cast<std::size_t>(big->frames) * 2, 0.f);
   ProjectSession large;
   CHECK(large.loadSource(big, "long").ok());
+  CHECK(large.saveState(true).ok());  // under the generous 128 MiB default
+  CHECK_EQ(large.embeddedSourceCap(), kMaxEmbeddedSourceBytes);
+  CHECK(!large.setEmbeddedSourceCap(0).ok() && !large.setEmbeddedSourceCap(kCodecCeilingBytes).ok());
+  CHECK(large.setEmbeddedSourceCap(32u * 1024u * 1024u).ok());
   auto tooBig = large.saveState(true);
   CHECK(!tooBig.ok() && tooBig.error().code == ErrorCode::LimitExceeded);
   CHECK(large.saveState(false).ok());  // referencing the file is always allowed

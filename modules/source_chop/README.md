@@ -43,4 +43,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

@@ -279,6 +279,55 @@ CHOP_TEST(file_decoding_enforces_limits_and_reports_errors) {
   dir.deleteRecursively();
 }
 
+CHOP_TEST(evolve_steps_the_pattern_at_the_loop_midpoint_without_touching_the_audio_thread) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  std::vector<std::uint8_t> before;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    before = cf::pattern::serialize(*s.pattern());
+    cf::evolve::Settings es;
+    es.enabled = true;
+    es.everyLoops = 1;
+    es.amount = 0.8;
+    es.startSeed = 5;
+    CHECK(s.setEvolve(es).ok());
+  });
+  FakePlayHead ph;
+  // The pattern is 2 bars = 8 quarters; 4.5 quarters at 120 bpm / 48 kHz is about 211 blocks of 512.
+  const auto first = run(p, ph, 211);
+  CHECK(peak(first) > 0.05f);
+  CHECK(p.playheadQuarters() >= 0.0 && p.playheadQuarters() < 8.0);
+  p.pollAudioFlags();  // the message thread's timer would do this
+  std::vector<std::uint8_t> after;
+  p.withSession([&](cf::composition::ProjectSession& s) { after = cf::pattern::serialize(*s.pattern()); });
+  CHECK(after != before);                                  // the midpoint step landed
+  const auto second = run(p, ph, 100);                     // and the new pattern still plays
+  CHECK(peak(second) > 0.05f);
+  ph.playing = false;
+  run(p, ph, 4);
+  CHECK(p.playheadQuarters() < 0.0);                       // no playhead while stopped
+}
+
+CHOP_TEST(effect_parameters_reach_generation_and_the_state_round_trips) {
+  ChopFractalProcessor p;
+  prepare(p);
+  setParam(p, "allow_filter", 1.f);
+  setParam(p, "allow_glide", 1.f);
+  setParam(p, "fx_intensity", 0.9f);
+  const cf::host::ParamValues v = p.currentParams();
+  CHECK(v.get(cf::host::kAllowFilter) == 1.0 && v.get(cf::host::kAllowGlide) == 1.0 && v.get(cf::host::kAllowCrunch) == 0.0);
+  CHECK_NEAR(v.get(cf::host::kFxIntensity), 0.9, 1e-6);
+  const cf::pattern::Settings s = cf::composition::settingsFromParams(v, cf::pattern::Settings{});
+  CHECK(s.allowFilter && s.allowGlide && !s.allowCrunch);
+  juce::MemoryBlock blob;
+  p.getStateInformation(blob);
+  ChopFractalProcessor q;
+  q.setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+  CHECK_NEAR(q.currentParams().get(cf::host::kFxIntensity), 0.9, 1e-6);
+  CHECK(q.currentParams().get(cf::host::kAllowFilter) == 1.0);
+}
+
 CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists) {
   if (!std::getenv("DISPLAY")) return;  // CI without a display skips the GUI smoke test
   ChopFractalProcessor p;

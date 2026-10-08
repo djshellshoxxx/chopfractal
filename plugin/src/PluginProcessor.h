@@ -49,6 +49,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
     syncAudioInfo();
   }
   chopfractal::host::ParamValues currentParams() const;
+  void pollAudioFlags();  // acts on loop-boundary / loop-midpoint events from the audio thread (also called by tests)
   void loadFileAsync(const juce::File& file);                 // decodes on a worker thread, then loads on the message thread
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   juce::String statusMessage() const;
@@ -59,12 +60,15 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> hostPlaying{false};
   std::atomic<bool> usedFallbackTempo{true};
   std::atomic<bool> usedFallbackMeter{true};
+  std::atomic<double> activeBpm{120.0};        // tempo the last block used (host tempo, else the manual fallback)
+  // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
+  double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }
 
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
-  void timerCallback() override;
+  void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -76,6 +80,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<double> sampleRate_{48000.0};
   std::atomic<double> patternQuarters_{0.0};
   std::atomic<bool> boundaryFlag_{false};
+  std::atomic<bool> midpointFlag_{false};  // set by the audio thread at each loop midpoint (drives Evolve)
+  std::atomic<double> playheadQuarters_{-1.0};
   juce::String status_;
   mutable juce::CriticalSection statusLock_;
 

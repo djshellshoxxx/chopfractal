@@ -1,0 +1,43 @@
+{
+  "id": "fractal_rhythm",
+  "name": "Fractal rhythm",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::fractal_rhythm",
+  "public_headers": [
+    "include/chopfractal/fractal_rhythm/fractal.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Event/NestedPattern model, ChopSnapshot, ICandidatePolicy, derived IDs, RNG and Result"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/fractal_rhythm -B build/fractal_rhythm && cmake --build build/fractal_rhythm && ctest --test-dir build/fractal_rhythm",
+  "summary": "Generates a self-similar groove: a short motif (x hit, a accent, . rest) is applied at every scale, each hit subdividing itself by the same motif down to a chosen depth. Output is ordinary nested events (children via NestedPattern) that the pattern engine, zoom, renderer and flatten already understand.",
+  "public_api": [
+    "`generateBar(Context, Settings)` -> `vector<Event>` for one bar",
+    "`validate(Context, Settings)`",
+    "`Settings{motif, depth, seed, mutation, mirror, accentDecay}`"
+  ],
+  "limits": [
+    "Motif 2..8 cells, depth 1..3, smallest leaf cell 15 ticks, leaves limited by the caller's event budget (error carries the deepest permitted depth in `hint`)"
+  ],
+  "adapters": [
+    "Install the returned events into your own pattern model (the pattern engine does this with `setBarEvents`)."
+  ],
+  "adapter_notes": "Event IDs are derived (kDerivedIdBit) from seed, bar and path, so no id counter is needed.",
+  "removal": "Delete the folder; callers lose Fractal Rhythm only.",
+  "example": "examples/minimal.cpp"
+}

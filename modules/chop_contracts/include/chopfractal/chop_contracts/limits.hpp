@@ -14,5 +14,6 @@ constexpr int kMaxNestedDepth = 3;      // configurable hard maximum
 constexpr int kMaxRetrigger = 8;
 constexpr float kMaxPitchSemitones = 24.f;
 constexpr float kMaxLevel = 4.f;
+constexpr float kMaxGlideSemitones = 24.f;
 
 }  // namespace chopfractal::limits

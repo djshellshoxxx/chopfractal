@@ -6,6 +6,18 @@ hierarchy. A fixed seed always reproduces the same pattern; locks keep the parts
 mutates; any hit can be zoomed into to create a nested rhythm inside it; and every variation is kept as a
 branch you can return to.
 
+## Features
+
+- **Chop and generate:** detect or place chops, then generate deterministic variations (same seed, same pattern) through a phrase, bar, beat and hit hierarchy with locks, roles and rules.
+- **Recursive Hit Zoom:** open any hit into a nested rhythm of its own, up to three levels deep.
+- **Fractal Rhythm:** type a motif such as `x.xx` and apply it at every scale, so each hit subdivides itself by the same motif (a self-similar groove no step sequencer produces).
+- **Evolve:** the beat slowly mutates itself while it plays; locked bars and your edits stay put, and every step is reproducible from its seed.
+- **Smart Setup:** one click detects chops, suggests kick, snare, hat and cymbal roles from the audio, and suggests the loop's bars and tempo. Nothing is applied without your say-so.
+- **Orbit View:** the phrase drawn as concentric rings (one per chop) with a sweeping, pulsing playhead.
+- **Per-hit effects:** state-variable filter, tape glide (tape stop and rise) and bit/sample-rate crunch, generated, editable and lockable like any other hit property.
+- **Export:** WAV (16-bit, 24-bit or 32-bit float, up to 192 kHz) and a Producer Kit (every chop as its own WAV plus a MIDI file that replays the pattern on those slices).
+- **Variation family tree:** every Generate, Mutate and Zoom is kept as a branch you can return to.
+
 **Where the build stands:** see [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md). Specifications live in
 [`docs/specs/`](docs/specs/README.md).
 
@@ -13,7 +25,7 @@ branch you can return to.
 
 | Path | What it is |
 |---|---|
-| `modules/<id>/` | Ten independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
+| `modules/<id>/` | Fifteen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
 | `composition/` | The headless composition root (`ProjectSession`) that wires the modules together |
 | `plugin/` | The JUCE VST3 shell: thin glue over the composition root (optional build) |
 | `tools/` | Portability checker, doc generator, module transfer script, clean-consumer smoke test, VST3 validator runner |
@@ -47,5 +59,7 @@ python3 tools/transfer_module.py pattern_engine /path/to/your/project   # copies
 tools/smoke_transfer.sh                                                  # proves every module builds in an empty project
 ```
 
-Each module's `MIGRATION.md` lists the exact steps. JUCE is AGPLv3/commercial and the project's own license
-is not yet chosen; see the open decisions in [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md).
+Each module's `MIGRATION.md` lists the exact steps. The project is **all rights reserved** for now, chosen to
+keep every future option (open source, dual license, commercial) open; changing it later is one command, see
+[`docs/LICENSING.md`](docs/LICENSING.md). JUCE is AGPLv3/commercial, so a closed-source plugin release needs a
+JUCE commercial license.

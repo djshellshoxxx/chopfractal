@@ -30,6 +30,10 @@ const Golden kGolden[] = {
     {"allow_reverse", ParamKind::Bool, 0.0, 1.0, 0.0, 1},
     {"allow_pitch", ParamKind::Bool, 0.0, 1.0, 0.0, 1},
     {"allow_retrigger", ParamKind::Bool, 0.0, 1.0, 0.0, 1},
+    {"allow_filter", ParamKind::Bool, 0.0, 1.0, 0.0, 2},
+    {"allow_glide", ParamKind::Bool, 0.0, 1.0, 0.0, 2},
+    {"allow_crunch", ParamKind::Bool, 0.0, 1.0, 0.0, 2},
+    {"fx_intensity", ParamKind::Float, 0.0, 1.0, 0.5, 2},
 };
 }  // namespace
 
@@ -51,6 +55,8 @@ CHOP_TEST(manifest_matches_the_golden_list_and_indices) {
   }
   CHECK_EQ(std::string(m[kOutputGainDb].id), "output_gain_db");
   CHECK_EQ(std::string(m[kAllowRetrigger].id), "allow_retrigger");
+  CHECK_EQ(std::string(m[kFxIntensity].id), "fx_intensity");
+  CHECK_EQ(kManifestVersion, 2);
   CHECK(findParam("density") == &m[kDensity]);
   CHECK(findParam("seed") == nullptr);  // the seed is never an automatable parameter
   CHECK(findParam("nope") == nullptr);

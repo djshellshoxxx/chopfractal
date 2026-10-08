@@ -4,7 +4,7 @@ Version 0.1.0 · API 0.1 · C++17
 
 > Generated from `module.json` by `tools/gen_module_docs.py`. Edit the manifest, not this file.
 
-Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.
+Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.
 
 ## Public API
 
@@ -12,6 +12,7 @@ Voice playback and event transforms: sample-accurate host-synced scheduler, boun
 - `Renderer::prepare/process/reset/requestPreview/activeVoices` and `mailbox().publish()`
 - `renderOffline(playback, settings)`
 - `Mailbox<T>`: wait-free reader, reclaims only after the reader acknowledges a newer object
+- `FlatEvent::fx` (EventFx): filter (low/high-pass, cutoff, resonance), glide semitones, crush; defaults are exact bypasses
 
 Public headers:
 
@@ -26,7 +27,7 @@ Public headers:
 ## Limits
 
 - 8 voices (plus fading voices), 4096 prepared events after retrigger expansion, host blocks of any size (chunked above the prepared maximum)
-- Transform order is fixed: region, reverse, rate/pitch, gate/fades, level/pan, voice sum, dry mix and output gain. Pan is a balance law; mono output is (L+R)/2; interpolation is linear
+- Transform order is fixed: region, reverse, rate/pitch then glide, crunch, gate/fades, filter, level/pan, voice sum, dry mix and output gain. Pan is a balance law; mono output is (L+R)/2; interpolation is linear
 
 ## Dependencies
 
@@ -42,4 +43,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

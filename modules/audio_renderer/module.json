@@ -17,7 +17,7 @@
       "reason": "flat event and time contracts, Result"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "`process()`, `reset()` and `Mailbox::acquire()` are real-time safe (no allocation, locks, I/O). `prepare()`, `makePlayback()`, `Mailbox::publish()` and `renderOffline()` are non-real-time. `requestPreview()` is for one producer thread.",
@@ -26,16 +26,17 @@
   "real_time_safe": true,
   "migration_guide": "MIGRATION.md",
   "standalone_test_command": "cmake -S modules/audio_renderer -B build/audio_renderer && cmake --build build/audio_renderer && ctest --test-dir build/audio_renderer",
-  "summary": "Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.",
+  "summary": "Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.",
   "public_api": [
     "`makePlayback(source, flatEvents, lengthTicks)` validates and prepares immutable data; `makePassThroughPlayback(source)`",
     "`Renderer::prepare/process/reset/requestPreview/activeVoices` and `mailbox().publish()`",
     "`renderOffline(playback, settings)`",
-    "`Mailbox<T>`: wait-free reader, reclaims only after the reader acknowledges a newer object"
+    "`Mailbox<T>`: wait-free reader, reclaims only after the reader acknowledges a newer object",
+    "`FlatEvent::fx` (EventFx): filter (low/high-pass, cutoff, resonance), glide semitones, crush; defaults are exact bypasses"
   ],
   "limits": [
     "8 voices (plus fading voices), 4096 prepared events after retrigger expansion, host blocks of any size (chunked above the prepared maximum)",
-    "Transform order is fixed: region, reverse, rate/pitch, gate/fades, level/pan, voice sum, dry mix and output gain. Pan is a balance law; mono output is (L+R)/2; interpolation is linear"
+    "Transform order is fixed: region, reverse, rate/pitch then glide, crunch, gate/fades, filter, level/pan, voice sum, dry mix and output gain. Pan is a balance law; mono output is (L+R)/2; interpolation is linear"
   ],
   "adapters": [
     "The plugin shell owns bus negotiation, host bypass, and transport translation (`plugin_host_adapter`)."

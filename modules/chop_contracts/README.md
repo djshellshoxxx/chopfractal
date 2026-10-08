@@ -17,6 +17,7 @@ The small shared vocabulary every other module speaks: typed IDs, musical ticks,
 - `Event`, `NestedPattern`, `FlatEvent`, `flattenInto()`, `validateEvent()`, `writeEvent()/readEvent()`
 - `ICandidatePolicy`, `CandidateQuery`, `Decision`: how an optional rule provider guides generation
 - `SnapshotStack<T>`: bounded undo/redo
+- `EventFx` (filter, cutoff, resonance, glide, crush) on `Event`/`FlatEvent`; serialized only when active (flag bit 32)
 
 Public headers:
 
@@ -55,4 +56,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

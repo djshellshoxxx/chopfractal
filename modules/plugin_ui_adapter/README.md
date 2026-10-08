@@ -11,10 +11,12 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `computePeaks()`, `ViewWindow`, `frameToX/xToFrame/zoomAround/scrolledBy`
 - `buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`
 - `layoutHistoryTree()`
+- `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
 
 Public headers:
 
 - `include/chopfractal/plugin_ui_adapter/views.hpp`
+- `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 
 ## Contract
 
@@ -42,4 +44,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

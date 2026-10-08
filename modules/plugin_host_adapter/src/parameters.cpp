@@ -19,6 +19,10 @@ const std::vector<ParamDef>& parameterManifest() {
       {"allow_reverse", "Allow Reverse", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 1, nullptr},
       {"allow_pitch", "Allow Pitch", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 1, nullptr},
       {"allow_retrigger", "Allow Retrigger", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 1, nullptr},
+      {"allow_filter", "Allow Filter", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 2, nullptr},
+      {"allow_glide", "Allow Tape Glide", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 2, nullptr},
+      {"allow_crunch", "Allow Crunch", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 2, nullptr},
+      {"fx_intensity", "Effect Intensity", "%", ParamKind::Float, 0.0, 1.0, 0.5, 0.0, 20.0, 2, nullptr},
   };
   return manifest;
 }

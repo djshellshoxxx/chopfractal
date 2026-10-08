@@ -36,6 +36,19 @@ struct Voice {
   float gainR = 0.f;
   float lastLevel = 0.f;
   std::uint64_t serial = 0;
+  // Event effects. Defaults are exact bypasses (rateScale stays 1.0, filter/crunch skipped).
+  double rateScale = 1.0;
+  double glideMul = 1.0;
+  bool filterOn = false;
+  bool highPass = false;
+  float fa1 = 0.f, fa2 = 0.f, fa3 = 0.f, fk = 0.f;
+  float ic1[2] = {0.f, 0.f};
+  float ic2[2] = {0.f, 0.f};
+  bool crunchOn = false;
+  float crushLevels = 1.f;
+  int holdFrames = 1;
+  int holdCount = 0;
+  float heldL = 0.f, heldR = 0.f;
 };
 
 struct Trigger {
@@ -61,6 +74,10 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
   for (const FlatEvent& e : events) {
     if (e.duration <= 0 || e.start < 0 || e.start >= lengthTicks) return makeError(ErrorCode::OutOfRange, "an event has invalid timing");
     if (e.region.empty() || e.region.start < 0 || e.region.end > pb->source->frames) return makeError(ErrorCode::OutOfRange, "an event reads outside the source");
+    const EventFx& fx = e.fx;
+    if (static_cast<std::uint8_t>(fx.filter) > 2 || !finiteIn(fx.cutoff, 0.f, 1.f) || !finiteIn(fx.resonance, 0.f, 1.f) ||
+        !finiteIn(fx.crush, 0.f, 1.f) || !finiteIn(fx.glideSemitones, -limits::kMaxGlideSemitones, limits::kMaxGlideSemitones))
+      return makeError(ErrorCode::OutOfRange, "an event has an out-of-range effect");
     const EventTransform& t = e.tx;
     if (!finiteIn(t.level, 0.f, limits::kMaxLevel) || !finiteIn(t.pan, -1.f, 1.f) || !finiteIn(t.pitchSemitones, -limits::kMaxPitchSemitones, limits::kMaxPitchSemitones) ||
         t.retrigger < 1 || t.retrigger > limits::kMaxRetrigger)
@@ -168,7 +185,7 @@ struct Renderer::Impl {
   }
 
   void startVoice(Voice& v, const SourceData& src, SampleRange region, const EventTransform& tx, std::int64_t gateFrames,
-                  std::uint32_t fadeIn, std::uint32_t fadeOut) {
+                  std::uint32_t fadeIn, std::uint32_t fadeOut, const EventFx& fx = EventFx{}) {
     const double ratio = static_cast<double>(src.sampleRate) / cfg.sampleRate;
     const double rate = ratio * std::exp2(static_cast<double>(tx.pitchSemitones) / 12.0);
     v = Voice{};
@@ -190,6 +207,26 @@ struct Renderer::Impl {
     v.release = static_cast<int>(std::max<std::int64_t>(1, r));
     v.gainL = tx.level * (tx.pan > 0.f ? 1.f - tx.pan : 1.f);
     v.gainR = tx.level * (tx.pan < 0.f ? 1.f + tx.pan : 1.f);
+    if (fx.glideSemitones != 0.f) v.glideMul = std::exp2((static_cast<double>(fx.glideSemitones) / 12.0) / static_cast<double>(gate));
+    if (fx.crush > 0.f) {
+      const double c = fx.crush;
+      v.crunchOn = true;
+      v.crushLevels = static_cast<float>(std::exp2(16.0 - 12.0 * c - 1.0));
+      v.holdFrames = 1 + static_cast<int>(std::lround(15.0 * c * c));
+    }
+    if (fx.filter != FilterType::Off) {
+      const double fc = std::min(20.0 * std::pow(1000.0, static_cast<double>(fx.cutoff)), 0.45 * cfg.sampleRate);
+      const double q = 0.71 + (8.0 - 0.71) * static_cast<double>(fx.resonance);
+      const double g = std::tan(3.14159265358979323846 * fc / cfg.sampleRate);
+      const double k = 1.0 / q;
+      const double a1 = 1.0 / (1.0 + g * (g + k));
+      v.filterOn = true;
+      v.highPass = fx.filter == FilterType::HighPass;
+      v.fk = static_cast<float>(k);
+      v.fa1 = static_cast<float>(a1);
+      v.fa2 = static_cast<float>(g * a1);
+      v.fa3 = static_cast<float>(g * g * a1);
+    }
   }
 
   Voice* allocateVoice() {
@@ -217,7 +254,7 @@ struct Renderer::Impl {
     Voice* v = allocateVoice();
     if (!v) return;
     const std::int64_t gate = static_cast<std::int64_t>(std::llround(static_cast<double>(e.duration) / ticksPerFrame));
-    startVoice(*v, src, e.region, e.tx, gate, e.fadeInFrames, e.fadeOutFrames);
+    startVoice(*v, src, e.region, e.tx, gate, e.fadeInFrames, e.fadeOutFrames, e.fx);
   }
 
   void drainPreview(const Playback* pb, bool allow) {
@@ -256,14 +293,25 @@ struct Renderer::Impl {
       }
       const std::int64_t i1 = std::min(i0 + 1, v.regionEnd - 1);
       const float frac = static_cast<float>(v.pos - static_cast<double>(i0));
-      const float l = v.ch0[i0] + (v.ch0[i1] - v.ch0[i0]) * frac;
-      const float r = v.ch1[i0] + (v.ch1[i1] - v.ch1[i0]) * frac;
+      float l = v.ch0[i0] + (v.ch0[i1] - v.ch0[i0]) * frac;
+      float r = v.ch1[i0] + (v.ch1[i1] - v.ch1[i0]) * frac;
+      if (v.crunchOn) {
+        if (v.holdCount <= 0) {
+          v.heldL = std::floor(l * v.crushLevels + 0.5f) / v.crushLevels;
+          v.heldR = std::floor(r * v.crushLevels + 0.5f) / v.crushLevels;
+          v.holdCount = v.holdFrames;
+        }
+        --v.holdCount;
+        l = v.heldL;
+        r = v.heldR;
+      }
 
       float env = 1.f;
       if (v.attack > 0 && v.age < v.attack) env = static_cast<float>(v.age) / static_cast<float>(v.attack);
       const std::int64_t toGateEnd = v.gateFrames - v.age;
       if (toGateEnd < v.release) env = std::min(env, static_cast<float>(toGateEnd) / static_cast<float>(v.release));
-      const double remaining = v.step > 0.0 ? (static_cast<double>(v.regionEnd - 1) - v.pos) / v.step : (v.pos - static_cast<double>(v.regionStart)) / -v.step;
+      const double curStep = v.step * v.rateScale;
+      const double remaining = curStep > 0.0 ? (static_cast<double>(v.regionEnd - 1) - v.pos) / curStep : (v.pos - static_cast<double>(v.regionStart)) / -curStep;
       if (remaining < static_cast<double>(v.release)) env = std::min(env, static_cast<float>(std::max(0.0, remaining) / static_cast<double>(v.release)));
       if (v.fading) {
         env *= static_cast<float>(v.fadeLeft) / static_cast<float>(v.fadeTotal);
@@ -271,9 +319,30 @@ struct Renderer::Impl {
       }
       env = std::max(0.f, env);
       v.lastLevel = env * std::max(v.gainL, v.gainR);
-      mixL[static_cast<std::size_t>(i)] += l * env * v.gainL;
-      mixR[static_cast<std::size_t>(i)] += r * env * v.gainR;
-      v.pos += v.step;
+      float el = l * env, er = r * env;
+      if (v.filterOn) {
+        float* in2[2] = {&el, &er};
+        for (int c = 0; c < 2; ++c) {
+          const float x = *in2[c];
+          const float v3 = x - v.ic2[c];
+          const float v1 = v.fa1 * v.ic1[c] + v.fa2 * v3;
+          const float v2 = v.ic2[c] + v.fa2 * v.ic1[c] + v.fa3 * v3;
+          v.ic1[c] = 2.f * v1 - v.ic1[c];
+          v.ic2[c] = 2.f * v2 - v.ic2[c];
+          if (std::fabs(v.ic1[c]) < 1e-20f) v.ic1[c] = 0.f;
+          if (std::fabs(v.ic2[c]) < 1e-20f) v.ic2[c] = 0.f;
+          float y = v.highPass ? x - v.fk * v1 - v2 : v2;
+          if (!std::isfinite(y)) {
+            y = 0.f;
+            v.ic1[c] = v.ic2[c] = 0.f;
+          }
+          *in2[c] = y;
+        }
+      }
+      mixL[static_cast<std::size_t>(i)] += el * v.gainL;
+      mixR[static_cast<std::size_t>(i)] += er * v.gainR;
+      v.pos += v.step * v.rateScale;
+      v.rateScale *= v.glideMul;
       ++v.age;
     }
   }

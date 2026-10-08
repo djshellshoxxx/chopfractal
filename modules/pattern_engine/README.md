@@ -13,6 +13,7 @@ Deterministic hierarchical pattern model (phrase, bar, beat, event), Generate an
 - edits: `setLock`, `clearLocks`, `addEvent`, `deleteEvent`, `moveEvent`, `setEventChop`, `setEventTransform`, `duplicateBar`, `restoreSourceOrder`, `setChild`, `collapse`, `setChildActive`
 - `serialize()` / `deserialize()` (schema 1, engine version 1)
 - `PatternSession`: undo/redo and two A/B snapshot slots
+- `setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)
 
 Public headers:
 
@@ -43,4 +44,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

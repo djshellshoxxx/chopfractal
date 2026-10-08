@@ -179,3 +179,107 @@ CHOP_TEST(history_layout_gives_leaves_columns_and_parents_depth) {
   // An orphan whose parent is missing is shown as a root rather than dropped.
   CHECK_EQ(layoutHistoryTree({node(9, 77, 1, "orphan")}, 0).size(), 1u);
 }
+
+// ---- Orbit View ----
+#include <chopfractal/plugin_ui_adapter/orbit.hpp>
+
+namespace {
+constexpr double kPi2 = 6.28318530717958647692;
+}
+
+CHOP_TEST(orbit_arcs_tile_the_phrase_and_nest_inside_their_parents) {
+  const auto chops = makeChops(4);
+  auto p = makePattern(chops);
+  const auto v = buildOrbitView(p, chops);
+  CHECK(v.lengthTicks == pattern::lengthTicks(p) && v.rings == 4);
+  CHECK_EQ(v.barAngles.size(), 2u);
+  CHECK_NEAR(v.barAngles[0], 0.0, 0.0);
+  CHECK_NEAR(v.barAngles[1], kPi2 / 2.0, 1e-12);
+  CHECK_EQ(v.beatAngles.size(), 8u);
+  CHECK(!v.arcs.empty());
+  for (const auto& a : v.arcs) {
+    CHECK_NEAR(a.startAngle, kPi2 * static_cast<double>(a.startTick) / static_cast<double>(v.lengthTicks), 1e-12);
+    CHECK_NEAR(a.sweep, kPi2 * static_cast<double>(a.durationTick) / static_cast<double>(v.lengthTicks), 1e-12);
+    CHECK(a.startAngle >= 0.0 && a.startAngle + a.sweep <= kPi2 + 1e-9 && a.ring >= 0 && a.ring < 4 && a.depth == 0);
+  }
+  // Zoom into a hit: its children appear one depth deeper and inside its angular span.
+  const Event* first = nullptr;
+  for (const auto& bt : p.bars[0].beats)
+    if (!bt.events.empty() && !first) first = &bt.events[0];
+  CHECK(first != nullptr);
+  auto child = std::make_shared<NestedPattern>();
+  child->windowDuration = first->duration;
+  child->depth = 1;
+  for (int i = 0; i < 2; ++i) {
+    Event c;
+    c.id = EventId{kDerivedIdBit | static_cast<std::uint64_t>(10 + i)};
+    c.chop = first->chop;
+    c.start = i * (first->duration / 2);
+    c.duration = first->duration / 2;
+    child->events.push_back(c);
+  }
+  auto zoomed = pattern::setChild(p, first->id, child, chops);
+  CHECK(zoomed.ok());
+  const auto z = buildOrbitView(zoomed.value(), chops);
+  const OrbitArc* parent = nullptr;
+  int nested = 0;
+  for (const auto& a : z.arcs)
+    if (a.id == first->id) parent = &a;
+  CHECK(parent && parent->hasChild && parent->childActive);
+  for (const auto& a : z.arcs)
+    if (a.depth == 1) {
+      ++nested;
+      CHECK(a.parent == first->id && a.startAngle >= parent->startAngle - 1e-12 && a.startAngle + a.sweep <= parent->startAngle + parent->sweep + 1e-12);
+    }
+  CHECK_EQ(nested, 2);
+  // Parents precede their children in time order, and a nested arc is thinner than its parent.
+  const Radii r0 = arcRadii(z, *parent, 100.0);
+  for (const auto& a : z.arcs)
+    if (a.depth == 1) {
+      const Radii r1 = arcRadii(z, a, 100.0);
+      CHECK(r1.inner > r0.inner && r1.outer < r0.outer);
+    }
+}
+
+CHOP_TEST(orbit_playhead_pulse_and_hit_testing) {
+  CHECK_NEAR(playheadAngle(0, 7680), 0.0, 0.0);
+  CHECK_NEAR(playheadAngle(4.0, 7680), kPi2 / 2.0, 1e-12);        // 7680 ticks = 8 quarters
+  CHECK_NEAR(playheadAngle(8.0, 7680), 0.0, 1e-12);                 // wraps at the loop length
+  CHECK_NEAR(playheadAngle(-2.0, 7680), kPi2 * 0.75, 1e-12);
+  CHECK(playheadAngle(std::nan(""), 7680) == 0.0 && playheadAngle(1.0, 0) == 0.0);
+  const double nearEnd = playheadAngle(7.999999999, 7680);
+  CHECK(nearEnd >= 0.0 && nearEnd < kPi2);
+
+  OrbitArc a;
+  a.startTick = 960;
+  a.durationTick = 480;
+  CHECK(hitPulse(a, 959, 7680) == 0.0 && hitPulse(a, 1440, 7680) == 0.0);
+  CHECK_NEAR(hitPulse(a, 960, 7680), 1.0, 1e-12);
+  double last = 2.0;
+  for (int t = 960; t < 1440; t += 40) {
+    const double h = hitPulse(a, t, 7680);
+    CHECK(h <= last && h > 0.0);
+    last = h;
+  }
+  CHECK_NEAR(hitPulse(a, 960 + 7680, 7680), 1.0, 1e-12);            // later loops pulse again
+  CHECK(hitPulse(a, std::nan(""), 7680) == 0.0 && hitPulse(a, 5, 0) == 0.0);
+
+  const auto chops = makeChops(4);
+  const auto p = makePattern(chops);
+  const auto v = buildOrbitView(p, chops);
+  const double R = 200.0;
+  int found = 0;
+  for (const auto& arc : v.arcs) {
+    const Radii rr = arcRadii(v, arc, R);
+    const double mid = arc.startAngle + arc.sweep / 2.0, rad = (rr.inner + rr.outer) / 2.0;
+    const double x = rad * std::sin(mid), y = -rad * std::cos(mid);   // 12 o'clock is up
+    const EventId hit = hitTest(v, x, y, R);
+    CHECK(hit.valid());
+    found += hit == arc.id;
+  }
+  CHECK(found > 0);
+  CHECK(!hitTest(v, 0, 0, R).valid());               // the centre hole
+  CHECK(!hitTest(v, 0, -R * 1.01, R).valid());       // outside the rings
+  CHECK(!hitTest(v, std::nan(""), 0, R).valid() && !hitTest(v, 1, 1, 0).valid());
+  CHECK(!hitTest(OrbitView{}, 10, 10, R).valid());
+}

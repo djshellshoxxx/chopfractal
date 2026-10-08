@@ -39,6 +39,12 @@ The [component portability protocol](component-portability-protocol.md) is norma
 - [Recursive Hit Zoom](recursive-hit-zoom.md)
 - [Chop Roles and Grammar](chop-roles-and-grammar.md)
 - [Variation Family Tree](variation-family-tree.md)
+- [Fractal Rhythm](fractal-rhythm.md)
+- [Evolve Mode](evolve-mode.md)
+- [Smart Setup](smart-setup.md)
+- [Orbit View](orbit-view.md)
+- [Event effects: Filter, Tape Glide, Crunch](effects-filter-glide-crunch.md)
+- [WAV export and Producer Kit](export-wav-and-producer-kit.md)
 - [Modular integration and transfer plan](modular-integration-and-transfer-plan.md)
 
 Each feature is specified as a portable component, with a separate plugin/UI adapter and explicit integration steps. The integration plan defines the order and contracts for assembling the modules.

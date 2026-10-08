@@ -11,7 +11,7 @@
     "include/chopfractal/state_codec/result.hpp"
   ],
   "dependencies": [],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "Pure functions; thread-safe. Not real-time safe (allocates).",
@@ -28,7 +28,7 @@
     "`crc32()`"
   ],
   "limits": [
-    "64 MiB total, 48 MiB per payload, 32 modules, 64-character module IDs (implementation defaults; the maximum serialized source size is an open spec decision)"
+    "256 MiB total, 192 MiB per payload, 32 modules, 64-character module IDs (sized for the 128 MiB default embedded-source cap plus pattern and history data)"
   ],
   "adapters": [
     "Your host's save/restore callbacks hand the byte blob to `decode()` / receive it from `encode()`."

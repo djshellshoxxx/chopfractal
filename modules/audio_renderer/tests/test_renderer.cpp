@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <limits>
 #include <atomic>
 #include <chopfractal/audio_renderer/renderer.hpp>
@@ -521,4 +522,113 @@ CHOP_TEST(offline_render_is_deterministic_and_validates_settings) {
   bad.cycles = 1000;
   CHECK(!renderOffline(pb, bad).ok());
   CHECK(!renderOffline(nullptr, OfflineSettings{}).ok());
+}
+
+// ---- event effects: filter, tape glide, crunch ----
+namespace {
+double rms(const std::vector<float>& v, std::size_t a, std::size_t b) {
+  double s = 0;
+  for (std::size_t i = a; i < b; ++i) s += static_cast<double>(v[i]) * v[i];
+  return std::sqrt(s / static_cast<double>(b - a));
+}
+float sine200(std::int64_t i, std::int64_t, int) { return static_cast<float>(std::sin(2.0 * 3.14159265358979 * 200.0 * static_cast<double>(i) / 48000.0)); }
+float sine8k(std::int64_t i, std::int64_t, int) { return static_cast<float>(std::sin(2.0 * 3.14159265358979 * 8000.0 * static_cast<double>(i) / 48000.0)); }
+std::vector<float> renderFx(SourcePtr src, const EventFx& fx) {
+  FlatEvent e = ev(1, 24000, 0, 960);
+  e.fx = fx;
+  return renderWith(playback(std::move(src), {e}))[0];
+}
+}  // namespace
+
+CHOP_TEST(filter_attenuates_the_expected_band) {
+  EventFx lp;
+  lp.filter = FilterType::LowPass;
+  lp.cutoff = 0.4f;  // about 316 Hz
+  EventFx hp = lp;
+  hp.filter = FilterType::HighPass;
+  const EventFx off;
+  auto lowSrc = makeSource(1, 48000, 24000, sine200);
+  auto highSrc = makeSource(1, 48000, 24000, sine8k);
+  const double lowDry = rms(renderFx(lowSrc, off), 2000, 20000);
+  const double highDry = rms(renderFx(highSrc, off), 2000, 20000);
+  CHECK(rms(renderFx(highSrc, lp), 2000, 20000) < 0.02 * highDry);
+  CHECK(rms(renderFx(lowSrc, lp), 2000, 20000) > 0.6 * lowDry);
+  CHECK(rms(renderFx(lowSrc, hp), 2000, 20000) < 0.6 * lowDry);
+  CHECK(rms(renderFx(highSrc, hp), 2000, 20000) > 0.9 * highDry);
+  EventFx res = lp;
+  res.cutoff = 0.5f;
+  res.resonance = 1.f;
+  auto edge = makeSource(1, 48000, 24000, [](std::int64_t i, std::int64_t, int) {
+    return static_cast<float>(std::sin(2.0 * 3.14159265358979 * 632.0 * static_cast<double>(i) / 48000.0));
+  });
+  EventFx plain = lp;
+  plain.cutoff = 0.5f;
+  CHECK(rms(renderFx(edge, res), 2000, 20000) > 2.0 * rms(renderFx(edge, plain), 2000, 20000));  // resonance peak
+  EventFx top = lp;
+  top.cutoff = 1.f;  // clamped below Nyquist, must stay stable
+  CHECK(allFinite(renderFx(highSrc, top)));
+  CHECK(rms(renderFx(makeSource(1, 48000, 24000, [](std::int64_t, std::int64_t, int) { return 0.f; }), res), 0, 24000) == 0.0);
+}
+
+CHOP_TEST(tape_glide_changes_the_read_rate_across_the_hit) {
+  auto src = makeSource(1, 48000, 24000, ramp);
+  const auto base = renderFx(src, EventFx{});
+  EventFx down;
+  down.glideSemitones = -12.f;
+  EventFx up;
+  up.glideSemitones = 12.f;
+  const auto d = renderFx(src, down);
+  const auto u = renderFx(src, up);
+  CHECK(d[12000] < base[12000] - 0.05f);  // falls behind: tape stop
+  CHECK(u[12000] > base[12000] + 0.05f);  // runs ahead: rise
+  CHECK(d[100] > 0.f && std::fabs(d[100] - base[100]) < 1e-3f);  // the ramp starts at the normal rate
+  EventFx zero;
+  zero.glideSemitones = 0.f;
+  CHECK(renderFx(src, zero) == base);
+}
+
+CHOP_TEST(crunch_reduces_levels_and_holds_samples) {
+  auto src = makeSource(1, 48000, 24000, ramp);
+  EventFx c;
+  c.crush = 1.f;  // 4 bits, hold 16
+  const auto out = renderFx(src, c);
+  std::vector<float> seen;
+  for (std::size_t i = 2000; i < 20000; ++i)
+    if (std::find(seen.begin(), seen.end(), out[i]) == seen.end()) seen.push_back(out[i]);
+  CHECK(seen.size() <= 9);  // ramp 0..1 quantized to 1/8 steps
+  CHECK(out[3200] == out[3215]);
+  EventFx none;
+  none.crush = 0.f;
+  CHECK(renderFx(src, none) == renderFx(src, EventFx{}));
+  EventFx mild;
+  mild.crush = 0.1f;
+  const auto m = renderFx(src, mild);
+  CHECK(std::fabs(m[10000] - out[10000]) <= 1.f && allFinite(m));
+}
+
+CHOP_TEST(effects_are_block_size_independent_and_validated) {
+  auto stereo = makeSource(2, 44100, 30000, [](std::int64_t i, std::int64_t, int c) {
+    Rng r(static_cast<std::uint64_t>(i) * 2 + static_cast<std::uint64_t>(c));
+    return static_cast<float>(r.uniform01() * 2.0 - 1.0);
+  });
+  FlatEventList events;
+  for (int i = 0; i < 9; ++i) {
+    FlatEvent e = ev(static_cast<std::uint64_t>(i + 1), 30000, i * 400, 360);
+    e.fx.filter = static_cast<FilterType>(1 + i % 2);
+    e.fx.cutoff = 0.2f + 0.08f * static_cast<float>(i);
+    e.fx.resonance = 0.1f * static_cast<float>(i % 5);
+    e.fx.glideSemitones = static_cast<float>(i - 4) * 3.f;
+    e.fx.crush = (i % 3) * 0.4f;
+    events.push_back(e);
+  }
+  auto pb = playback(stereo, events, 3840);
+  const auto ref = renderWith(pb, 512, 2, 0.2);
+  for (int block : {1, 7, 64, 333, 2048}) CHECK(renderWith(pb, block, 2, 0.2) == ref);
+  CHECK(allFinite(ref[0]) && allFinite(ref[1]));
+  for (const auto& bad : {EventFx{static_cast<FilterType>(3), 0.5f, 0.f, 0.f, 0.f}, EventFx{FilterType::LowPass, 2.f, 0.f, 0.f, 0.f},
+                          EventFx{FilterType::Off, 0.5f, 0.f, 99.f, 0.f}, EventFx{FilterType::Off, 0.5f, 0.f, 0.f, -1.f}}) {
+    FlatEvent e = ev(1, 24000, 0, 960);
+    e.fx = bad;
+    CHECK(!makePlayback(makeSource(1, 48000, 24000, dc), {e}, 3840).ok());
+  }
 }

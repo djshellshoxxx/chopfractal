@@ -1,0 +1,37 @@
+{
+  "id": "evolve",
+  "name": "Evolve scheduler",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::evolve",
+  "public_headers": [
+    "include/chopfractal/evolve/evolve.hpp"
+  ],
+  "dependencies": [],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Not thread-safe by itself: call from one thread (the plugin calls it from the message thread). Allocation-free after construction.",
+  "platforms": "Any C++17 compiler. No dependencies at all.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/evolve -B build/evolve && cmake --build build/evolve && ctest --test-dir build/evolve",
+  "summary": "Deterministic scheduler for Evolve mode: decides when the beat should take a mutation step (every N loops), with what seed and amount (optional build-up ramp), and stops itself after repeated failures. It performs no mutation itself; the host application applies each step with its own mutate function.",
+  "public_api": [
+    "`Settings{enabled, everyLoops, amount, ramp, rampCeiling, startSeed}` and `valid(settings)`",
+    "`Controller::start/stop/onLoopMidpoint() -> optional<Step>`, `reportSuccess()/reportFailure()`",
+    "`seedForStep()` and `amountForStep()` (pure)"
+  ],
+  "limits": [
+    "Every 1, 2, 4, 8 or 16 loops; amount, ramp and ceiling in [0, 1]; stops after 3 consecutive failures; never steps faster than once per loop"
+  ],
+  "adapters": [
+    "Call `onLoopMidpoint()` from your own transport once per loop (at the middle of the loop) and apply the returned step."
+  ],
+  "adapter_notes": "The seed and amount are inputs to whatever mutate function you have.",
+  "removal": "Delete the folder; callers lose Evolve mode only.",
+  "example": "examples/minimal.cpp"
+}

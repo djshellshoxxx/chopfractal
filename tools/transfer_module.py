@@ -41,6 +41,9 @@ def main(argv):
             shutil.rmtree(target)
         shutil.copytree(os.path.join(gen_module_docs.MODULES, c), target, ignore=IGNORE)
         print("copied modules/%s" % c)
+    lic = os.path.join(gen_module_docs.ROOT, "LICENSE")
+    if os.path.isfile(lic):
+        shutil.copy(lic, os.path.join(dest, "CHOPFRACTAL_LICENSE.txt"))  # retain the license notice with the code
     with open(os.path.join(dest, "CHOPFRACTAL_IMPORT.md"), "a") as f:
         f.write("\n## Imported %s\n\n" % time.strftime("%Y-%m-%d"))
         for c in chain:

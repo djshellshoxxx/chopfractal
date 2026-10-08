@@ -54,6 +54,7 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
     f.start = windowStart + e.start;
     f.duration = e.duration;
     f.tx = e.tx;
+    f.fx = e.fx;
     f.fadeInFrames = chop->fadeInFrames;
     f.fadeOutFrames = chop->fadeOutFrames;
     f.depth = static_cast<std::uint8_t>(depth);
@@ -79,6 +80,11 @@ Status validateEvent(const Event& e, int depth) {
   if (!(t.pan >= -1.f && t.pan <= 1.f)) return makeError(ErrorCode::OutOfRange, who + " pan out of range");
   if (!(std::fabs(t.pitchSemitones) <= limits::kMaxPitchSemitones)) return makeError(ErrorCode::OutOfRange, who + " pitch out of range");
   if (t.retrigger < 1 || t.retrigger > limits::kMaxRetrigger) return makeError(ErrorCode::OutOfRange, who + " retrigger out of range");
+  const EventFx& fx = e.fx;
+  if (static_cast<std::uint8_t>(fx.filter) > 2) return makeError(ErrorCode::OutOfRange, who + " filter type out of range");
+  if (!(fx.cutoff >= 0.f && fx.cutoff <= 1.f) || !(fx.resonance >= 0.f && fx.resonance <= 1.f) ||
+      !(fx.crush >= 0.f && fx.crush <= 1.f) || !(std::fabs(fx.glideSemitones) <= limits::kMaxGlideSemitones))
+    return makeError(ErrorCode::OutOfRange, who + " effect out of range");
   if (!(e.probability >= 0.f && e.probability <= 1.f)) return makeError(ErrorCode::OutOfRange, who + " probability out of range");
   if (e.child) {
     if (depth + 1 > limits::kMaxNestedDepth) return makeError(ErrorCode::LimitExceeded, who + " nests too deeply", limits::kMaxNestedDepth);
@@ -106,9 +112,17 @@ void writeEvent(bytes::Writer& w, const Event& e) {
   w.u8(e.tx.retrigger);
   w.f32(e.probability);
   const std::uint8_t flags = static_cast<std::uint8_t>((e.enabled ? 1 : 0) | (e.locked ? 2 : 0) | (e.userOwned ? 4 : 0) |
-                                                       (e.sourceOverride ? 8 : 0) | (e.childActive ? 16 : 0));
+                                                       (e.sourceOverride ? 8 : 0) | (e.childActive ? 16 : 0) |
+                                                       (e.fx.active() ? 32 : 0));
   w.u8(flags);
   w.u8(e.child ? 1 : 0);
+  if (e.fx.active()) {
+    w.u8(static_cast<std::uint8_t>(e.fx.filter));
+    w.f32(e.fx.cutoff);
+    w.f32(e.fx.resonance);
+    w.f32(e.fx.glideSemitones);
+    w.f32(e.fx.crush);
+  }
   if (e.child) {
     w.u64(e.child->seed);
     w.i64(e.child->windowDuration);
@@ -139,6 +153,19 @@ bool readEvent(bytes::Reader& r, Event& out, int depth) {
   out.sourceOverride = (flags & 8) != 0;
   out.childActive = (flags & 16) != 0;
   const bool hasChild = r.u8() != 0;
+  out.fx = EventFx{};
+  if (flags & 32) {
+    const std::uint8_t ft = r.u8();
+    if (ft > 2) {
+      r.fail();
+      return false;
+    }
+    out.fx.filter = static_cast<FilterType>(ft);
+    out.fx.cutoff = r.f32();
+    out.fx.resonance = r.f32();
+    out.fx.glideSemitones = r.f32();
+    out.fx.crush = r.f32();
+  }
   if (!r.ok()) return false;
   if (hasChild) {
     if (depth + 1 > limits::kMaxNestedDepth) {

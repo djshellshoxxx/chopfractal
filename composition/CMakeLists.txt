@@ -14,7 +14,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 set(CHOPFRACTAL_COMPOSITION_DEPS chop_contracts state_codec variation_history source_chop pattern_engine
-    recursive_hit_zoom chop_roles_grammar audio_renderer plugin_host_adapter)
+    recursive_hit_zoom chop_roles_grammar wav_export midi_export evolve fractal_rhythm chop_insight audio_renderer
+    plugin_host_adapter)
 foreach(dep ${CHOPFRACTAL_COMPOSITION_DEPS})
   if(NOT TARGET chopfractal::${dep})
     add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../modules/${dep}" "${CMAKE_BINARY_DIR}/_chopfractal_${dep}")

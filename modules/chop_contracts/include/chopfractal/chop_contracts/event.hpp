@@ -25,6 +25,22 @@ struct EventTransform {
   }
 };
 
+// Per-event effects (see docs/specs/effects-filter-glide-crunch.md). All-default means "no effect" and is
+// serialized as absent, so effect-free events keep their exact pre-effect encoding.
+enum class FilterType : std::uint8_t { Off = 0, LowPass = 1, HighPass = 2 };
+struct EventFx {
+  FilterType filter = FilterType::Off;
+  float cutoff = 1.f;          // [0, 1], logarithmic 20 Hz .. 20 kHz
+  float resonance = 0.f;       // [0, 1]
+  float glideSemitones = 0.f;  // +/- kMaxGlideSemitones, exponential rate ramp across the event
+  float crush = 0.f;           // [0, 1] bit and sample-rate reduction
+  bool active() const { return filter != FilterType::Off || glideSemitones != 0.f || crush != 0.f; }
+  friend bool operator==(const EventFx& a, const EventFx& b) {
+    return a.filter == b.filter && a.cutoff == b.cutoff && a.resonance == b.resonance &&
+           a.glideSemitones == b.glideSemitones && a.crush == b.crush;
+  }
+};
+
 struct NestedPattern;
 
 // One scheduled playback of a chop. `start` is relative to the enclosing window: the bar for
@@ -36,6 +52,7 @@ struct Event {
   Ticks start = 0;
   Ticks duration = 0;
   EventTransform tx;
+  EventFx fx;
   float probability = 1.f;     // resolved deterministically at flatten time
   bool enabled = true;
   bool locked = false;
@@ -61,6 +78,7 @@ struct FlatEvent {
   Ticks start = 0;
   Ticks duration = 0;
   EventTransform tx;
+  EventFx fx;
   std::uint32_t fadeInFrames = 0;
   std::uint32_t fadeOutFrames = 0;
   std::uint8_t depth = 0;

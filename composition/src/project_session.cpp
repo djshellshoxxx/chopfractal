@@ -357,6 +357,10 @@ Status ProjectSession::mutate(const pattern::MutateOptions& options, const patte
     cur.allowReverse = live->allowReverse;
     cur.allowPitch = live->allowPitch;
     cur.allowRetrigger = live->allowRetrigger;
+    cur.allowFilter = live->allowFilter;
+    cur.allowGlide = live->allowGlide;
+    cur.allowCrunch = live->allowCrunch;
+    cur.fxIntensity = live->fxIntensity;
     cur.pitchRange = live->pitchRange;
     cur.maxRetrigger = live->maxRetrigger;
     cur.maxShiftTicks = live->maxShiftTicks;
@@ -572,6 +576,14 @@ Result<std::string> ProjectSession::compareNodes(history::NodeId a, history::Nod
 
 std::size_t ProjectSession::embeddedSourceBytes() const { return sourceData_ ? 16 + sourceData_->samples.size() * sizeof(float) : 0; }
 
+Status ProjectSession::setEmbeddedSourceCap(std::size_t bytes) {
+  constexpr std::size_t kHeadroom = 64u * 1024u * 1024u;
+  if (bytes == 0 || bytes > kCodecCeilingBytes - kHeadroom)
+    return makeError(ErrorCode::OutOfRange, "embed cap out of range", static_cast<std::int64_t>(kCodecCeilingBytes - kHeadroom));
+  embeddedCap_ = bytes;
+  return {};
+}
+
 Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) const {
   codec::ProjectState st;
   if (chopMap_) st.modules[kModSource] = {source::kSchemaVersion, chopMap_->serialize()};
@@ -580,8 +592,8 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
   st.modules[kModHistory] = {history::kSchemaVersion, history_.serialize()};
   const bool embedded = embedSource && sourceData_;
   if (embedded) {
-    if (embeddedSourceBytes() > kMaxEmbeddedSourceBytes)
-      return makeError(ErrorCode::LimitExceeded, "the source is too large to embed in the project", static_cast<std::int64_t>(kMaxEmbeddedSourceBytes));
+    if (embeddedSourceBytes() > embeddedCap_)
+      return makeError(ErrorCode::LimitExceeded, "the source is too large to embed in the project", static_cast<std::int64_t>(embeddedCap_));
     std::vector<std::uint8_t> payload;
     bytes::Writer w(payload);
     w.i32(sourceData_->channels);
@@ -593,6 +605,15 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
   std::vector<std::uint8_t> meta;
   bytes::Writer mw(meta);
   mw.boolean(embedded);
+  {
+    const evolve::Settings& es = evolve_.settings();  // optional trailing block; absent when never configured
+    mw.u8(1);
+    mw.i32(es.everyLoops);
+    mw.f64(es.amount);
+    mw.f64(es.ramp);
+    mw.f64(es.rampCeiling);
+    mw.u64(es.startSeed);
+  }
   st.modules[kModSession] = {kSessionSchemaVersion, std::move(meta)};
   auto enc = codec::encode(st);
   if (!enc.ok()) return convert(enc.error());
@@ -701,7 +722,28 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     newPlayback = pt.value();
   }
 
+  std::optional<evolve::Settings> newEvolve;
+  if (hasSession && sessionBytes.size() >= 2 + 1) {
+    bytes::Reader sr(sessionBytes.data(), sessionBytes.size());
+    sr.boolean();  // embedded flag
+    if (sr.u8() == 1) {
+      evolve::Settings es;
+      es.everyLoops = sr.i32();
+      es.amount = sr.f64();
+      es.ramp = sr.f64();
+      es.rampCeiling = sr.f64();
+      es.startSeed = sr.u64();
+      es.enabled = false;  // a project never starts changing by itself
+      if (sr.ok() && evolve::valid(es)) newEvolve = es;
+    }
+  }
+
   // ---- commit ----
+  if (newEvolve) {
+    evolve_.start(*newEvolve);  // not enabled: only remembers the settings
+  } else {
+    evolve_.stop();
+  }
   sourceData_ = std::move(newData);
   chopMap_ = std::move(newMap);
   chops_ = std::move(newChops);
@@ -717,6 +759,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 }
 
 void ProjectSession::reset() {
+  evolve_.stop();
   clearSource();
   rules_ = roles::RuleSet{};
   notices_.clear();
@@ -733,6 +776,10 @@ pattern::Settings settingsFromParams(const host::ParamValues& v, pattern::Settin
   base.allowReverse = v.get(host::kAllowReverse) >= 0.5;
   base.allowPitch = v.get(host::kAllowPitch) >= 0.5;
   base.allowRetrigger = v.get(host::kAllowRetrigger) >= 0.5;
+  base.allowFilter = v.get(host::kAllowFilter) >= 0.5;
+  base.allowGlide = v.get(host::kAllowGlide) >= 0.5;
+  base.allowCrunch = v.get(host::kAllowCrunch) >= 0.5;
+  base.fxIntensity = v.get(host::kFxIntensity);
   return base;
 }
 

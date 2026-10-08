@@ -17,7 +17,7 @@
       "reason": "event model, flatten(), chop snapshot, policy interface, RNG, byte codec, time, undo stack"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "UI/worker thread only. Not real-time safe; the audio side consumes only the flattened events.",
@@ -32,7 +32,8 @@
     "`flatten(pattern, chops)`, `validate(pattern)`, `sanitize(pattern, chops)`",
     "edits: `setLock`, `clearLocks`, `addEvent`, `deleteEvent`, `moveEvent`, `setEventChop`, `setEventTransform`, `duplicateBar`, `restoreSourceOrder`, `setChild`, `collapse`, `setChildActive`",
     "`serialize()` / `deserialize()` (schema 1, engine version 1)",
-    "`PatternSession`: undo/redo and two A/B snapshot slots"
+    "`PatternSession`: undo/redo and two A/B snapshot slots",
+    "`setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)"
   ],
   "limits": [
     "Pattern length 1, 2, 4 or 8 bars; grids 1/1 to 1/32, straight or triplet",

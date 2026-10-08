@@ -11,6 +11,7 @@ Everything about the VST3 host boundary that needs no JUCE: the append-only auto
 - `parameterManifest()`, `findParam()`, `normalize/denormalize/snapValue`, `ParamValues`, `toRenderParams()`
 - `translateHostTime(HostTimeInfo, manualBpm, fallbackMeter)` -> transport block + fallback flags
 - `isSupportedBusLayout(in, out)`
+- Manifest version 2 appends `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity`
 
 Public headers:
 
@@ -41,4 +42,4 @@ Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration 
 
 ## License
 
-`LicenseRef-ChopFractal-TBD` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying.
+`LicenseRef-ChopFractal-Proprietary` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it).

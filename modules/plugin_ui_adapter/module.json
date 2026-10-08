@@ -7,7 +7,8 @@
   "language_standard": "C++17",
   "build_target": "chopfractal::plugin_ui_adapter",
   "public_headers": [
-    "include/chopfractal/plugin_ui_adapter/views.hpp"
+    "include/chopfractal/plugin_ui_adapter/views.hpp",
+    "include/chopfractal/plugin_ui_adapter/orbit.hpp"
   ],
   "dependencies": [
     {
@@ -31,7 +32,7 @@
       "reason": "the tree layout reads node summaries"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "UI thread only. Views are derived from immutable snapshots and never mutate project state.",
@@ -44,7 +45,8 @@
   "public_api": [
     "`computePeaks()`, `ViewWindow`, `frameToX/xToFrame/zoomAround/scrolledBy`",
     "`buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`",
-    "`layoutHistoryTree()`"
+    "`layoutHistoryTree()`",
+    "`buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)"
   ],
   "limits": [
     "Colour is never the only indicator: every rectangle carries a text description"

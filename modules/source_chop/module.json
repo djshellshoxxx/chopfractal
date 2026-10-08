@@ -17,7 +17,7 @@
       "reason": "typed chop IDs, SampleRange, the ChopSnapshot export, Result, byte codec, and the undo stack"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "UI/worker thread only. Analysis functions are pure and meant for a worker thread. Not real-time safe.",

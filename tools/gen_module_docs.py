@@ -64,7 +64,7 @@ def render_readme(mods, mid):
         out += ["None."]
     out += ["", "## Build and test", "", "```sh", m["standalone_test_command"], "```", "",
             "Tests live in `tests/`, a consumer example in `examples/minimal.cpp`. Migration steps: [MIGRATION.md](MIGRATION.md).", "",
-            "## License", "", "`%s` — the root license policy is still an open decision. Keep any `LICENSE`/`NOTICE` files when copying." % m["license"], ""]
+            "## License", "", "`%s` — see the root `LICENSE` and `docs/LICENSING.md`. Keep the license notice when copying (the transfer script includes it)." % m["license"], ""]
     return "\n".join(out)
 
 

@@ -16,7 +16,7 @@
       "reason": "candidate-policy interface, chop IDs, byte codec"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "Const use is thread-safe; build a new policy per generation. Not real-time safe.",

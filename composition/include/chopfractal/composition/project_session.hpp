@@ -22,6 +22,10 @@
 #include <chopfractal/variation_history/history.hpp>
 
 #include <cstdint>
+#include <chopfractal/chop_insight/insight.hpp>
+#include <chopfractal/evolve/evolve.hpp>
+#include <chopfractal/fractal_rhythm/fractal.hpp>
+#include <chopfractal/wav_export/wav.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -31,9 +35,11 @@
 namespace chopfractal::composition {
 
 constexpr std::uint32_t kSessionSchemaVersion = 1;
-// Default cap on audio embedded in project state (an open decision in the spec; a visible estimate is
-// available through embeddedSourceBytes()).
-constexpr std::size_t kMaxEmbeddedSourceBytes = 32u * 1024u * 1024u;
+// Default cap on audio embedded in project state: 128 MiB (about 12 minutes of 44.1 kHz stereo float).
+// Decided generous; a session can lower or raise it with setEmbeddedSourceCap(). The codec ceiling
+// (kCodecCeilingBytes) bounds what can ever be saved or loaded.
+constexpr std::size_t kMaxEmbeddedSourceBytes = 128u * 1024u * 1024u;
+constexpr std::size_t kCodecCeilingBytes = 256u * 1024u * 1024u;
 
 struct Notice {
   enum class Level : std::uint8_t { Info, Warning, Error };
@@ -50,6 +56,32 @@ struct DetectOptions {
 };
 
 enum class Quantize { Immediate, LoopBoundary };
+
+// ---- Smart Setup, export (docs/specs/smart-setup.md, export-wav-and-producer-kit.md) ----
+struct SetupSuggestion {
+  std::vector<insight::RoleSuggestion> roles;
+  std::vector<insight::LoopSuggestion> loops;
+};
+struct ExportWavOptions {
+  wav::Options wav;             // format, sample rate, dither, normalization
+  double bpm = 120.0;
+  int loops = 1;                // 1..16
+  double tailSeconds = 0.5;     // 0..30
+  bool overwrite = false;       // only after the user confirmed
+};
+struct ExportReport {
+  std::uint64_t frames = 0;
+  float peak = 0.f;
+  std::uint64_t clipped = 0;
+  std::vector<std::string> files;
+};
+struct KitOptions {
+  int baseNote = 36;            // chop n -> note baseNote + n
+  double bpm = 120.0;
+  int loops = 1;                // 1..16 repeats of the pattern in pattern.mid
+  bool overwrite = false;
+  std::string name = "chopfractal";
+};
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
 using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(const source::SourceInfo&)>;
@@ -116,8 +148,35 @@ class ProjectSession {
   Status deleteBranch(history::NodeId node, bool includeFavorites = false);
   Result<std::string> compareNodes(history::NodeId a, history::NodeId b) const;
 
+  // ---- Fractal Rhythm ----
+  // Replaces the chosen bars (empty = every unlocked bar) with a fractal groove; locked bars are refused when
+  // named explicitly and skipped otherwise. The bars become user-owned, so Mutate keeps them.
+  Status applyFractal(const fractal::Settings& settings, const std::vector<int>& bars = {}, const std::string& label = {});
+
+  // ---- Evolve ----
+  Status setEvolve(const evolve::Settings& settings);  // starts or stops the scheduler
+  const evolve::Settings& evolveSettings() const { return evolve_.settings(); }
+  bool evolveRunning() const { return evolve_.running(); }
+  // Call once per loop at the loop midpoint, from the message thread. Returns true when a step was applied.
+  Result<bool> evolveStep();
+  Status keepEvolved(const std::string& label = {});  // records the current pattern as a family-tree branch
+
+  // ---- Smart Setup ----
+  Result<SetupSuggestion> suggestSetup(double hostBpm = 0.0) const;  // never changes state
+  // Applies roles only to chops that have none (never overwrites); returns how many were assigned.
+  Result<int> acceptRoleSuggestions(const std::vector<insight::RoleSuggestion>& suggestions, double minConfidence = 0.0);
+  // Detects chops (merging with the user's markers) when the source has none, then suggests.
+  Result<SetupSuggestion> smartSetup(double hostBpm = 0.0);
+
+  // ---- export (message thread; never the audio thread) ----
+  Result<ExportReport> exportWav(const std::string& path, const ExportWavOptions& options) const;
+  // slice_NN_<role>.wav for every chop, pattern.mid replaying the pattern on those slices, and kit.txt.
+  Result<ExportReport> exportKit(const std::string& directory, const KitOptions& options) const;
+
   // ---- project state ----
   std::size_t embeddedSourceBytes() const;  // estimate shown before the user opts in to embedding
+  std::size_t embeddedSourceCap() const { return embeddedCap_; }
+  Status setEmbeddedSourceCap(std::size_t bytes);  // 1 .. kCodecCeilingBytes - 64 MiB headroom
   Result<std::vector<std::uint8_t>> saveState(bool embedSource) const;
   // All-or-nothing: on any error the session is left exactly as it was.
   Status loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver);
@@ -153,6 +212,8 @@ class ProjectSession {
   render::Mailbox<render::Playback>* mailbox_ = nullptr;
   std::shared_ptr<const render::Playback> playback_;
   codec::MigrationRegistry migrations_;
+  std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
+  evolve::Controller evolve_;
   std::vector<Notice> notices_;
 };
 

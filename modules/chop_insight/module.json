@@ -1,0 +1,43 @@
+{
+  "id": "chop_insight",
+  "name": "Chop insight",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::chop_insight",
+  "public_headers": [
+    "include/chopfractal/chop_insight/insight.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "ChopSnapshot, SampleRange, ChopId and Result"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe; run on a worker thread. Not real-time safe.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/chop_insight -B build/chop_insight && cmake --build build/chop_insight && ctest --test-dir build/chop_insight",
+  "summary": "Deterministic, model-free audio analysis for Smart Setup: per-chop spectral balance, noisiness and decay, rule-based role suggestions (kick, snare, hat, cymbal, other) with confidence and a plain-language reason, and loop length / tempo suggestions from a clip duration.",
+  "public_api": [
+    "`analyzeChop(SourceView, SampleRange)` -> `ChopFeatures`",
+    "`suggestRoles(SourceView, ChopSnapshot)` -> `RoleSuggestion{chop, role, confidence, reason}[]`",
+    "`suggestLoop(seconds, hostBpm)` -> `LoopSuggestion{beats, bars, bpm, confidence, note}[]`"
+  ],
+  "limits": [
+    "Mono mix-down analysis; chops shorter than 5 ms or silent are classified as `other` with low confidence; suggestions never change project state"
+  ],
+  "adapters": [
+    "Pass decoded planar sample pointers wrapped in `SourceView`; apply accepted suggestions in your own role-assignment UI."
+  ],
+  "adapter_notes": "Role names match the built-in role IDs of `chop_roles_grammar` but this module does not depend on it.",
+  "removal": "Delete the folder; callers lose Smart Setup suggestions only.",
+  "example": "examples/minimal.cpp"
+}

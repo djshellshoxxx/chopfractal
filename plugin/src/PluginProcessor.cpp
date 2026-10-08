@@ -90,6 +90,7 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   hostPlaying.store(tt.block.playing, std::memory_order_relaxed);
   usedFallbackTempo.store(tt.usedFallbackTempo, std::memory_order_relaxed);
   usedFallbackMeter.store(tt.usedFallbackMeter, std::memory_order_relaxed);
+  activeBpm.store(tt.block.bpm, std::memory_order_relaxed);
 
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed));
@@ -101,11 +102,25 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   if (tt.block.playing && tt.block.positionValid && quarters > 0.0) {
     const double end = tt.block.ppq + static_cast<double>(frames) * tt.block.bpm / (60.0 * sampleRate_.load(std::memory_order_relaxed));
     if (std::floor(tt.block.ppq / quarters) != std::floor(end / quarters)) boundaryFlag_.store(true, std::memory_order_relaxed);
+    if (std::floor((tt.block.ppq - 0.5 * quarters) / quarters) != std::floor((end - 0.5 * quarters) / quarters)) midpointFlag_.store(true, std::memory_order_relaxed);
+    double ph = std::fmod(tt.block.ppq, quarters);
+    if (ph < 0.0) ph += quarters;
+    playheadQuarters_.store(ph, std::memory_order_relaxed);
+  } else {
+    playheadQuarters_.store(-1.0, std::memory_order_relaxed);
   }
 }
 
-void ChopFractalProcessor::timerCallback() {
+void ChopFractalProcessor::pollAudioFlags() {
   if (boundaryFlag_.exchange(false)) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
+  if (midpointFlag_.exchange(false)) {
+    // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins.
+    withSession([this](cf::composition::ProjectSession& s) {
+      auto r = s.evolveStep();
+      if (!r.ok()) setStatusMessage("Evolve: " + juce::String(r.error().message));
+      else if (r.value()) setStatusMessage("Evolve stepped");
+    });
+  }
 }
 
 void ChopFractalProcessor::syncAudioInfo() {

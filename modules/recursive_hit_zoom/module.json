@@ -16,7 +16,7 @@
       "reason": "event model, chop snapshot, flatten(), RNG, byte codec"
     }
   ],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "Pure functions; thread-safe. Not real-time safe.",

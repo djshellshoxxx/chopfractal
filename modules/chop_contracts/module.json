@@ -19,7 +19,7 @@
     "include/chopfractal/chop_contracts/undo.hpp"
   ],
   "dependencies": [],
-  "license": "LicenseRef-ChopFractal-TBD",
+  "license": "LicenseRef-ChopFractal-Proprietary",
   "notices": [],
   "third_party": [],
   "threading": "Value types and pure functions; thread-safe for distinct data. flatten() and the codecs allocate, so they are not real-time safe.",
@@ -38,7 +38,8 @@
     "`ChopSnapshot`/`ChopInfo`: read-only chop list handed to pattern modules",
     "`Event`, `NestedPattern`, `FlatEvent`, `flattenInto()`, `validateEvent()`, `writeEvent()/readEvent()`",
     "`ICandidatePolicy`, `CandidateQuery`, `Decision`: how an optional rule provider guides generation",
-    "`SnapshotStack<T>`: bounded undo/redo"
+    "`SnapshotStack<T>`: bounded undo/redo",
+    "`EventFx` (filter, cutoff, resonance, glide, crush) on `Event`/`FlatEvent`; serialized only when active (flag bit 32)"
   ],
   "limits": [
     "512 flattened events per pattern, 8 voices, 8 bars, 256 chops, nesting depth 2 by default / 3 hard maximum (see `limits.hpp`)",
