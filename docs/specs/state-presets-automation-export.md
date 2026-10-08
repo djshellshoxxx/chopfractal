@@ -62,3 +62,8 @@ Direct MIDI export is out of scope for the initial VST3 effect because MIDI-outp
 - Old supported state versions migrate correctly; malformed state cannot crash or allocate unbounded memory.
 - Automation changes are smooth where needed and do not allocate or lock in the audio callback.
 - If WAV export ships, rendered output matches offline reference within a defined numeric tolerance and reports all failures.
+## Module boundary and migration
+
+Keep state serialization in `state_codec`, separate from host project callbacks and file dialogs. Each stateful module owns the serialization of its own versioned state. The host adapter composes module payloads under a top-level project version; it must not reach into module internals. Parameter IDs and host automation stay in `plugin_host_adapter`, while stable parameter definitions are documented independently from UI control IDs.
+
+**Transfer guide:** copy the codec and each state-owning module listed in its manifest; preserve each module's schema version and migration function; adapt the receiving host's save/restore callbacks to the top-level container; test missing sources, older state, malformed input, and round-trip equivalence. Never strip a dependency's license or attribution files. See `modules/state_codec/MIGRATION.md`.
