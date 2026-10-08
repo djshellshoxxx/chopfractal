@@ -1,0 +1,28 @@
+# ChopFractal specifications
+
+**Status:** Draft for review  
+**Product:** ChopFractal, a deterministic loop-chopping and pattern-generation VST3 audio effect  
+**Design basis:** Effect-first hybrid approved 2026-10-07
+
+## Document map
+
+| Spec | Defines |
+|---|---|
+| [Product and system architecture](product-and-architecture.md) | Audience, goals, scope, terminology, system boundaries |
+| [Source and chop editor](source-and-chop-editor.md) | Import, capture, analysis, marker editing, audition |
+| [Pattern generation engine](pattern-generation-engine.md) | Hierarchical rhythmic generation, constraints, determinism |
+| [Audio engine, effects, and routing](audio-engine-and-routing.md) | Playback voices, real-time rules, event transforms, signal flow |
+| [GUI and interaction](gui-and-interaction.md) | Layout, visualization, accessibility, interaction behavior |
+| [State, presets, automation, and export](state-presets-automation-export.md) | Project recall, parameter contract, presets, rendering/export |
+| [Testing and acceptance](testing-and-acceptance.md) | Functional, audio, host, performance, and release gates |
+| [Build plan](build-plan.md) | Ordered delivery stages, dependencies, and exit criteria |
+
+## Review rules
+
+These documents define intended behavior, not permission to implement it. Review the specs as a set and resolve open decisions before detailed engineering tasks or production code are started. The build plan is a product delivery roadmap; a code-level implementation plan should follow spec review.
+
+## Product premise
+
+ChopFractal transforms a user-provided or captured loop into new drum patterns by arranging detected or manually edited chops. A visible phrase-to-bar-to-beat-to-event hierarchy provides structured variation. A fixed seed reproduces the same pattern, and locks preserve chosen sections while other sections mutate.
+
+The product does not claim to be the first loop slicer, sequencer, or randomized beat tool. Its intended distinction is the combination of transparent hierarchical pattern variation, repeatable seeds, granular locks, and fast source-to-pattern workflow. Market context is documented in the product spec.
