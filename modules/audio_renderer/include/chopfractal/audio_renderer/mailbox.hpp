@@ -6,6 +6,8 @@
 //  * Reclamation: an object is freed only after the RT thread has acknowledged a strictly newer one, so
 //                 the RT thread can never touch freed memory. Freeing happens on the publishing thread.
 // The Mailbox must outlive the RT thread's last call to acquire().
+#include <cstddef>
+#include <utility>
 #include <atomic>
 #include <cstdint>
 #include <memory>

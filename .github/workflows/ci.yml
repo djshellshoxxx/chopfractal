@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 tools/check_modules.py
       - run: python3 tools/gen_module_docs.py --check
+      # Standard headers must be included directly, not inherited from one compiler's library internals.
+      - run: python3 tools/check_includes.py
 
   # Every module and the composition root, on each supported compiler/OS. The golden determinism hashes in
   # pattern_engine make a cross-platform divergence fail loudly here.

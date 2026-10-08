@@ -1,3 +1,4 @@
+#include <iterator>
 #include <chopfractal/chop_contracts/bytes.hpp>
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 

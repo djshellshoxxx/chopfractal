@@ -1,5 +1,8 @@
 #include "PluginEditor.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <initializer_list>
 #include <cmath>
 
 namespace cf = chopfractal;

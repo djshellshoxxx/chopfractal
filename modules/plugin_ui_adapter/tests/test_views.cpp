@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <chopfractal/plugin_ui_adapter/views.hpp>
 #include <cmath>
 #include <map>

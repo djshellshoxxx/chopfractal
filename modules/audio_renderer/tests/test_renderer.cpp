@@ -1,3 +1,4 @@
+#include <limits>
 #include <atomic>
 #include <chopfractal/audio_renderer/renderer.hpp>
 #include <chopfractal/chop_contracts/rng.hpp>
@@ -9,30 +10,37 @@
 #include "chop_test.hpp"
 
 // ---- allocation counter: process() must never allocate ----
+// The replaced operators are non-inlinable so optimizing compilers always see a matching operator new /
+// operator delete pair (GCC's -Wmismatched-new-delete otherwise flags free() inside an inlined delete).
+#if defined(_MSC_VER)
+#define CF_NOINLINE __declspec(noinline)
+#else
+#define CF_NOINLINE __attribute__((noinline))
+#endif
 namespace {
 std::atomic<bool> gCountAllocs{false};
 std::atomic<long> gAllocs{0};
 }  // namespace
-void* operator new(std::size_t n) {
+CF_NOINLINE void* operator new(std::size_t n) {
   if (gCountAllocs.load(std::memory_order_relaxed)) gAllocs.fetch_add(1, std::memory_order_relaxed);
   void* p = std::malloc(n ? n : 1);
   if (!p) throw std::bad_alloc();
   return p;
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void* operator new[](std::size_t n) { return operator new(n); }
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+CF_NOINLINE void operator delete(void* p) noexcept { std::free(p); }
+CF_NOINLINE void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+CF_NOINLINE void* operator new[](std::size_t n) { return operator new(n); }
+CF_NOINLINE void operator delete[](void* p) noexcept { std::free(p); }
+CF_NOINLINE void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 // Every form must be replaced together (std::stable_sort uses the nothrow form), or sanitizers report a
 // new/free mismatch.
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+CF_NOINLINE void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
   if (gCountAllocs.load(std::memory_order_relaxed)) gAllocs.fetch_add(1, std::memory_order_relaxed);
   return std::malloc(n ? n : 1);
 }
-void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return operator new(n, std::nothrow); }
-void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
+CF_NOINLINE void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return operator new(n, std::nothrow); }
+CF_NOINLINE void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
+CF_NOINLINE void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
 
 using namespace chopfractal;
 using namespace chopfractal::render;

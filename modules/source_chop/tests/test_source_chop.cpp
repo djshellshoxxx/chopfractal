@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <chopfractal/source_chop/analysis.hpp>
 #include <chopfractal/source_chop/chop_map.hpp>

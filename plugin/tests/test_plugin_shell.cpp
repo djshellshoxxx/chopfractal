@@ -1,5 +1,7 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+#include <algorithm>
+#include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <cmath>
 #include <cstdlib>

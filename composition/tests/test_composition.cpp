@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <algorithm>

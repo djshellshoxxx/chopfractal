@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chopfractal/chop_contracts/bytes.hpp>
 #include <chopfractal/pattern_engine/pattern.hpp>
 #include <chopfractal/pattern_engine/session.hpp>
