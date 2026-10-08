@@ -72,3 +72,10 @@ Markers are stored as integer sample positions relative to the canonical source 
 - Capture at the ceiling ends cleanly without buffer overrun or audio-thread allocation.
 - At least 128 chops can be represented and edited; product UI may recommend fewer for legibility.
 - Empty, invalid, and missing-file cases have explicit UI feedback and safe audio behavior.
+## Module boundary and migration
+
+Implement the source/chop model as `source_chop`, separated from file dialogs, waveform drawing, plugin capture, and host transport. It owns canonical source metadata, chop IDs, marker validation, and marker editing commands. A decoder interface accepts decoded mono/stereo sample views; the VST3 adapter handles WAV/AIFF decoding and file selection. Capture is a separate adapter that publishes a completed immutable source buffer.
+
+Public inputs and outputs use `chop_contracts` types. The module must not depend on JUCE or pattern generation. Pattern generation consumes the exported chop list through a read-only snapshot.
+
+**Transfer guide:** copy `modules/source_chop/` and `modules/chop_contracts/` (or provide the receiving project's compatible contracts adapter); add the `source_chop` CMake target; implement the decoder and optional capture adapter; run the module unit tests; then connect the host's waveform UI to its public commands. Preserve the source ID and marker coordinate rules. Read `modules/source_chop/MIGRATION.md` before adopting a newer module schema.
