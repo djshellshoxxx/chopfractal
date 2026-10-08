@@ -67,3 +67,8 @@ Source representation and deterministic pattern semantics must be stable before 
 - Automatic semantic source classification.
 - Standalone app, sample library, account system, cloud generation.
 - Networked or model-based “AI” generation.
+## Modular integration and transfer
+
+Follow [the modular integration and transfer plan](modular-integration-and-transfer-plan.md). Build and verify the contracts layer first, then source/pattern modules, then the three feature modules, then the audio renderer and adapters. Implement features behind public contracts and integrate them through the composition root. Keep each module's transfer guide current as its API changes.
+
+Integration is complete only after each module passes its own clean build and migration smoke test, and the full plugin passes transport, state, UI, and audio acceptance tests. The module dependency graph and the integration plan are version-controlled alongside the feature specs.
