@@ -84,3 +84,8 @@ Transform order is fixed and visible in the spec: source region → reverse/read
 - Seek, loop wrap, stop/start, and tempo change tests do not leave stuck voices.
 - Clicks are controlled at chop boundaries and when stealing voices.
 - Mono and stereo paths produce valid, expected output.
+## Module boundary and migration
+
+The playback and DSP implementation belongs in `audio_renderer`, independent of plugin buses and UI. It accepts immutable source buffers and flattened scheduled events defined by `chop_contracts`, then writes to caller-provided output spans/buffers. The VST3 adapter owns host bus negotiation, transport-to-scheduler conversion, host bypass, and parameter automation. No JUCE or VST SDK type crosses the renderer's public API.
+
+**Transfer guide:** copy `modules/audio_renderer/` and its declared contracts dependency; map the destination application's source and event types at one adapter boundary; configure sample rate and maximum block size; provide prepared immutable buffers; then run DSP, real-time-safety, and host timing tests. Do not copy plugin bus or editor code unless the target is also a JUCE VST3 plugin. See `modules/audio_renderer/MIGRATION.md`.
