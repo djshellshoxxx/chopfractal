@@ -87,3 +87,8 @@ The user can switch between a simple view (Generate, Mutate, Density, Variation,
 - Current play position, source chop, event transform, lock status, and clipping are distinguishable.
 - Resizing does not hide core controls or make timeline editing impossible.
 - UI refresh rate is decoupled from audio processing and does not affect audio determinism.
+## Module boundary and migration
+
+The UI is a replaceable adapter, not the owner of pattern or source state. It consumes immutable view snapshots and sends commands through public interfaces. Waveform drawing, timeline rendering, and hierarchy visualization may be separate UI components, but they must not depend on the audio callback or module-private data.
+
+**Transfer guide:** copy the desired component under `modules/ui_components/` with its documented public model interface; supply a view-model adapter for the destination application's source and pattern types; map actions to that application's command queue; verify keyboard, scaling, and accessibility behavior. JUCE-specific widgets remain in a JUCE adapter and are not a dependency of the core modules. See the UI migration notes in the component protocol.
