@@ -76,3 +76,30 @@ ChopFractal should be positioned around transparent hierarchical variation, repr
 - A user can preserve a useful bar while changing another bar in one action.
 - Project recall restores source linkage or embedded source, markers, pattern, seed, and parameter values.
 - The plugin produces no avoidable audio dropouts during the defined host test matrix.
+## Modular product architecture
+
+Every independently reusable capability is a module with a public contract, isolated implementation, standalone tests, and a migration guide. The plugin is an integration shell, not the owner of feature algorithms. No module may reach into another module's private source tree.
+
+### Proposed module map
+
+- `chop_contracts`: small product-neutral domain types and interfaces used across modules.
+- `source_chop`: source metadata, chop regions, marker operations, and analysis result model. Audio decoding and host capture are adapters.
+- `pattern_engine`: deterministic pattern model, generation, mutation, and flattening to scheduled events.
+- `recursive_hit_zoom`: creates nested child patterns for a selected chop event.
+- `chop_roles_grammar`: role tags and deterministic rule evaluation for pattern candidates.
+- `variation_history`: generic immutable snapshot branch graph; no audio or UI code.
+- `audio_renderer`: source playback voices and event transforms from the common contracts.
+- `plugin_host_adapter`: VST3 buses, transport, parameters, and lifecycle.
+- `plugin_ui_adapter`: editor controls and views connected to public commands and view data.
+
+Dependency direction is one-way: `chop_contracts` → source/pattern/feature modules → audio renderer and UI/host adapters → plugin composition root. Feature modules must not depend on JUCE, a DAW SDK, or GUI classes. Adapters may depend on JUCE. Cyclic dependencies are forbidden.
+
+### Reuse and migration requirements
+
+Each module ships as a self-contained folder with public headers, implementation, a CMake target, tests, a README, a module manifest, and `MIGRATION.md`. The migration guide lists exact dependencies, build commands, required adapters, state compatibility, licensing notices to retain, and a short integration example. The protocol sets the complete required contents.
+
+The first implementation should use portable standard C++ for behavior modules and isolate framework types at adapter boundaries. A module can be copied into another project without copying the VST3 shell, editor, sample assets, or unrelated feature code.
+
+### Scope and project success
+
+The goals and user workflow above remain product-level requirements. Module extraction must not create extra abstractions without a reuse or test benefit. Keep the shared contracts layer deliberately small and stable; feature-specific data belongs in the feature module that owns it.
