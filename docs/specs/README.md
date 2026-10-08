@@ -26,3 +26,15 @@ These documents define intended behavior, not permission to implement it. Review
 ChopFractal transforms a user-provided or captured loop into new drum patterns by arranging detected or manually edited chops. A visible phrase-to-bar-to-beat-to-event hierarchy provides structured variation. A fixed seed reproduces the same pattern, and locks preserve chosen sections while other sections mutate.
 
 The product does not claim to be the first loop slicer, sequencer, or randomized beat tool. Its intended distinction is the combination of transparent hierarchical pattern variation, repeatable seeds, granular locks, and fast source-to-pattern workflow. Market context is documented in the product spec.
+## Modular component protocol
+
+The [component portability protocol](component-portability-protocol.md) is normative for every independently reusable project element. It defines module boundaries, public contracts, dependency rules, test requirements, transfer packages, and the required migration guide for every module.
+
+## Feature creation specs
+
+- [Recursive Hit Zoom](recursive-hit-zoom.md)
+- [Chop Roles and Grammar](chop-roles-and-grammar.md)
+- [Variation Family Tree](variation-family-tree.md)
+- [Modular integration and transfer plan](modular-integration-and-transfer-plan.md)
+
+Each feature is specified as a portable component, with a separate plugin/UI adapter and explicit integration steps. The integration plan defines the order and contracts for assembling the modules.
