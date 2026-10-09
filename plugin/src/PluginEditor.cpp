@@ -115,6 +115,31 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   exportWav_.onClick = [this] { doExportWav(); };
   exportKit_.onClick = [this] { doExportKit(); };
 
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&storeA_, &recallA_, &storeB_, &recallB_, &setRole_}) {
+    addAndMakeVisible(*b);
+    b->setTitle(b->getButtonText());
+  }
+  for (std::size_t i = 0; i < 2; ++i) {
+    juce::Button* store = i == 0 ? &storeA_ : &storeB_;
+    juce::Button* recall = i == 0 ? &recallA_ : &recallB_;
+    store->onClick = [this, i] { run([=](cf::composition::ProjectSession& s) { return s.storeSnapshot(i); }); };
+    recall->onClick = [this, i] { run([=](cf::composition::ProjectSession& s) { return s.recallSnapshot(i); }); };
+  }
+  for (const auto& r : cf::roles::builtinRoles()) role_.addItem(juce::String(r), role_.getNumItems() + 1);
+  role_.setSelectedId(1);
+  role_.setTitle("Role for the selected hit's chop");
+  addAndMakeVisible(role_);
+  setRole_.onClick = [this] {
+    int idx = -1;
+    for (const auto& r : pattern_.rects)
+      if (r.id == selected_) idx = r.chopIndex;
+    const juce::String role = role_.getText();
+    run([=](cf::composition::ProjectSession& s) {
+      if (idx < 0 || idx >= static_cast<int>(s.chops()->chops.size())) return cf::Status{cf::makeError(cf::ErrorCode::InvalidArgument, "Select a hit first; its chop gets the role (used by the next Generate or Mutate).")};
+      return s.assignRole(s.chops()->chops[static_cast<std::size_t>(idx)].id, role.toStdString());
+    });
+  };
+
   motifLabel_.setJustificationType(juce::Justification::centredRight);
   addAndMakeVisible(motifLabel_);
   motif_.setText("x.xx");
@@ -236,6 +261,11 @@ void ChopFractalEditor::resized() {
   auto featC = area.removeFromTop(26);
   exportWav_.setBounds(featC.removeFromLeft(110).reduced(2));
   exportKit_.setBounds(featC.removeFromLeft(110).reduced(2));
+  featC.removeFromLeft(16);
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&storeA_, &recallA_, &storeB_, &recallB_}) b->setBounds(featC.removeFromLeft(78).reduced(2));
+  featC.removeFromLeft(16);
+  role_.setBounds(featC.removeFromLeft(110).reduced(2));
+  setRole_.setBounds(featC.removeFromLeft(80).reduced(2));
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
@@ -385,6 +415,48 @@ void ChopFractalEditor::doExportWav() {
                           proc_.setStatusMessage(status_);
                           repaint();
                         });
+}
+
+void ChopFractalEditor::historyMenu(cf::history::NodeId id) {
+  juce::PopupMenu m;
+  m.addItem(1, "Favorite / unfavorite");
+  m.addItem(2, "Rename...");
+  m.addItem(3, "Compare with active variation");
+  m.addItem(4, "Delete this branch");
+  m.showMenuAsync(juce::PopupMenu::Options(), [this, id](int choice) {
+    if (choice == 1) {
+      bool now = false;
+      proc_.withSession([&](cf::composition::ProjectSession& s) {
+        for (const auto& n : s.history().listAll())
+          if (n.id == id) now = n.favorite;
+      });
+      run([=](cf::composition::ProjectSession& s) { return s.setFavorite(id, !now); });
+    } else if (choice == 2) {
+      auto* w = new juce::AlertWindow("Rename variation", "Name:", juce::MessageBoxIconType::NoIcon);
+      w->addTextEditor("name", "");
+      w->addButton("OK", 1);
+      w->addButton("Cancel", 0);
+      w->enterModalState(true, juce::ModalCallbackFunction::create([this, w, id](int r) {
+                           if (r == 1) {
+                             const std::string name = w->getTextEditorContents("name").toStdString();
+                             run([=](cf::composition::ProjectSession& s) { return s.renameNode(id, name); });
+                           }
+                         }),
+                         true);
+    } else if (choice == 3) {
+      std::string text;
+      cf::Status st;
+      proc_.withSession([&](cf::composition::ProjectSession& s) {
+        auto r = s.compareNodes(s.history().active(), id);
+        if (r.ok()) text = r.value(); else st = r.error();
+      });
+      status_ = st.ok() ? juce::String(text) : juce::String(st.error().message);
+      proc_.setStatusMessage(status_);
+      repaint();
+    } else if (choice == 4) {
+      run([=](cf::composition::ProjectSession& s) { return s.deleteBranch(id); });
+    }
+  });
 }
 
 void ChopFractalEditor::doExportKit() {
@@ -648,6 +720,10 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
       const int y = historyArea_.getY() + 22 + n.depth * 30;
       if (std::abs(pt.x - x) < 11 && std::abs(pt.y - y) < 11) {
         const cf::history::NodeId id = n.id;
+        if (e.mods.isPopupMenu()) {
+          historyMenu(id);
+          break;
+        }
         const auto when = proc_.hostPlaying.load() ? cf::composition::Quantize::LoopBoundary : cf::composition::Quantize::Immediate;
         run([=](cf::composition::ProjectSession& s) { return s.activate(id, when); });
         break;
