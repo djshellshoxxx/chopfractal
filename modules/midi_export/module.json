@@ -1,0 +1,42 @@
+{
+  "id": "midi_export",
+  "name": "MIDI file export",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::midi_export",
+  "public_headers": [
+    "include/chopfractal/midi_export/midi.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Result/Status and the Ticks type (960 per quarter, matching the pattern grid)"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe (allocates).",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/midi_export -B build/midi_export && cmake --build build/midi_export && ctest --test-dir build/midi_export",
+  "summary": "Deterministic Standard MIDI File (format 0) encoder and decoder for note sequences with tempo and time-signature events. The tick grid equals the pattern engine's, so exported hits land on exact ticks.",
+  "public_api": [
+    "`encode(FileSpec)` -> .mid bytes; `decode(bytes)` -> FileSpec (for verification)",
+    "`FileSpec{bpm, timeSignature, trackName, notes[]}`, `Note{note, velocity, start, duration, channel}`"
+  ],
+  "limits": [
+    "960 ticks per quarter; notes 0..127, velocity 1..127, at most 65536 notes; same-pitch overlaps are clipped and zero-length results dropped"
+  ],
+  "adapters": [
+    "Your app maps its own events to `Note` values and writes the bytes to disk."
+  ],
+  "adapter_notes": "Pitch is just a number; map chops to notes however your sampler expects.",
+  "removal": "Delete the folder; callers lose MIDI export only.",
+  "example": "examples/minimal.cpp"
+}

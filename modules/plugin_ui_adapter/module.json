@@ -1,0 +1,60 @@
+{
+  "id": "plugin_ui_adapter",
+  "name": "Plugin UI adapter (portable part)",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::plugin_ui_adapter",
+  "public_headers": [
+    "include/chopfractal/plugin_ui_adapter/views.hpp",
+    "include/chopfractal/plugin_ui_adapter/orbit.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "chop and ID types"
+    },
+    {
+      "id": "source_chop",
+      "version": "^0.1",
+      "reason": "marker views read the chop map"
+    },
+    {
+      "id": "pattern_engine",
+      "version": "^0.1",
+      "reason": "pattern views read the pattern tree"
+    },
+    {
+      "id": "variation_history",
+      "version": "^0.1",
+      "reason": "the tree layout reads node summaries"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "UI thread only. Views are derived from immutable snapshots and never mutate project state.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/plugin_ui_adapter -B build/plugin_ui_adapter && cmake --build build/plugin_ui_adapter && ctest --test-dir build/plugin_ui_adapter",
+  "summary": "Headless view models for the editor so geometry, text, and layout are unit-testable without a GUI: waveform peaks, drift-free time-to-pixel mapping with zoom/scroll, marker and pattern views, breadcrumbs, accessible descriptions, and history-tree layout.",
+  "public_api": [
+    "`computePeaks()`, `ViewWindow`, `frameToX/xToFrame/zoomAround/scrolledBy`",
+    "`buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`",
+    "`layoutHistoryTree()`",
+    "`buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)"
+  ],
+  "limits": [
+    "Colour is never the only indicator: every rectangle carries a text description"
+  ],
+  "adapters": [
+    "The JUCE editor draws these structures and sends commands to the composition root."
+  ],
+  "adapter_notes": "Draw the view structs with your toolkit; route user actions to the composition root, not into the models.",
+  "removal": "Delete the folder; the editor loses its view logic only.",
+  "example": "examples/minimal.cpp"
+}

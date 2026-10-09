@@ -1,0 +1,47 @@
+{
+  "id": "source_chop",
+  "name": "Source and chop model",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::source_chop",
+  "public_headers": [
+    "include/chopfractal/source_chop/chop_map.hpp",
+    "include/chopfractal/source_chop/analysis.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "typed chop IDs, SampleRange, the ChopSnapshot export, Result, byte codec, and the undo stack"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "UI/worker thread only. Analysis functions are pure and meant for a worker thread. Not real-time safe.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/source_chop -B build/source_chop && cmake --build build/source_chop && ctest --test-dir build/source_chop",
+  "summary": "Source metadata, chop markers, marker editing with undo/redo, region and snapshot export, transient and even-grid analysis proposals, snapping helpers, and source identity hashing. Decoding, capture, file dialogs, and waveform drawing are adapters.",
+  "public_api": [
+    "`ChopMap::create(SourceInfo)`; `addMarker/moveMarker/deleteMarker/setEnabled/setTrim/setFades/setGroup/setLabel`",
+    "`regions()` and `snapshot()` (enabled chops, trims applied, immutable)",
+    "`preview()/applyProposal()` with `MergeMode::Replace|Merge`, one undo step",
+    "`detectTransients()`, `evenGrid()`, `snapToNearest()`, `snapToZeroCrossing()`, `computeSourceId()`",
+    "`serialize()` / `deserialize()` (schema 1)"
+  ],
+  "limits": [
+    "256 markers (spec requires at least 128), minimum region 64 frames by default, 60 s at 192 kHz maximum source",
+    "Markers are integer frames in the source's own sample rate, so they never drift when the host rate changes"
+  ],
+  "adapters": [
+    "WAV/AIFF decoding, input capture, and waveform drawing hand this module decoded sample views."
+  ],
+  "adapter_notes": "Wrap your decoded buffer in `SourceInfo` + sample pointers; keep the marker coordinate rule (integer source frames).",
+  "removal": "Remove `plugin_ui_adapter` and the composition root's source features first; pattern modules only need the `ChopSnapshot` contract.",
+  "example": "examples/minimal.cpp"
+}

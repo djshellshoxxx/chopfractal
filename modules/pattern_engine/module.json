@@ -1,0 +1,48 @@
+{
+  "id": "pattern_engine",
+  "name": "Pattern engine",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::pattern_engine",
+  "public_headers": [
+    "include/chopfractal/pattern_engine/pattern.hpp",
+    "include/chopfractal/pattern_engine/session.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "event model, flatten(), chop snapshot, policy interface, RNG, byte codec, time, undo stack"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "UI/worker thread only. Not real-time safe; the audio side consumes only the flattened events.",
+  "platforms": "Any C++17 compiler. Output is bit-identical across platforms (integer and exact-double arithmetic only; a golden hash test pins it).",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/pattern_engine -B build/pattern_engine && cmake --build build/pattern_engine && ctest --test-dir build/pattern_engine",
+  "summary": "Deterministic hierarchical pattern model (phrase, bar, beat, event), Generate and Mutate with locks, edit commands, flattening to a bounded event list, validation, versioned state, and an undo/redo + A/B session.",
+  "public_api": [
+    "`generate(chops, settings, policy)` and `mutate(pattern, chops, options, policy)`",
+    "`flatten(pattern, chops)`, `validate(pattern)`, `sanitize(pattern, chops)`",
+    "edits: `setLock`, `clearLocks`, `addEvent`, `deleteEvent`, `moveEvent`, `setEventChop`, `setEventTransform`, `duplicateBar`, `restoreSourceOrder`, `setChild`, `collapse`, `setChildActive`",
+    "`serialize()` / `deserialize()` (schema 1, engine version 1)",
+    "`PatternSession`: undo/redo and two A/B snapshot slots",
+    "`setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)"
+  ],
+  "limits": [
+    "Pattern length 1, 2, 4 or 8 bars; grids 1/1 to 1/32, straight or triplet",
+    "512 events per pattern (configurable down), retrigger 2-8, pitch range up to 24 semitones, micro-shift up to one eighth of a grid cell"
+  ],
+  "adapters": [
+    "Optionally supply an `ICandidatePolicy` (for example `chop_roles_grammar`)."
+  ],
+  "adapter_notes": "Pass chop snapshots in, consume `flatten()` output in your scheduler; choose the seed source yourself. Engine version is stored with every pattern so algorithm changes never silently rewrite old patterns.",
+  "removal": "Remove the composition root and `plugin_ui_adapter` first.",
+  "example": "examples/minimal.cpp"
+}

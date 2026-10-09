@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Portability protocol: manifests, dependency graph, includes, forbidden host/GUI headers, current docs.
+  portability:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/check_modules.py
+      - run: python3 tools/gen_module_docs.py --check
+      # Standard headers must be included directly, not inherited from one compiler's library internals.
+      - run: python3 tools/check_includes.py
+
+  # Every module and the composition root, on each supported compiler/OS. The golden determinism hashes in
+  # pattern_engine make a cross-platform divergence fail loudly here.
+  build-test:
+    name: build-test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-gcc, os: ubuntu-24.04, cc: gcc, cxx: g++, werror: "ON"}
+          - {name: linux-clang, os: ubuntu-24.04, cc: clang, cxx: clang++, werror: "ON"}
+          - {name: macos-arm64, os: macos-14, cc: clang, cxx: clang++, werror: "ON"}
+          # MSVC /W4 has not been exercised yet, so warnings are reported but not fatal there.
+          - {name: windows-msvc, os: windows-2022, cc: cl, cxx: cl, werror: "OFF"}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHOPFRACTAL_WARNINGS_AS_ERRORS=${{ matrix.werror }}
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: AddressSanitizer + UBSan over everything
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          cmake -S . -B build-asan -G Ninja -DCHOPFRACTAL_SANITIZE=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build-asan
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-asan --output-on-failure
+      - name: ThreadSanitizer on the real-time renderer and its lock-free mailbox
+        run: |
+          cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan --target test_audio_renderer
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
+
+  # Each module copied with only its declared dependencies into an empty project must build and pass.
+  transfer-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: tools/smoke_transfer.sh
+
+  # The JUCE VST3 shell: builds the plugin, runs the headless shell tests (including the editor under a
+  # virtual display), and runs Steinberg's official validator on the bundle.
+  plugin-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libgl1-mesa-dev libfreetype-dev libfontconfig1-dev libgtk-3-dev libgtkmm-3.0-dev
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/chopfractal-vst3sdk
+            build-plugin/_deps
+          key: plugin-deps-${{ hashFiles('plugin/CMakeLists.txt', 'tools/validate_vst3.sh') }}
+      - name: Build plugin and shell tests
+        run: |
+          cmake -S . -B build-plugin -G Ninja -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-plugin --target ChopFractal_VST3 ChopFractalShellTests
+      - name: Shell tests (headless, then with a virtual display for the editor)
+        run: |
+          env -u DISPLAY ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+          xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+      - name: VST3 validator
+        run: tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3

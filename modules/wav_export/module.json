@@ -1,0 +1,43 @@
+{
+  "id": "wav_export",
+  "name": "WAV export",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::wav_export",
+  "public_headers": [
+    "include/chopfractal/wav_export/wav.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Result/Status and the deterministic RNG used for dither"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe (allocates).",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/wav_export -B build/wav_export && cmake --build build/wav_export && ctest --test-dir build/wav_export",
+  "summary": "Deterministic WAV encoder and decoder (16-bit, 24-bit PCM and 32-bit float, mono or stereo) with optional peak normalization, seeded TPDF dither, clip reporting, atomic file writing and safe file-name sanitizing. Pure byte transforms: no audio engine or host types.",
+  "public_api": [
+    "`encode(planar, Options, EncodeReport*)` -> WAV bytes; `decode(bytes)` -> planar floats",
+    "`writeFileAtomic(path, bytes, overwrite)` (temp file then rename; never replaces a file unless asked)",
+    "`sanitizeFileName(text)` -> [a-z0-9_-] name"
+  ],
+  "limits": [
+    "1 or 2 channels, 8 kHz to 384 kHz, at most 4 GiB minus headers (RIFF limit); non-finite samples are written as silence"
+  ],
+  "adapters": [
+    "Your app picks the destination path and confirms overwrites; this module only produces bytes and writes them atomically."
+  ],
+  "adapter_notes": "Pass planar float buffers (one vector per channel).",
+  "removal": "Delete the folder; callers lose export only.",
+  "example": "examples/minimal.cpp"
+}

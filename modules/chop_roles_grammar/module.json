@@ -1,0 +1,46 @@
+{
+  "id": "chop_roles_grammar",
+  "name": "Chop roles and grammar",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::chop_roles_grammar",
+  "public_headers": [
+    "include/chopfractal/chop_roles_grammar/grammar.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "candidate-policy interface, chop IDs, byte codec"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Const use is thread-safe; build a new policy per generation. Not real-time safe.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/chop_roles_grammar -B build/chop_roles_grammar && cmake --build build/chop_roles_grammar && ctest --test-dir build/chop_roles_grammar",
+  "summary": "User-defined chop roles and a small serializable rule grammar (forbid, limit repeats, limit count, prefer, require, preserve). Plugs into pattern generation through `ICandidatePolicy` and explains every decision with a trace.",
+  "public_api": [
+    "`RoleMap::assignRole`; built-in role IDs plus custom IDs (`[a-z0-9_-]`, up to 32 characters)",
+    "`validateRules(ruleSet)` -> errors and conflict warnings",
+    "`GrammarPolicy::evaluate/isPreserved/required` and `explain(decision)`",
+    "guided `templates::*` rules (preserve first kick, avoid adjacent repeats, require accent in final beat, ...)",
+    "`serialize()` / `deserialize()` (schema 1)"
+  ],
+  "limits": [
+    "64 rules, 256 role assignments",
+    "Conflicts resolve deterministically: priority high to low, then rule id; a prohibition yields only to a strictly higher-priority matching requirement"
+  ],
+  "adapters": [
+    "Role editing UI and rule panel; the composition root builds the policy and injects it into generation."
+  ],
+  "adapter_notes": "Map your own role vocabulary to stable role IDs and keep unknown custom IDs.",
+  "removal": "Delete the folder; generation runs without a policy.",
+  "example": "examples/minimal.cpp"
+}
