@@ -240,6 +240,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   info.path = std::move(path);
   auto map = source::ChopMap::create(std::move(info));
   if (!map.ok()) return map.error();  // nothing has changed yet
+  evolve_.stop();  // there is no pattern for a new source
   sourceData_ = std::move(data);
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
@@ -723,9 +724,10 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   }
 
   std::optional<evolve::Settings> newEvolve;
+  bool loadedFlag = false;
   if (hasSession && sessionBytes.size() >= 2 + 1) {
     bytes::Reader sr(sessionBytes.data(), sessionBytes.size());
-    sr.boolean();  // embedded flag
+    loadedFlag = sr.boolean();  // embedded flag
     if (sr.u8() == 1) {
       evolve::Settings es;
       es.everyLoops = sr.i32();
@@ -739,6 +741,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   }
 
   // ---- commit ----
+  loadedEmbedded_ = loadedFlag;
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings
   } else {

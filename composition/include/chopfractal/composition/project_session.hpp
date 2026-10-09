@@ -176,6 +176,7 @@ class ProjectSession {
   // ---- project state ----
   std::size_t embeddedSourceBytes() const;  // estimate shown before the user opts in to embedding
   std::size_t embeddedSourceCap() const { return embeddedCap_; }
+  bool wasEmbedded() const { return loadedEmbedded_; }  // the last loaded project carried its audio
   Status setEmbeddedSourceCap(std::size_t bytes);  // 1 .. kCodecCeilingBytes - 64 MiB headroom
   Result<std::vector<std::uint8_t>> saveState(bool embedSource) const;
   // All-or-nothing: on any error the session is left exactly as it was.
@@ -214,6 +215,7 @@ class ProjectSession {
   codec::MigrationRegistry migrations_;
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
+  bool loadedEmbedded_ = false;
   std::vector<Notice> notices_;
 };
 

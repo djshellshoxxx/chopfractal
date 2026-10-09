@@ -65,7 +65,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   ParamSlider fxIntensity_;
 
   // Feature controls (not host parameters: they act on the project).
-  juce::TextButton smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
+  juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
   juce::ComboBox role_;
@@ -73,6 +73,12 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   juce::ToggleButton evolve_{"Evolve"};
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;
+  juce::ComboBox detectMode_;
+  const void* peaksSource_ = nullptr;
+  int peaksWidth_ = 0;
+  bool lastPlaying_ = false;
+  chopfractal::evolve::Settings pushedEvolve_;  // the settings the editor last sent; a different session value (a restored project) is shown
+  bool sourceMissing_ = false;
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
   chopfractal::composition::SetupSuggestion setup_;

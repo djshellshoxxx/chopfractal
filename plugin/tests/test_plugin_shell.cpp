@@ -328,6 +328,29 @@ CHOP_TEST(effect_parameters_reach_generation_and_the_state_round_trips) {
   CHECK(q.currentParams().get(cf::host::kAllowFilter) == 1.0);
 }
 
+CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  p.embedSource = true;
+  p.manualBpm = 97.5;
+  juce::MemoryBlock blob;
+  p.getStateInformation(blob);
+  ChopFractalProcessor q;
+  q.setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+  CHECK(q.embedSource.load());                                  // a re-save keeps the audio inside the project
+  CHECK_NEAR(q.manualBpm.load(), 97.5, 1e-9);
+  juce::MemoryBlock again;
+  q.getStateInformation(again);
+  CHECK(again.getSize() > 90000);                               // the second save still embeds the audio
+  p.embedSource = false;
+  juce::MemoryBlock ref;
+  p.getStateInformation(ref);
+  ChopFractalProcessor r;
+  r.setStateInformation(ref.getData(), static_cast<int>(ref.getSize()));
+  CHECK(!r.embedSource.load());
+}
+
 CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists) {
   if (!std::getenv("DISPLAY")) return;  // CI without a display skips the GUI smoke test
   ChopFractalProcessor p;
@@ -410,10 +433,11 @@ CHOP_TEST(editor_buttons_drive_the_session) {
   CHECK(f != m);
   click("Recall A");
   CHECK(patternBytes(p) == m);
-  click("Lock Bar");
-  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.pattern()->bars[0].locked); });
-  click("Lock Bar");
-  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(!s.pattern()->bars[0].locked); });
+  click("Lock Bar");  // nothing selected: refused, no bar is locked
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& b : s.pattern()->bars) CHECK(!b.locked);
+  });
+  CHECK(p.statusMessage().contains("Select a hit"));
   click("Keep");
   click("Smart Setup");
   if (auto* e = dynamic_cast<juce::Button*>(findButton(*ed, "Evolve"))) {

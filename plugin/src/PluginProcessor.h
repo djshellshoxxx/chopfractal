@@ -50,7 +50,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   }
   chopfractal::host::ParamValues currentParams() const;
   void pollAudioFlags();  // acts on loop-boundary / loop-midpoint events from the audio thread (also called by tests)
-  void loadFileAsync(const juce::File& file);                 // decodes on a worker thread, then loads on the message thread
+  void loadFileAsync(const juce::File& file, bool relink = false);  // relink: re-attach the audio of a project whose file went missing                 // decodes on a worker thread, then loads on the message thread
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);

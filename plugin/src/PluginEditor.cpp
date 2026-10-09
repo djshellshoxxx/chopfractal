@@ -23,8 +23,31 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   }
   load_.onClick = [this] { chooseFile(); };
   detect_.onClick = [this] {
-    run([](cf::composition::ProjectSession& s) { return s.applyChops(cf::composition::DetectOptions{}); });
+    const int mode = detectMode_.getSelectedId();
+    run([=](cf::composition::ProjectSession& s) {
+      cf::composition::DetectOptions d;
+      d.merge = (mode == 2) ? cf::source::MergeMode::Merge : cf::source::MergeMode::Replace;  // Merge keeps the markers you placed
+      if (mode >= 3) {
+        d.mode = cf::composition::DetectMode::EvenGrid;
+        d.grid.division = mode == 3 ? 8 : 16;
+        d.grid.loopBeats = 4.0 * (s.pattern() ? s.pattern()->settings.bars : 1);
+      }
+      return s.applyChops(d);
+    });
   };
+  detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
+  detectMode_.setSelectedId(1);
+  detectMode_.setTitle("Detection mode");
+  addAndMakeVisible(detectMode_);
+  locate_.onClick = [this] {
+    chooser_ = std::make_unique<juce::FileChooser>("Locate the project's original audio file", juce::File(), "*.wav;*.aif;*.aiff");
+    chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this](const juce::FileChooser& fc) {
+      const juce::File f = fc.getResult();
+      if (f.existsAsFile()) proc_.loadFileAsync(f, true);
+    });
+  };
+  addAndMakeVisible(locate_);
+  locate_.setEnabled(false);
   generate_.onClick = [this] { doGenerate(); };
   mutate_.onClick = [this] { doMutate(); };
   undo_.onClick = [this] {
@@ -36,7 +59,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   zoom_.onClick = [this] {
     const cf::EventId id = selected_;
     const std::uint64_t seed = currentSeed() + 1;
-    setSeed(seed);
+    if (id.valid()) setSeed(seed);
     run([=](cf::composition::ProjectSession& s) {
       if (!id.valid()) return cf::Status{cf::makeError(cf::ErrorCode::InvalidArgument, "Select a hit in the pattern first.")};
       cf::zoom::Settings zs;
@@ -261,6 +284,8 @@ void ChopFractalEditor::resized() {
   auto featC = area.removeFromTop(26);
   exportWav_.setBounds(featC.removeFromLeft(110).reduced(2));
   exportKit_.setBounds(featC.removeFromLeft(110).reduced(2));
+  locate_.setBounds(featC.removeFromLeft(110).reduced(2));
+  detectMode_.setBounds(featC.removeFromLeft(190).reduced(2));
   featC.removeFromLeft(16);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&storeA_, &recallA_, &storeB_, &recallB_}) b->setBounds(featC.removeFromLeft(78).reduced(2));
   featC.removeFromLeft(16);
@@ -317,7 +342,9 @@ void ChopFractalEditor::doGenerate() {
 void ChopFractalEditor::doMutate() {
   const cf::host::ParamValues params = proc_.currentParams();
   const std::uint64_t seed = currentSeed() + 1;
-  setSeed(seed);
+  bool hasPattern = false;
+  proc_.withSession([&](cf::composition::ProjectSession& s) { hasPattern = s.pattern() != nullptr; });
+  if (hasPattern) setSeed(seed);  // a refused Mutate does not consume a seed
   run([=](cf::composition::ProjectSession& session) {
     if (!session.pattern()) return cf::Status{cf::makeError(cf::ErrorCode::InvalidArgument, "Generate a pattern first.")};
     cf::pattern::Settings live = session.pattern()->settings;  // length, meter and grid stay; the automatable controls refresh
@@ -330,6 +357,8 @@ void ChopFractalEditor::doMutate() {
     live.allowGlide = params.get(cf::host::kAllowGlide) >= 0.5;
     live.allowCrunch = params.get(cf::host::kAllowCrunch) >= 0.5;
     live.fxIntensity = params.get(cf::host::kFxIntensity);
+    const double v = params.get(cf::host::kVariationAmount);
+    live.variation = {v, v, v, v};
     cf::pattern::MutateOptions opt;
     opt.seed = seed;
     opt.amount = cf::composition::mutateAmountFromParams(params);
@@ -373,12 +402,14 @@ void ChopFractalEditor::doFractal() {
 }
 
 void ChopFractalEditor::doEvolve() {
-  cf::evolve::Settings es;
+  cf::evolve::Settings es = pushedEvolve_;  // keeps ramp and ceiling from a restored project
+  proc_.withSession([&](cf::composition::ProjectSession& s) { es = s.evolveSettings(); });
   es.enabled = evolve_.getToggleState();
   static const int kEvery[] = {1, 2, 4, 8, 16};
   es.everyLoops = kEvery[std::max(0, std::min(4, every_.getSelectedId() - 1))];
   es.amount = evolveAmount_.getValue();
-  es.startSeed = currentSeed();
+  if (!es.enabled || !pushedEvolve_.enabled) es.startSeed = currentSeed();
+  pushedEvolve_ = es;
   run([=](cf::composition::ProjectSession& s) { return s.setEvolve(es); });
   if (es.enabled) {
     bool running = false;
@@ -393,7 +424,8 @@ void ChopFractalEditor::doExportWav() {
                         [this](const juce::FileChooser& fc) {
                           juce::File f = fc.getResult();
                           if (f == juce::File()) return;
-                          f = f.withFileExtension("wav");
+                          const bool extensionAdded = f.getFileExtension().isEmpty();
+                          if (extensionAdded) f = f.withFileExtension("wav");
                           cf::composition::ExportWavOptions o;
                           static const cf::wav::Format kFmt[] = {cf::wav::Format::Pcm16, cf::wav::Format::Pcm24, cf::wav::Format::Float32};
                           static const int kRate[] = {44100, 48000, 88200, 96000};
@@ -402,7 +434,7 @@ void ChopFractalEditor::doExportWav() {
                           o.wav.sampleRate = kRate[std::max(0, std::min(3, exportRate_.getSelectedId() - 1))];
                           o.loops = kLoops[std::max(0, std::min(4, exportLoops_.getSelectedId() - 1))];
                           o.bpm = proc_.activeBpm.load();
-                          o.overwrite = true;  // the native dialog already asked
+                          o.overwrite = !extensionAdded;  // the native dialog asked about the name as typed; a name we extended is checked again
                           const std::string path = f.getFullPathName().toStdString();
                           cf::Status status;
                           cf::composition::ExportReport rep;
@@ -423,38 +455,42 @@ void ChopFractalEditor::historyMenu(cf::history::NodeId id) {
   m.addItem(2, "Rename...");
   m.addItem(3, "Compare with active variation");
   m.addItem(4, "Delete this branch");
-  m.showMenuAsync(juce::PopupMenu::Options(), [this, id](int choice) {
+  juce::Component::SafePointer<ChopFractalEditor> self(this);
+  m.showMenuAsync(juce::PopupMenu::Options(), [self, id](int choice) {
+    if (self == nullptr) return;
+    auto* const ed = self.getComponent();
     if (choice == 1) {
       bool now = false;
-      proc_.withSession([&](cf::composition::ProjectSession& s) {
+      ed->proc_.withSession([&](cf::composition::ProjectSession& s) {
         for (const auto& n : s.history().listAll())
           if (n.id == id) now = n.favorite;
       });
-      run([=](cf::composition::ProjectSession& s) { return s.setFavorite(id, !now); });
+      ed->run([=](cf::composition::ProjectSession& s) { return s.setFavorite(id, !now); });
     } else if (choice == 2) {
       auto* w = new juce::AlertWindow("Rename variation", "Name:", juce::MessageBoxIconType::NoIcon);
       w->addTextEditor("name", "");
       w->addButton("OK", 1);
       w->addButton("Cancel", 0);
-      w->enterModalState(true, juce::ModalCallbackFunction::create([this, w, id](int r) {
-                           if (r == 1) {
+      w->enterModalState(true, juce::ModalCallbackFunction::create([self, w, id](int r) {
+                           if (r == 1 && self != nullptr) {
                              const std::string name = w->getTextEditorContents("name").toStdString();
-                             run([=](cf::composition::ProjectSession& s) { return s.renameNode(id, name); });
+                             if (name.empty()) return;
+                             self->run([=](cf::composition::ProjectSession& s) { return s.renameNode(id, name); });
                            }
                          }),
                          true);
     } else if (choice == 3) {
       std::string text;
       cf::Status st;
-      proc_.withSession([&](cf::composition::ProjectSession& s) {
+      ed->proc_.withSession([&](cf::composition::ProjectSession& s) {
         auto r = s.compareNodes(s.history().active(), id);
         if (r.ok()) text = r.value(); else st = r.error();
       });
-      status_ = st.ok() ? juce::String(text) : juce::String(st.error().message);
-      proc_.setStatusMessage(status_);
-      repaint();
+      ed->status_ = st.ok() ? juce::String(text) : juce::String(st.error().message);
+      ed->proc_.setStatusMessage(ed->status_);
+      ed->repaint();
     } else if (choice == 4) {
-      run([=](cf::composition::ProjectSession& s) { return s.deleteBranch(id); });
+      ed->run([=](cf::composition::ProjectSession& s) { return s.deleteBranch(id); });
     }
   });
 }
@@ -486,6 +522,14 @@ int ChopFractalEditor::selectedBar() const {
 }
 
 void ChopFractalEditor::doToggleLock() {
+  bool found = false;
+  for (const auto& r : pattern_.rects) found = found || r.id == selected_;
+  if (!found) {
+    status_ = "Select a hit first; Lock Bar locks the bar that hit is in.";
+    proc_.setStatusMessage(status_);
+    repaint();
+    return;
+  }
   const int bar = selectedBar();
   run([=](cf::composition::ProjectSession& s) {
     return s.edit([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) {
@@ -497,10 +541,23 @@ void ChopFractalEditor::doToggleLock() {
 
 void ChopFractalEditor::refresh(bool force) {
   juce::String sig;
+  bool rebuilt = false;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<int>(s.history().size()) << "|"
         << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1);
+    sourceMissing_ = s.sourceMissing();
+    const bool running = s.evolveRunning();
+    if (evolve_.getToggleState() != running) evolve_.setToggleState(running, juce::dontSendNotification);
+    const auto& se = s.evolveSettings();
+    if (!running && (se.everyLoops != pushedEvolve_.everyLoops || se.amount != pushedEvolve_.amount || se.startSeed != pushedEvolve_.startSeed)) {
+      pushedEvolve_ = se;
+      static const int kEvery[] = {1, 2, 4, 8, 16};
+      for (int i = 0; i < 5; ++i)
+        if (kEvery[i] == s.evolveSettings().everyLoops && every_.getSelectedId() != i + 1) every_.setSelectedId(i + 1, juce::dontSendNotification);
+      evolveAmount_.setValue(s.evolveSettings().amount, juce::dontSendNotification);
+    }
     if (!force && sig == signature_) return;
+    rebuilt = true;
     signature_ = sig;
     sourceFrames_ = 0;
     markers_.clear();
@@ -510,7 +567,9 @@ void ChopFractalEditor::refresh(bool force) {
     tree_.clear();
     const auto pb = s.playback();
     if (s.chopMap()) sourceFrames_ = s.chopMap()->info().frames;
-    if (pb && pb->source && peaks_.min.empty()) {
+    if (pb && pb->source && (peaks_.min.empty() || peaksSource_ != pb->source.get() || peaksWidth_ != waveArea_.getWidth())) {
+      peaksSource_ = pb->source.get();
+      peaksWidth_ = waveArea_.getWidth();
       const auto ptrs = std::vector<const float*>{pb->source->channel(0), pb->source->channel(pb->source->channels - 1)};
       peaks_ = cf::ui::computePeaks(ptrs.data(), pb->source->channels, pb->source->frames, {0, pb->source->frames}, std::max(1, waveArea_.getWidth()));
     }
@@ -524,9 +583,15 @@ void ChopFractalEditor::refresh(bool force) {
       }
     }
     tree_ = cf::ui::layoutHistoryTree(s.history().listAll(), s.history().active());
+    bool stillThere = false;
+    for (const auto& r : pattern_.rects) stillThere = stillThere || r.id == selected_;
+    if (!stillThere) selected_ = cf::EventId{};
   });
-  if (force || sig != signature_) repaint();
-  else repaint();
+  locate_.setEnabled(sourceMissing_);
+  if (embed_.getToggleState() != proc_.embedSource.load()) embed_.setToggleState(proc_.embedSource.load(), juce::dontSendNotification);
+  const bool playing = proc_.playheadQuarters() >= 0.0;
+  if (force || rebuilt || playing || lastPlaying_) repaint();
+  lastPlaying_ = playing;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -550,7 +615,9 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
       g.drawVerticalLine(waveArea_.getX() + i, cy - peaks_.max[static_cast<std::size_t>(i)] * h, cy - peaks_.min[static_cast<std::size_t>(i)] * h);
   } else {
     g.setColour(juce::Colours::grey);
-    g.drawText("Load a loop (WAV or AIFF). Until a pattern is generated, the input passes through unchanged.", waveArea_, juce::Justification::centred);
+    g.drawText(sourceMissing_ ? "The project's audio file was not found. Press Locate Source (your markers, pattern and history are kept)."
+                              : "Load a loop (WAV or AIFF). Until a pattern is generated, the input passes through unchanged.",
+               waveArea_, juce::Justification::centred);
   }
   int markerNumber = 0;
   for (const auto& m : markers_) {
@@ -603,6 +670,8 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   }
 
   // Variation family tree.
+  g.saveState();
+  g.reduceClipRegion(historyArea_);
   g.setColour(juce::Colour(0xff20252d));
   g.fillRect(historyArea_);
   for (const auto& n : tree_) {
@@ -622,6 +691,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     g.setColour(juce::Colours::grey);
     g.drawText("Each Generate, Mutate and Zoom is saved here as a branch you can return to.", historyArea_, juce::Justification::centred);
   }
+  g.restoreState();
 
   // Orbit View: one ring per chop (ring 1 outermost, numbered), the playhead sweeping clockwise from 12 o'clock.
   g.setColour(juce::Colour(0xff20252d));
@@ -668,7 +738,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   }
 
   // Status line: user-visible messages and host-fallback hints.
-  juce::String line = status_.isNotEmpty() ? status_ : proc_.statusMessage();
+  juce::String line = proc_.statusMessage();
   if (proc_.usedFallbackTempo.load()) line << (line.isEmpty() ? "" : "   |   ") << "No host tempo: using " << juce::String(proc_.manualBpm.load(), 1) << " BPM";
   if (proc_.usedFallbackMeter.load()) line << "   |   Assuming 4/4";
   g.setColour(juce::Colours::white.withAlpha(0.8f));
