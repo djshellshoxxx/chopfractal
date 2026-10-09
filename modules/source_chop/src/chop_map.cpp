@@ -237,6 +237,7 @@ Result<ChopMap> ChopMap::deserialize(const std::uint8_t* data, std::size_t size)
   if (!map.ok()) return makeError(ErrorCode::Corrupt, "source state is invalid: " + map.error().message);
   State s;
   s.nextId = r.u64();
+  if (s.nextId == 0) return makeError(ErrorCode::Corrupt, "the id counter is invalid");
   const std::uint32_t n = r.count(static_cast<std::uint32_t>(limits::kMaxChops), kMinMarkerBytes);
   if (!r.ok()) return makeError(ErrorCode::Corrupt, "marker count is invalid");
   for (std::uint32_t i = 0; i < n; ++i) {
@@ -254,6 +255,8 @@ Result<ChopMap> ChopMap::deserialize(const std::uint8_t* data, std::size_t size)
     m.fadeOut = r.u32();
     if (!r.ok()) return makeError(ErrorCode::Corrupt, "marker data is truncated");
     if (m.id.value >= s.nextId) return makeError(ErrorCode::Corrupt, "marker id exceeds the id counter");
+    for (const Marker& prev : s.markers)
+      if (prev.id == m.id) return makeError(ErrorCode::Corrupt, "duplicate marker id");
     s.markers.push_back(std::move(m));
   }
   if (r.remaining() != 0) return makeError(ErrorCode::Corrupt, "trailing bytes in source state");

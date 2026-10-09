@@ -156,21 +156,29 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
       if (!running) return bad("data byte without status");
       st = running;
     }
+    if (st >= 0xF0 && st != 0xF0 && st != 0xF7 && st != 0xFF) return bad("unsupported system message");
     if (st == 0xFF) {
+      running = 0;
       if (p + 1 > endp) return bad("truncated meta event");
       const std::uint8_t type = d[p++];
       std::uint32_t ml;
       if (!readVlq(ml) || ml > endp - p) return bad("truncated meta event");
       if (type == 0x2F) ended = true;
       else if (type == 0x03) spec.trackName.assign(reinterpret_cast<const char*>(d + p), ml);
-      else if (type == 0x51 && ml == 3) spec.bpm = 60000000.0 / static_cast<double>((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
+      else if (type == 0x51 && ml == 3) {
+        const std::uint32_t mpq = static_cast<std::uint32_t>((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
+        if (mpq == 0) return bad("invalid tempo");
+        spec.bpm = 60000000.0 / static_cast<double>(mpq);
+        if (!(spec.bpm >= 20.0 && spec.bpm <= 999.0)) return bad("tempo out of range");
+      }
       else if (type == 0x58 && ml >= 2) {
-        if (d[p + 1] > 5) return bad("invalid time signature");
+        if (d[p + 1] > 5 || d[p] < 1 || d[p] > 32) return bad("invalid time signature");
         spec.numerator = d[p];
         spec.denominator = 1 << d[p + 1];
       }
       p += ml;
     } else if (st == 0xF0 || st == 0xF7) {
+      running = 0;
       std::uint32_t sl;
       if (!readVlq(sl) || sl > endp - p) return bad("truncated sysex");
       p += sl;
@@ -187,6 +195,7 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
       } else if (kind == 0x80 || kind == 0x90) {
         auto it = open.find({ch, a});
         if (it == open.end()) return bad("note ended without a start");
+        if (now <= it->second.first) return bad("zero-length note");
         spec.notes.push_back({a, it->second.second, it->second.first, now - it->second.first, ch});
         open.erase(it);
       }

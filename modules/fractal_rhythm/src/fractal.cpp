@@ -127,7 +127,7 @@ std::size_t soundingHits(const Settings& s) {
 
 Status validate(const Context& ctx, const Settings& s) {
   if (!ctx.chops || ctx.chops->chops.empty()) return makeError(ErrorCode::InvalidArgument, "there are no chops to play");
-  if (ctx.barTicks <= 0 || ctx.beatsPerBar < 1 || ctx.bar < 0 || ctx.barCount < 1 || ctx.bar >= ctx.barCount)
+  if (ctx.barTicks <= 0 || ctx.beatsPerBar < 1 || ctx.beatsPerBar > ctx.barTicks || ctx.bar < 0 || ctx.barCount < 1 || ctx.bar >= ctx.barCount)
     return makeError(ErrorCode::InvalidArgument, "invalid bar context");
   const int len = static_cast<int>(s.motif.size());
   if (len < kMinMotif || len > kMaxMotif) return makeError(ErrorCode::OutOfRange, "the motif must have 2 to 8 cells", len);

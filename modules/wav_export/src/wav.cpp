@@ -5,7 +5,10 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <atomic>
 #include <fstream>
+#include <functional>
+#include <thread>
 
 namespace chopfractal::wav {
 namespace {
@@ -88,10 +91,10 @@ Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& 
           std::int64_t q = std::llround(v);
           if (q > 32767) {
             q = 32767;
-            ++clipped;
+            if (x > 1.0f) ++clipped;  // exactly full scale is representable enough: not a clip
           } else if (q < -32768) {
             q = -32768;
-            ++clipped;
+            if (x < -1.0f) ++clipped;
           }
           put16(out, static_cast<std::uint32_t>(static_cast<std::int16_t>(q)) & 0xFFFFu);
           break;
@@ -100,10 +103,10 @@ Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& 
           std::int64_t q = std::llround(static_cast<double>(x) * 8388608.0);
           if (q > 8388607) {
             q = 8388607;
-            ++clipped;
+            if (x > 1.0f) ++clipped;
           } else if (q < -8388608) {
             q = -8388608;
-            ++clipped;
+            if (x < -1.0f) ++clipped;
           }
           const std::uint32_t u = static_cast<std::uint32_t>(q) & 0xFFFFFFu;
           out.push_back(static_cast<std::uint8_t>(u));
@@ -179,8 +182,9 @@ Status writeFileAtomic(const std::string& path, const std::vector<std::uint8_t>&
   if (path.empty()) return makeError(ErrorCode::InvalidArgument, "empty path");
   const fs::path target(path);
   if (fs::exists(target, ec) && !overwrite) return makeError(ErrorCode::Conflict, "a file already exists at " + path);
+  static std::atomic<std::uint64_t> counter{0};
   fs::path tmp = target;
-  tmp += ".cf-tmp";
+  tmp += ".cf-tmp" + std::to_string(counter.fetch_add(1)) + "-" + std::to_string(static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id())) % 100000);
   {
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
     if (!f) return makeError(ErrorCode::InvalidArgument, "cannot create " + tmp.string());
@@ -192,8 +196,19 @@ Status writeFileAtomic(const std::string& path, const std::vector<std::uint8_t>&
       return makeError(ErrorCode::InvalidArgument, "write failed for " + path);
     }
   }
-  if (overwrite && fs::exists(target, ec)) fs::remove(target, ec);  // portable: rename onto an existing file fails on Windows
-  fs::rename(tmp, target, ec);
+  fs::rename(tmp, target, ec);  // replaces an existing file atomically on POSIX
+  if (ec && overwrite && fs::exists(target)) {
+    // Windows-style filesystems refuse to rename over an existing file: keep a backup so a failure cannot lose it.
+    fs::path backup = tmp;
+    backup += ".old";
+    std::error_code ec2;
+    fs::rename(target, backup, ec2);
+    if (!ec2) {
+      fs::rename(tmp, target, ec);
+      if (ec) fs::rename(backup, target, ec2);  // put the original back
+      else fs::remove(backup, ec2);
+    }
+  }
   if (ec) {
     fs::remove(tmp, ec);
     return makeError(ErrorCode::InvalidArgument, "could not move the finished file into place");

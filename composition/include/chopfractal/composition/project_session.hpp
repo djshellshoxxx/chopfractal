@@ -71,6 +71,7 @@ struct ExportWavOptions {
 };
 struct ExportReport {
   std::uint64_t frames = 0;
+  std::uint64_t notes = 0;  // kit: MIDI notes written
   float peak = 0.f;
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
@@ -176,6 +177,7 @@ class ProjectSession {
   // ---- project state ----
   std::size_t embeddedSourceBytes() const;  // estimate shown before the user opts in to embedding
   std::size_t embeddedSourceCap() const { return embeddedCap_; }
+  bool wasEmbedded() const { return loadedEmbedded_; }  // the last loaded project carried its audio
   Status setEmbeddedSourceCap(std::size_t bytes);  // 1 .. kCodecCeilingBytes - 64 MiB headroom
   Result<std::vector<std::uint8_t>> saveState(bool embedSource) const;
   // All-or-nothing: on any error the session is left exactly as it was.
@@ -193,6 +195,7 @@ class ProjectSession {
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
+  bool settleRestoredPattern();
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
   Status reconcileAfterMarkerChange();
@@ -214,6 +217,7 @@ class ProjectSession {
   codec::MigrationRegistry migrations_;
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
+  bool loadedEmbedded_ = false;
   std::vector<Notice> notices_;
 };
 

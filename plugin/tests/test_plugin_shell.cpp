@@ -328,6 +328,29 @@ CHOP_TEST(effect_parameters_reach_generation_and_the_state_round_trips) {
   CHECK(q.currentParams().get(cf::host::kAllowFilter) == 1.0);
 }
 
+CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  p.embedSource = true;
+  p.manualBpm = 97.5;
+  juce::MemoryBlock blob;
+  p.getStateInformation(blob);
+  ChopFractalProcessor q;
+  q.setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+  CHECK(q.embedSource.load());                                  // a re-save keeps the audio inside the project
+  CHECK_NEAR(q.manualBpm.load(), 97.5, 1e-9);
+  juce::MemoryBlock again;
+  q.getStateInformation(again);
+  CHECK(again.getSize() > 90000);                               // the second save still embeds the audio
+  p.embedSource = false;
+  juce::MemoryBlock ref;
+  p.getStateInformation(ref);
+  ChopFractalProcessor r;
+  r.setStateInformation(ref.getData(), static_cast<int>(ref.getSize()));
+  CHECK(!r.embedSource.load());
+}
+
 CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists) {
   if (!std::getenv("DISPLAY")) return;  // CI without a display skips the GUI smoke test
   ChopFractalProcessor p;
@@ -346,6 +369,99 @@ CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists
     juce::FileOutputStream fs(f);
     juce::PNGImageFormat().writeImageToStream(img, fs);
   }
+}
+
+namespace {
+juce::Button* findButton(juce::Component& root, const juce::String& text) {
+  for (auto* c : root.getChildren())
+    if (auto* b = dynamic_cast<juce::Button*>(c))
+      if (b->getButtonText() == text) return b;
+  return nullptr;
+}
+juce::ComboBox* findCombo(juce::Component& root, const juce::String& title) {
+  for (auto* c : root.getChildren())
+    if (auto* b = dynamic_cast<juce::ComboBox*>(c))
+      if (b->getTitle() == title) return b;
+  return nullptr;
+}
+std::vector<std::uint8_t> patternBytes(ChopFractalProcessor& p) {
+  std::vector<std::uint8_t> out;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    if (s.pattern()) out = cf::pattern::serialize(*s.pattern());
+  });
+  return out;
+}
+}  // namespace
+
+// Drives the real editor's buttons the way a user would and checks the session reacts.
+CHOP_TEST(editor_buttons_drive_the_session) {
+  if (!std::getenv("DISPLAY")) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "").ok()); });
+  std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  ed->setVisible(true);
+  auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(60); };
+  auto click = [&](const char* text) {
+    juce::Button* b = findButton(*ed, text);
+    CHECK(b != nullptr);
+    if (b && b->isEnabled()) b->triggerClick();
+    pump();
+    return b != nullptr;
+  };
+  auto hasPattern = [&] { return !patternBytes(p).empty(); };
+
+  click("Detect Chops");
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.chops() && s.chops()->chops.size() >= 1); });
+  click("Mutate");                                   // refused without a pattern: no crash, no pattern
+  CHECK(!hasPattern());
+  click("Generate");
+  CHECK(hasPattern());
+  const auto g = patternBytes(p);
+  click("Mutate");
+  const auto m = patternBytes(p);
+  CHECK(m != g);
+  click("Undo");
+  CHECK(patternBytes(p) == g);
+  click("Redo");
+  CHECK(patternBytes(p) == m);
+  click("Store A");
+  click("Fractal");
+  const auto f = patternBytes(p);
+  CHECK(f != m);
+  click("Recall A");
+  CHECK(patternBytes(p) == m);
+  click("Lock Bar");  // nothing selected: refused, no bar is locked
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& b : s.pattern()->bars) CHECK(!b.locked);
+  });
+  CHECK(p.statusMessage().contains("Select a hit"));
+  click("Keep");
+  click("Smart Setup");
+  if (auto* e = dynamic_cast<juce::Button*>(findButton(*ed, "Evolve"))) {
+    e->setToggleState(true, juce::sendNotificationSync);
+    pump();
+    bool running = false;
+    p.withSession([&](cf::composition::ProjectSession& s) { running = s.evolveRunning(); });
+    CHECK(running);
+    e->setToggleState(false, juce::sendNotificationSync);
+    pump();
+    p.withSession([&](cf::composition::ProjectSession& s) { running = s.evolveRunning(); });
+    CHECK(!running);
+  } else {
+    CHECK(false);
+  }
+  // Selecting a hit then Zoom In / Collapse (no selection: refused politely, nothing breaks).
+  click("Zoom In");
+  click("Collapse");
+  click("Set Role");
+  CHECK(hasPattern());
+  // Every visible button must have a title for accessibility.
+  for (auto* c : ed->getChildren())
+    if (auto* b = dynamic_cast<juce::Button*>(c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
+  (void)findCombo;
 }
 
 int main() {

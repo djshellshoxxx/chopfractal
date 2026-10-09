@@ -240,6 +240,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   info.path = std::move(path);
   auto map = source::ChopMap::create(std::move(info));
   if (!map.ok()) return map.error();  // nothing has changed yet
+  evolve_.stop();  // there is no pattern for a new source
   sourceData_ = std::move(data);
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
@@ -275,25 +276,40 @@ Status ProjectSession::applyChops(const DetectOptions& options) {
 
 Status ProjectSession::editMarkers(const std::function<Status(source::ChopMap&)>& edit) {
   if (!chopMap_) return makeError(ErrorCode::InvalidArgument, "load a source first");
+  // Transactional: if the edit or the reconcile that follows fails, the map, chops and roles are put back.
+  const source::ChopMap mapBackup = *chopMap_;
+  const ChopSnapshotPtr chopsBackup = chops_;
+  const roles::RoleMap rolesBackup = roles_;
   Status s = edit(*chopMap_);
-  if (!s.ok()) return s;
-  return reconcileAfterMarkerChange();
+  if (s.ok()) s = reconcileAfterMarkerChange();
+  if (!s.ok()) {
+    *chopMap_ = mapBackup;
+    chops_ = chopsBackup;
+    roles_ = rolesBackup;
+    republish();  // best effort: the previous, valid state
+  }
+  return s;
 }
 
 Status ProjectSession::undoMarkers() {
-  if (!chopMap_ || !chopMap_->undo()) return makeError(ErrorCode::NotFound, "nothing to undo");
-  return reconcileAfterMarkerChange();
+  if (!chopMap_) return makeError(ErrorCode::NotFound, "nothing to undo");
+  bool did = false;
+  Status s = editMarkers([&](source::ChopMap& m) {
+    did = m.undo();
+    return did ? Status{} : Status{makeError(ErrorCode::NotFound, "nothing to undo")};
+  });
+  return s;
 }
 
 Status ProjectSession::redoMarkers() {
-  if (!chopMap_ || !chopMap_->redo()) return makeError(ErrorCode::NotFound, "nothing to redo");
-  return reconcileAfterMarkerChange();
+  if (!chopMap_) return makeError(ErrorCode::NotFound, "nothing to redo");
+  return editMarkers([&](source::ChopMap& m) { return m.redo() ? Status{} : Status{makeError(ErrorCode::NotFound, "nothing to redo")}; });
 }
 
 Status ProjectSession::reconcileAfterMarkerChange() {
   chops_ = chopMap_->snapshot();
-  std::vector<ChopId> ids;
-  for (const ChopInfo& c : chops_->chops) ids.push_back(c.id);
+  std::vector<ChopId> ids;  // roles follow the marker, so disabling a chop and enabling it again keeps its role
+  for (const source::Marker& m : chopMap_->markers()) ids.push_back(m.id);
   roles_.retainOnly(ids);
   if (!patterns_.hasPattern()) return republish();
   pattern::Pattern cleaned = pattern::sanitize(patterns_.current(), *chops_);
@@ -385,24 +401,43 @@ Status ProjectSession::commitEdit(const std::string& label) {
   return {};
 }
 
+// After the pattern history moved, make sure the restored pattern still fits the current chops (markers can
+// have changed since). Returns false when it cannot be made to fit; the caller then reverts the move.
+bool ProjectSession::settleRestoredPattern() {
+  if (!chops_) return true;
+  if (!patterns_.hasPattern()) return republish().ok();  // back before the first pattern: pass-through
+  if (installPlayback(patterns_.current()).ok()) return true;
+  return false;  // the caller cancels the move; the family tree (activate) repairs older versions when they are chosen
+}
+
 bool ProjectSession::undo() {
   if (!patterns_.undo()) return false;
-  Status s = republish();
-  if (!s.ok()) notice(Notice::Level::Error, "Could not publish the restored pattern: " + s.error().message);
+  if (!settleRestoredPattern()) {
+    patterns_.redo();
+    notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
+    return false;
+  }
   return true;
 }
 
 bool ProjectSession::redo() {
   if (!patterns_.redo()) return false;
-  Status s = republish();
-  if (!s.ok()) notice(Notice::Level::Error, "Could not publish the restored pattern: " + s.error().message);
+  if (!settleRestoredPattern()) {
+    patterns_.undo();
+    notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
+    return false;
+  }
   return true;
 }
 
 Status ProjectSession::recallSnapshot(std::size_t slot) {
   Status s = patterns_.recallSnapshot(slot);
   if (!s.ok()) return s;
-  return republish();
+  if (!settleRestoredPattern()) {
+    patterns_.undo();
+    return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
+  }
+  return {};
 }
 
 // ---- recursive hit zoom ----
@@ -708,6 +743,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   if (hasPat) {
     auto p = pattern::deserialize(patBytes.data(), patBytes.size());
     if (!p.ok()) return p.error();
+    p.value() = pattern::sanitize(p.value(), *newChops);  // drop only what no longer fits (for example a deleted chop's zoom)
     auto flat = pattern::flatten(p.value(), *newChops);  // the pattern must fit the saved chops
     if (!flat.ok()) return makeError(ErrorCode::Corrupt, "the saved pattern does not fit the saved chops: " + flat.error().message);
     if (newData) {
@@ -723,9 +759,10 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   }
 
   std::optional<evolve::Settings> newEvolve;
+  bool loadedFlag = false;
   if (hasSession && sessionBytes.size() >= 2 + 1) {
     bytes::Reader sr(sessionBytes.data(), sessionBytes.size());
-    sr.boolean();  // embedded flag
+    loadedFlag = sr.boolean();  // embedded flag
     if (sr.u8() == 1) {
       evolve::Settings es;
       es.everyLoops = sr.i32();
@@ -739,6 +776,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   }
 
   // ---- commit ----
+  loadedEmbedded_ = loadedFlag;
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings
   } else {

@@ -78,3 +78,25 @@ CHOP_TEST(decoder_survives_truncation_and_corruption) {
   }
   CHECK(!decode(nullptr, 0).ok());
 }
+
+CHOP_TEST(decoder_rejects_values_the_encoder_would_refuse) {
+  FileSpec s;
+  s.notes = {{36, 100, 0, 480, 0}};
+  const auto good = encode(s).value();
+  // Tempo meta event is "FF 51 03 tt tt tt"; time signature is "FF 58 04 nn dd cc bb".
+  auto find = [&](std::uint8_t type) {
+    for (std::size_t i = 0; i + 2 < good.size(); ++i)
+      if (good[i] == 0xFF && good[i + 1] == type) return i;
+    return good.size();
+  };
+  auto zeroTempo = good;
+  const std::size_t t = find(0x51);
+  zeroTempo[t + 3] = zeroTempo[t + 4] = zeroTempo[t + 5] = 0;
+  CHECK(!decode(zeroTempo.data(), zeroTempo.size()).ok());
+  auto zeroNum = good;
+  zeroNum[find(0x58) + 3] = 0;
+  CHECK(!decode(zeroNum.data(), zeroNum.size()).ok());
+  auto badExp = good;
+  badExp[find(0x58) + 4] = 253;
+  CHECK(!decode(badExp.data(), badExp.size()).ok());
+}

@@ -112,6 +112,11 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
 }
 
 void ChopFractalProcessor::pollAudioFlags() {
+  // A quantized switch can only complete when a pattern is playing; without one, apply it now.
+  if (patternQuarters_.load(std::memory_order_relaxed) <= 0.0)
+    withSession([](cf::composition::ProjectSession& s) {
+      if (s.hasPendingActivation()) s.onLoopBoundary();
+    });
   if (boundaryFlag_.exchange(false)) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
   if (midpointFlag_.exchange(false)) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins.
@@ -190,13 +195,13 @@ std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(c
   return data;
 }
 
-void ChopFractalProcessor::loadFileAsync(const juce::File& file) {
+void ChopFractalProcessor::loadFileAsync(const juce::File& file, bool relink) {
   setStatusMessage("Loading " + file.getFileName() + "...");
   juce::WeakReference<ChopFractalProcessor> self(this);
-  juce::Thread::launch([self, file] {
+  juce::Thread::launch([self, file, relink] {
     juce::String error;
     auto data = decodeFile(file, error);
-    juce::MessageManager::callAsync([self, file, data, error] {
+    juce::MessageManager::callAsync([self, file, data, error, relink] {
       if (self == nullptr) return;
       if (!data) {
         self->setStatusMessage(error);
@@ -204,9 +209,10 @@ void ChopFractalProcessor::loadFileAsync(const juce::File& file) {
       }
       cf::Status status;
       self->withSession([&](cf::composition::ProjectSession& s) {
-        status = s.loadSource(data, file.getFileNameWithoutExtension().toStdString(), file.getFullPathName().toStdString());
+        status = relink ? s.relinkSource(data)
+                        : s.loadSource(data, file.getFileNameWithoutExtension().toStdString(), file.getFullPathName().toStdString());
       });
-      self->setStatusMessage(status.ok() ? "Loaded " + file.getFileName() : juce::String(status.error().message));
+      self->setStatusMessage(status.ok() ? (relink ? "Relinked " : "Loaded ") + file.getFileName() : juce::String(status.error().message));
     });
   });
 }
@@ -219,6 +225,8 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::MemoryOutputStream out(destData, false);
   out.write(kStateMagic, 4);
   out.writeInt(kStateVersion);
+  apvts.state.setProperty("manualBpm", manualBpm.load(), nullptr);
+  apvts.state.setProperty("embedSource", embedSource.load(), nullptr);
   std::unique_ptr<juce::XmlElement> xml(apvts.copyState().createXml());
   out.writeString(xml ? xml->toString() : juce::String());
 
@@ -226,7 +234,10 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   {
     const juce::ScopedLock lock(sessionLock_);
     auto saved = session_.saveState(embedSource.load());
-    if (!saved.ok()) saved = session_.saveState(false);  // e.g. the source is too large to embed: reference it instead
+    if (!saved.ok() && embedSource.load()) {
+      setStatusMessage("The audio is too large to embed (" + juce::String(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024))) + " MB); the project references the file instead.");
+      saved = session_.saveState(false);  // reference it instead
+    }
     if (saved.ok()) blob = std::move(saved.value());
   }
   out.writeInt(static_cast<int>(blob.size()));
@@ -244,7 +255,11 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
   if (blobSize > 0 && in.read(blob.data(), blobSize) != blobSize) return;
 
   if (auto xml = juce::parseXML(xmlText))
-    if (xml->hasTagName(apvts.state.getType())) apvts.replaceState(juce::ValueTree::fromXml(*xml));
+    if (xml->hasTagName(apvts.state.getType())) {
+      apvts.replaceState(juce::ValueTree::fromXml(*xml));
+      manualBpm = juce::jlimit(20.0, 999.0, static_cast<double>(apvts.state.getProperty("manualBpm", 120.0)));
+      embedSource = static_cast<bool>(apvts.state.getProperty("embedSource", false));
+    }
 
   if (blob.empty()) return;
   cf::Status status;
@@ -259,6 +274,7 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
       return decodeFile(f, ignored);
     });
     syncAudioInfo();
+    if (status.ok() && session_.wasEmbedded()) embedSource = true;  // a re-save keeps the audio inside the project
   }
   // On failure the session is left exactly as it was (pass-through in a fresh instance); say why.
   setStatusMessage(status.ok() ? juce::String() : juce::String("Could not restore the project: ") + status.error().message);

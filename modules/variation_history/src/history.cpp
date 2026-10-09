@@ -27,6 +27,7 @@ std::uint64_t hashPayload(const std::vector<std::uint8_t>& payload) {
 VariationTree::VariationTree(Config config) : config_(config) {
   if (config_.maxNodes < 1) config_.maxNodes = 1;
   if (config_.maxNodes > kHardMaxNodes) config_.maxNodes = kHardMaxNodes;
+  if (config_.maxPayloadBytes > kAbsolutePayloadCap) config_.maxPayloadBytes = kAbsolutePayloadCap;
 }
 
 std::size_t VariationTree::childCount(NodeId id) const {
