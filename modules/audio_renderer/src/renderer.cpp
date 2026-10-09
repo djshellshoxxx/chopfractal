@@ -234,18 +234,26 @@ struct Renderer::Impl {
     for (const Voice& v : voices)
       if (v.active && !v.fading) ++playing;
     if (playing >= cfg.maxVoices) {
+      // Steal the quietest sounding voice; voices still in their attack are protected (their level is not
+      // yet meaningful) unless every voice is. Ties go to the oldest.
       Voice* victim = nullptr;
-      for (Voice& v : voices) {
-        if (!v.active || v.fading) continue;
-        if (!victim || v.lastLevel < victim->lastLevel || (v.lastLevel == victim->lastLevel && v.serial < victim->serial)) victim = &v;
-      }
-      if (victim) releaseVoice(*victim);  // quietest, then oldest, fades out instead of cutting
+      for (int pass = 0; pass < 2 && !victim; ++pass)
+        for (Voice& v : voices) {
+          if (!v.active || v.fading) continue;
+          if (pass == 0 && v.age < v.attack) continue;
+          if (!victim || v.lastLevel < victim->lastLevel || (v.lastLevel == victim->lastLevel && v.serial < victim->serial)) victim = &v;
+        }
+      if (victim) releaseVoice(*victim);  // fades out instead of cutting
     }
     for (Voice& v : voices)
       if (!v.active) return &v;
-    Voice* nearest = nullptr;  // pool exhausted by fading voices: cut the one closest to silence
+    // Pool exhausted. Recycle the fading voice closest to silence; only if none is fading, the oldest sounding one.
+    Voice* nearest = nullptr;
     for (Voice& v : voices)
-      if (!nearest || v.fadeLeft < nearest->fadeLeft) nearest = &v;
+      if (v.fading && (!nearest || v.fadeLeft < nearest->fadeLeft)) nearest = &v;
+    if (!nearest)
+      for (Voice& v : voices)
+        if (!nearest || v.serial < nearest->serial) nearest = &v;
     return nearest;
   }
 

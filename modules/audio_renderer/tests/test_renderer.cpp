@@ -632,3 +632,28 @@ CHOP_TEST(effects_are_block_size_independent_and_validated) {
     CHECK(!makePlayback(makeSource(1, 48000, 24000, dc), {e}, 3840).ok());
   }
 }
+
+CHOP_TEST(an_exhausted_voice_pool_never_hard_cuts_a_sounding_voice) {
+  auto src = makeSource(1, 48000, 48000, [](std::int64_t, std::int64_t, int) { return 0.5f; });
+  FlatEventList events;
+  for (int i = 0; i < 60; ++i) events.push_back(ev(static_cast<std::uint64_t>(i + 1), 48000, i, 3000));  // 1 tick apart
+  auto pb = playback(src, events, 3840);
+  Renderer r;
+  Config cfg;
+  cfg.maxVoices = 2;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  tb.bpm = 120;
+  std::vector<float> out(4096);
+  float* o[2] = {out.data(), out.data()};
+  std::vector<float> in(4096, 0.f);
+  const float* i2[2] = {in.data(), in.data()};
+  tb.ppq = 0.0;
+  r.process(tb, RenderParams{}, i2, o, 1, 4096);
+  float biggest = 0.f;
+  for (std::size_t k = 1; k < out.size(); ++k) biggest = std::max(biggest, std::fabs(out[k] - out[k - 1]));
+  CHECK(biggest < 0.2f);  // every steal fades; no full-level step
+}

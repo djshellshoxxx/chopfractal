@@ -85,6 +85,12 @@ Defects found and fixed during integration (each now has a test): derived child 
 1. **Supported platforms for the first beta** (Linux builds the plugin and passes the validator in CI; the portable modules and their tests pass on macOS arm64 and Windows MSVC, but the JUCE plugin is not yet built there) and whether Linux ships.
 2. **Before distributing a plugin:** the JUCE license route (AGPLv3, or a commercial JUCE license for a closed-source product) and the VST3 SDK terms. See `docs/LICENSING.md`. Settled for now: the project is all rights reserved.
 
+## Code audit (third round)
+
+Three independent read-only audits (core logic, audio/export/feature modules, plugin shell and GUI) plus a button-driving GUI test found and fixed: a failed marker edit that wedged the session (now transactional, and zoomed content stranded by a deleted chop is dropped); undo, redo and A/B recall restoring patterns that reference deleted chops; roles lost when a chop is disabled; per-event locks bypassed by bar replacement and bar duplication; signed overflow in event timing; grammar labels that saved but could not be loaded; duplicate marker IDs and a zero id counter in saved state; a history config that could write unreadable state; voice-pool exhaustion hard-cutting a sounding voice, and newest-voice stealing; MIDI decoder accepting invalid tempo, meter, running status and zero-length notes (and a shift-exponent bug); non-atomic WAV overwrite and false clip reports at 0 dB; stale waveform after loading a new source; embed flag, manual tempo not persisted; no Locate Source for a missing audio file; use-after-free risk in menu callbacks; Lock Bar acting on bar 0 with nothing selected; Evolve toggle out of sync with the session; repaint 10 times a second while idle. Each has a regression test.
+
+Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, seed field and motif not persisted, A/B snapshots not saved with the project, export runs on the message thread, no preset menu or meters.
+
 ## Known gaps
 
 - **Input capture** is not implemented (the spec's explicit Arm/Capture/Stop/Keep flow); only file import exists.

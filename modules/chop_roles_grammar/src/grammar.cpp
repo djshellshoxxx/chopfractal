@@ -68,6 +68,7 @@ ValidationReport validateRules(const RuleSet& rules, const RoleMap* roles) {
   if (rules.rules.size() > kMaxRules) err(0, "too many rules (maximum " + std::to_string(kMaxRules) + ")");
   std::set<std::uint32_t> ids;
   for (const Rule& r : rules.rules) {
+    if (r.label.size() > 128) err(r.id, "the label is longer than 128 characters");
     if (r.id == 0 || !ids.insert(r.id).second) err(r.id, "rule id is zero or duplicated");
     if (!r.when.role.empty() && !isValidRoleId(r.when.role)) err(r.id, "malformed role id in condition");
     if (r.when.barMin < 0 || r.when.beatMin < 0 || (r.when.barMax >= 0 && r.when.barMax < r.when.barMin) ||

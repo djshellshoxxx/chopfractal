@@ -439,3 +439,125 @@ CHOP_TEST(embed_cap_is_generous_but_adjustable) {
   CHECK(s.saveState(false).ok());
   CHECK(!s.setEmbeddedSourceCap(kCodecCeilingBytes).ok());
 }
+
+// ---- regression tests for the code audit ----
+namespace {
+// A child event that uses `chop` only inside a zoomed hit (so deleting that chop strands it).
+Status giveChildOnlyChop(ProjectSession& s, EventId parent, ChopId chop) {
+  return s.edit([&](const pattern::Pattern& p, const ChopSnapshot& chops) -> Result<pattern::Pattern> {
+    const Event* e = pattern::findEvent(p, parent);
+    if (!e) return makeError(ErrorCode::NotFound, "no event");
+    auto child = std::make_shared<NestedPattern>();
+    child->windowDuration = e->duration;
+    child->depth = 1;
+    Event c;
+    c.id = EventId{kDerivedIdBit | 0x777};
+    c.chop = chop;
+    c.sourceOverride = true;
+    c.start = 0;
+    c.duration = e->duration;
+    child->events.push_back(c);
+    return pattern::setChild(p, parent, child, chops);
+  });
+}
+}  // namespace
+
+CHOP_TEST(deleting_a_chop_used_only_inside_a_zoom_is_repaired_not_wedged) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(3, 2)).ok());
+  std::set<std::uint64_t> used;
+  EventId host;
+  for (const auto& b : s.pattern()->bars)
+    for (const auto& bt : b.beats)
+      for (const Event& e : bt.events) {
+        used.insert(e.chop.value);
+        host = e.id;
+      }
+  ChopId spare;
+  for (const ChopInfo& c : s.chops()->chops)
+    if (!used.count(c.id.value)) spare = c.id;
+  if (!spare.valid()) return;  // every chop is used at top level: nothing to strand
+  CHECK(giveChildOnlyChop(s, host, spare).ok());
+  CHECK(s.editMarkers([&](source::ChopMap& m) { return m.deleteMarker(spare); }).ok());
+  CHECK(pattern::flatten(*s.pattern(), *s.chops()).ok());   // the stranded zoom was dropped
+  pattern::MutateOptions mo;
+  CHECK(s.mutate(mo).ok());                                  // and the session still works
+}
+
+CHOP_TEST(marker_edits_are_transactional_and_undo_never_restores_dead_chops) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(5, 2)).ok());
+  const std::size_t markers = s.chopMap()->markers().size();
+  ChopId used = s.pattern()->bars[0].beats[0].events.empty() ? ChopId{} : s.pattern()->bars[0].beats[0].events[0].chop;
+  for (const auto& bt : s.pattern()->bars[0].beats)
+    if (!bt.events.empty() && !used.valid()) used = bt.events[0].chop;
+  CHECK(used.valid());
+  CHECK(!s.editMarkers([](source::ChopMap& m) { return m.deleteMarker(ChopId{987654}); }).ok());   // bad edit: nothing changes
+  CHECK_EQ(s.chopMap()->markers().size(), markers);
+  CHECK(s.editMarkers([&](source::ChopMap& m) { return m.deleteMarker(used); }).ok());
+  CHECK(pattern::flatten(*s.pattern(), *s.chops()).ok());
+  for (int i = 0; i < 10 && s.undo(); ++i) CHECK(pattern::flatten(*s.pattern(), *s.chops()).ok());   // every step it does restore is playable
+  CHECK(pattern::flatten(*s.pattern(), *s.chops()).ok());
+  CHECK(s.undoMarkers().ok());
+  CHECK_EQ(s.chopMap()->markers().size(), markers);
+}
+
+CHOP_TEST(roles_survive_disabling_and_re_enabling_a_chop) {
+  ProjectSession s;
+  CHECK(ready(s));
+  const ChopId c = s.chops()->chops[0].id;
+  CHECK(s.assignRole(c, "kick").ok());
+  CHECK(s.editMarkers([&](source::ChopMap& m) { return m.setEnabled(c, false); }).ok());
+  CHECK(s.editMarkers([&](source::ChopMap& m) { return m.setEnabled(c, true); }).ok());
+  CHECK(s.roleMap().roleOf(c) == "kick");
+}
+
+CHOP_TEST(per_event_locks_block_bar_replacement_and_duplication) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(9, 2)).ok());
+  EventId locked;
+  for (const auto& bt : s.pattern()->bars[1].beats)
+    if (!bt.events.empty() && !locked.valid()) locked = bt.events[0].id;
+  if (!locked.valid()) return;
+  CHECK(s.edit([&](const pattern::Pattern& p, const ChopSnapshot&) { return pattern::setLock(p, pattern::ScopeRef{ScopeLevel::Event, 0, 0, locked}, true); }).ok());
+  const auto before = pattern::serialize(*s.pattern());
+  auto dup = pattern::duplicateBar(*s.pattern(), 0, 1);
+  CHECK(!dup.ok() && dup.error().code == ErrorCode::Blocked);
+  auto repl = pattern::setBarEvents(*s.pattern(), 1, {}, *s.chops());
+  CHECK(!repl.ok() && repl.error().code == ErrorCode::Blocked);
+  fractal::Settings fs;
+  fs.depth = 1;
+  CHECK(s.applyFractal(fs).ok());                    // the bar holding the locked hit is skipped, the other is replaced
+  CHECK(pattern::findEvent(*s.pattern(), locked) != nullptr);
+  (void)before;
+}
+
+CHOP_TEST(absurd_event_times_and_rule_labels_are_rejected) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(2, 2)).ok());
+  const ChopId c = s.chops()->chops[0].id;
+  CHECK(!pattern::addEvent(*s.pattern(), 0, c, 1, INT64_MAX, *s.chops()).ok());
+  Event e;
+  e.id = EventId{kDerivedIdBit | 5};
+  e.chop = c;
+  e.start = Ticks{1} << 62;
+  e.duration = Ticks{1} << 62;
+  CHECK(!validateEvent(e).ok());
+  roles::RuleSet rules;
+  roles::Rule r;
+  r.id = 1;
+  r.label = std::string(200, 'x');
+  rules.rules.push_back(r);
+  CHECK(!s.setRules(rules).ok());                    // would otherwise save and then fail to load
+  r.label = "ok";
+  rules.rules[0] = r;
+  CHECK(s.setRules(rules).ok());
+  auto saved = s.saveState(true);
+  CHECK(saved.ok());
+  ProjectSession t;
+  CHECK(t.loadState(saved.value().data(), saved.value().size(), [](const source::SourceInfo&) { return nullptr; }).ok());
+}

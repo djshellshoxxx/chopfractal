@@ -166,3 +166,16 @@ CHOP_TEST(file_names_are_sanitized) {
   CHECK(sanitizeFileName(std::string(200, 'a')).size() == 48);
   CHECK(sanitizeFileName("kick-01") == "kick-01");
 }
+
+CHOP_TEST(normalizing_to_full_scale_is_not_reported_as_clipping) {
+  Options o;
+  o.format = Format::Pcm16;
+  o.dither = false;
+  o.normalize = true;
+  o.ceilingDb = 0.f;
+  EncodeReport rep;
+  CHECK(encode(tone(1, 500, 0.3f), o, &rep).ok());
+  CHECK_EQ(rep.clipped, 0u);
+  o.format = Format::Pcm24;
+  CHECK(encode(tone(1, 500, 0.3f), o, &rep).ok() && rep.clipped == 0);
+}

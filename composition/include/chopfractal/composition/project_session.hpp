@@ -71,6 +71,7 @@ struct ExportWavOptions {
 };
 struct ExportReport {
   std::uint64_t frames = 0;
+  std::uint64_t notes = 0;  // kit: MIDI notes written
   float peak = 0.f;
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
@@ -194,6 +195,7 @@ class ProjectSession {
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
+  bool settleRestoredPattern();
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
   Status reconcileAfterMarkerChange();

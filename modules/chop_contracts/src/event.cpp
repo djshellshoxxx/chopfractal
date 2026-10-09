@@ -26,7 +26,7 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
                    std::uint64_t probabilitySeed, int depth) {
   for (const Event& e : events) {
     if (!e.enabled) continue;
-    if (e.duration <= 0 || e.start < 0 || e.start + e.duration > windowDuration)
+    if (e.duration <= 0 || e.start < 0 || e.duration > windowDuration || e.start > windowDuration - e.duration)
       return makeError(ErrorCode::OutOfRange, "event " + idText(e.id) + " lies outside its window");
     const ChopInfo* chop = chops.find(e.chop);
     if (!chop) return makeError(ErrorCode::NotFound, "event " + idText(e.id) + " references an unknown chop");
@@ -73,7 +73,8 @@ void sortFlat(FlatEventList& list) {
 Status validateEvent(const Event& e, int depth) {
   const std::string who = "event " + idText(e.id);
   if (!e.id.valid() || !e.chop.valid()) return makeError(ErrorCode::InvalidArgument, who + " has an invalid id");
-  if (e.start < 0 || e.duration <= 0) return makeError(ErrorCode::OutOfRange, who + " has invalid timing");
+  constexpr Ticks kMaxTick = Ticks{1} << 40;  // far beyond any real pattern; keeps start + duration free of overflow
+  if (e.start < 0 || e.duration <= 0 || e.start > kMaxTick || e.duration > kMaxTick) return makeError(ErrorCode::OutOfRange, who + " has invalid timing");
   if (!e.region.empty() && e.region.start < 0) return makeError(ErrorCode::OutOfRange, who + " has an invalid region");
   const EventTransform& t = e.tx;
   if (!(t.level >= 0.f && t.level <= limits::kMaxLevel)) return makeError(ErrorCode::OutOfRange, who + " level out of range");

@@ -20,8 +20,10 @@ void addArcs(OrbitView& v, const std::vector<Event>& events, const ChopSnapshot&
     a.durationTick = e.duration;
     a.startAngle = angleOf(a.startTick, v.lengthTicks);
     a.sweep = angleOf(e.duration, v.lengthTicks);
+    a.ring = -1;
     for (std::size_t i = 0; i < chops.chops.size(); ++i)
       if (chops.chops[i].id == e.chop) a.ring = static_cast<int>(i);
+    if (a.ring < 0) continue;  // an unknown chop has no ring; the pattern view skips it too
     a.level = e.tx.level;
     a.locked = lockedAbove || e.locked;
     a.hasChild = e.child != nullptr;

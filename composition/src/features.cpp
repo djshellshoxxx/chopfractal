@@ -29,8 +29,15 @@ Status ProjectSession::applyFractal(const fractal::Settings& fs, const std::vect
   const int barCount = static_cast<int>(p.bars.size());
   std::vector<int> targets;
   if (bars.empty()) {
-    for (int b = 0; b < barCount; ++b)
-      if (!p.phraseLocked && !p.bars[static_cast<std::size_t>(b)].locked) targets.push_back(b);
+    for (int b = 0; b < barCount; ++b) {
+      const pattern::Bar& bar = p.bars[static_cast<std::size_t>(b)];
+      bool anyLock = p.phraseLocked || bar.locked;
+      for (const pattern::Beat& bt : bar.beats) {
+        anyLock = anyLock || bt.locked;
+        for (const Event& e : bt.events) anyLock = anyLock || e.locked;
+      }
+      if (!anyLock) targets.push_back(b);  // a bar holding any lock is left alone
+    }
     if (targets.empty()) return makeError(ErrorCode::Blocked, "every bar is locked; unlock a bar first");
   } else {
     targets = bars;
@@ -262,7 +269,8 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
   ExportReport rep;
   std::vector<fs::path> written;
   auto fail = [&](const Error& e) -> Result<ExportReport> {
-    for (const fs::path& w : written) fs::remove(w, ec);  // do not leave a partial kit behind
+    if (!o.overwrite)
+      for (const fs::path& w : written) fs::remove(w, ec);  // no partial kit (with overwrite the old files are already replaced)
     return e;
   };
   for (std::size_t i = 0; i < n; ++i) {
@@ -278,7 +286,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
   Status wk = wav::writeFileAtomic(targets[n + 1].string(), std::vector<std::uint8_t>(map.begin(), map.end()), o.overwrite);
   if (!wk.ok()) return fail(wk.error());
   rep.files.push_back(targets[n + 1].string());
-  rep.frames = spec.notes.size();  // number of MIDI notes
+  rep.notes = spec.notes.size();
   return rep;
 }
 

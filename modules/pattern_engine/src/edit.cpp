@@ -159,7 +159,7 @@ Result<Pattern> addEvent(const Pattern& p, int bar, ChopId chop, Ticks startInBa
   if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return makeError(ErrorCode::OutOfRange, "bar index out of range");
   if (!chops.find(chop)) return makeError(ErrorCode::NotFound, "unknown chop");
   const Ticks barT = barTicks(p.settings);
-  if (startInBar < 0 || duration <= 0 || startInBar + duration > barT) return makeError(ErrorCode::OutOfRange, "event must lie inside the bar");
+  if (startInBar < 0 || duration <= 0 || duration > barT || startInBar > barT - duration) return makeError(ErrorCode::OutOfRange, "event must lie inside the bar");
   const int beat = beatOf(p, startInBar);
   if (scopeLocked(p, bar, beat)) return blocked("this beat");
   if (static_cast<int>(eventCount(p)) >= p.settings.maxEvents) return makeError(ErrorCode::LimitExceeded, "event cap reached", p.settings.maxEvents);
@@ -258,6 +258,7 @@ Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx) {
 std::pair<Pattern, EventId> reserveIds(const Pattern& p, std::uint64_t count) {
   Pattern q = p;
   const EventId first{q.nextId};
+  if (count > (kDerivedIdBit >> 1) || q.nextId > (kDerivedIdBit >> 1)) return {std::move(q), EventId{}};  // exhausted: an invalid id tells the caller
   q.nextId += count;
   return {std::move(q), first};
 }
@@ -266,8 +267,11 @@ Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> event
   if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return makeError(ErrorCode::OutOfRange, "bar index out of range");
   const Bar& old = p.bars[static_cast<std::size_t>(bar)];
   if (p.phraseLocked || old.locked) return blocked("this bar");
-  for (const Beat& bt : old.beats)
+  for (const Beat& bt : old.beats) {
     if (bt.locked) return blocked("a beat in this bar");
+    for (const Event& e : bt.events)
+      if (e.locked) return blocked("an event in this bar");
+  }
   const Ticks bt = barTicks(p.settings);
   Pattern q = p;
   Bar& dst = q.bars[static_cast<std::size_t>(bar)];
@@ -296,6 +300,11 @@ Result<Pattern> duplicateBar(const Pattern& p, int fromBar, int toBar) {
   const int n = static_cast<int>(p.bars.size());
   if (fromBar < 0 || fromBar >= n || toBar < 0 || toBar >= n || fromBar == toBar) return makeError(ErrorCode::OutOfRange, "invalid bar indices");
   if (p.phraseLocked || p.bars[static_cast<std::size_t>(toBar)].locked) return blocked("the destination bar");
+  for (const Beat& bt : p.bars[static_cast<std::size_t>(toBar)].beats) {
+    if (bt.locked) return blocked("a beat in the destination bar");
+    for (const Event& e : bt.events)
+      if (e.locked) return blocked("an event in the destination bar");
+  }
   Pattern q = p;
   Bar& dst = q.bars[static_cast<std::size_t>(toBar)];
   const Bar& src = p.bars[static_cast<std::size_t>(fromBar)];
@@ -389,6 +398,23 @@ Result<Pattern> setChildActive(const Pattern& p, EventId id, bool active) {
   return q;
 }
 
+namespace {
+// True when every descendant still references an existing chop and stays inside the source bounds that
+// flatten() will enforce (its ancestor's resolved range, unless it explicitly overrides the source).
+bool subtreeValid(const Event& parent, SampleRange requested, const ChopSnapshot& chops) {
+  if (!parent.child) return true;
+  for (const Event& c : parent.child->events) {
+    const ChopInfo* ci = chops.find(c.chop);
+    if (!ci) return false;
+    const SampleRange req = c.region.empty() ? ci->range : c.region;
+    const SampleRange bound = c.sourceOverride ? ci->range : requested;
+    if (req.empty() || !bound.contains(req)) return false;
+    if (!subtreeValid(c, req, chops)) return false;
+  }
+  return true;
+}
+}  // namespace
+
 Pattern sanitize(const Pattern& p, const ChopSnapshot& chops) {
   Pattern q = p;
   for (Bar& b : q.bars)
@@ -400,6 +426,10 @@ Pattern sanitize(const Pattern& p, const ChopSnapshot& chops) {
         if (!e.region.empty() && !c->range.contains(e.region)) {
           e.region = {};
           e.child.reset();
+          e.childActive = true;
+        }
+        if (e.child && !subtreeValid(e, e.region.empty() ? c->range : e.region, chops)) {
+          e.child.reset();  // the zoomed content no longer fits its chops: the hit plays on its own
           e.childActive = true;
         }
         kept.push_back(std::move(e));

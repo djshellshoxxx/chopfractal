@@ -110,7 +110,8 @@ Proposal evenGrid(std::int64_t frames, const GridSpec& spec) {
   double cellBeats = 4.0 / spec.division;
   if (spec.kind == GridKind::Triplet) cellBeats *= 2.0 / 3.0;
   if (spec.kind == GridKind::Dotted) cellBeats *= 1.5;
-  const std::int64_t cells = static_cast<std::int64_t>(std::floor(spec.loopBeats / cellBeats + 1e-9));
+  const double rawCells = std::floor(spec.loopBeats / cellBeats + 1e-9);
+  const std::int64_t cells = rawCells > 4096.0 ? 4096 : static_cast<std::int64_t>(rawCells);  // far above the 256 chop limit
   for (std::int64_t k = 0; k < cells; ++k) {
     const std::int64_t pos = std::llround(static_cast<double>(k) * static_cast<double>(frames) * cellBeats / spec.loopBeats);
     if (pos >= frames) break;
