@@ -67,6 +67,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   // Feature controls (not host parameters: they act on the project).
   juce::TextButton smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
+  juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
+  juce::ComboBox role_;
+  void historyMenu(chopfractal::history::NodeId id);
   juce::ToggleButton evolve_{"Evolve"};
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;
