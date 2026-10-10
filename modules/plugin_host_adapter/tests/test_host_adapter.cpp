@@ -1,6 +1,7 @@
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <string>
@@ -137,4 +138,81 @@ CHOP_TEST(host_time_falls_back_and_says_so_when_data_is_missing_or_invalid) {
 CHOP_TEST(bus_layouts) {
   CHECK(isSupportedBusLayout(2, 2) && isSupportedBusLayout(1, 1));
   CHECK(!isSupportedBusLayout(1, 2) && !isSupportedBusLayout(0, 0) && !isSupportedBusLayout(6, 6));
+}
+
+// ---- loop position (extracted from ChopFractalProcessor::processBlock) ----
+#include <chopfractal/plugin_host_adapter/loop_position.hpp>
+
+namespace {
+// Characterization oracle: the original inline logic, copied verbatim from processBlock() before the
+// extraction. The extracted function must reproduce it exactly (bit for bit) for every input.
+struct OldResult {
+  bool boundary = false, midpoint = false;
+  double playhead = -1.0;
+};
+OldResult oldInline(const render::TransportBlock& tb, int frames, double sampleRate, double quarters) {
+  OldResult r;
+  if (tb.playing && tb.positionValid && quarters > 0.0) {
+    const double end = tb.ppq + static_cast<double>(frames) * tb.bpm / (60.0 * sampleRate);
+    if (std::floor(tb.ppq / quarters) != std::floor(end / quarters)) r.boundary = true;
+    if (std::floor((tb.ppq - 0.5 * quarters) / quarters) != std::floor((end - 0.5 * quarters) / quarters)) r.midpoint = true;
+    double ph = std::fmod(tb.ppq, quarters);
+    if (ph < 0.0) ph += quarters;
+    r.playhead = ph;
+  }
+  return r;
+}
+}  // namespace
+
+CHOP_TEST(loop_position_is_bit_identical_to_the_original_inline_logic) {
+  const double ppqs[] = {0.0, 1e-9, 0.5, 3.999999, 4.0, 4.000001, 7.9999, 8.0, 15.99, 16.0, 1234.5678, -0.25, -8.0, 1e6, 1e9};
+  const double bpms[] = {20.0, 60.0, 97.3, 120.0, 174.0, 999.0};
+  const double rates[] = {44100.0, 48000.0, 96000.0, 192000.0};
+  const double loops[] = {-1.0, 0.0, 1e-3, 1.0, 4.0, 7.5, 8.0, 16.0, 32.0};
+  const int frameCounts[] = {1, 7, 64, 512, 2048, 16384};
+  long compared = 0;
+  for (bool playing : {false, true})
+    for (bool valid : {false, true})
+      for (double ppq : ppqs)
+        for (double bpm : bpms)
+          for (double sr : rates)
+            for (double q : loops)
+              for (int n : frameCounts) {
+                render::TransportBlock tb;
+                tb.playing = playing;
+                tb.positionValid = valid;
+                tb.ppq = ppq;
+                tb.bpm = bpm;
+                const OldResult want = oldInline(tb, n, sr, q);
+                const LoopPosition got = computeLoopPosition(tb, n, sr, q);
+                CHECK(got.boundary == want.boundary && got.midpoint == want.midpoint);
+                CHECK(std::memcmp(&got.playheadQuarters, &want.playhead, sizeof(double)) == 0);
+                ++compared;
+              }
+  CHECK_EQ(compared, 2 * 2 * 15 * 6 * 4 * 9 * 6);  // 77,760 input combinations
+}
+
+CHOP_TEST(loop_position_reports_expected_crossings_and_playhead) {
+  render::TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  tb.bpm = 120.0;
+  tb.ppq = 7.99;  // an 8-quarter loop ends at 8.0; 512 frames at 48 kHz is about 0.021 quarters
+  auto a = computeLoopPosition(tb, 512, 48000.0, 8.0);
+  CHECK(a.boundary && !a.midpoint);
+  CHECK_NEAR(a.playheadQuarters, 7.99, 1e-12);
+  tb.ppq = 3.99;  // the midpoint is 4.0
+  auto b = computeLoopPosition(tb, 512, 48000.0, 8.0);
+  CHECK(!b.boundary && b.midpoint);
+  tb.ppq = 1.0;
+  auto c = computeLoopPosition(tb, 512, 48000.0, 8.0);
+  CHECK(!c.boundary && !c.midpoint);
+  tb.ppq = -2.0;  // before the start wraps into the loop
+  CHECK_NEAR(computeLoopPosition(tb, 512, 48000.0, 8.0).playheadQuarters, 6.0, 1e-12);
+  tb.playing = false;
+  CHECK(computeLoopPosition(tb, 512, 48000.0, 8.0).playheadQuarters == -1.0);
+  tb.playing = true;
+  CHECK(computeLoopPosition(tb, 512, 48000.0, 0.0).playheadQuarters == -1.0);  // no pattern
+  tb.positionValid = false;
+  CHECK(!computeLoopPosition(tb, 512, 48000.0, 8.0).boundary);
 }
