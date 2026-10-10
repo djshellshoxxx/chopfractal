@@ -48,7 +48,7 @@ struct OutputRouting {
 ```
 Effective bus of a chop = `chopBus[chop]` if present, else `roleBus[roleOf(chop)]` if the chop has a role and a route, else 0.
 
-Serialization: optional trailing block in the `composition` module payload (`kModSession` meta), after the existing evolve block, using the trailing-block registry F01 defines for session state v2. Block name `routing`, payload: `u8 mode; u32 nRole; nRole x (str role, u8 bus); u32 nChop; nChop x (u64 chopId, u8 bus)`. Limits: nRole <= 256, nChop <= limits::kMaxChops (256), bus <= 8, role string <= 64 bytes; any violation is `ErrorCode::Corrupt`, load is all-or-nothing as today. The block is written only when `mode != MainOnly || !roleBus.empty() || !chopBus.empty()`; a project that never used routing serializes byte-identically to before. Old projects (no block) load as `MainOnly`. A project saved with routing then opened in a build without F11 ignores the block (trailing, unknown). Route entries whose chop/role no longer exists are dropped at load with Info notice `"Some output routes were dropped because their chops changed."`.
+Serialization: a new extras block in the `composition` v2 payload defined by F01 (section 4.2 there: `u8 0xE2, u16 blockCount (<= 16)`, blocks `u8 tag, u32 length, bytes`). F11 claims **tag 9 (Routing)** (F01 uses 1-8; F12, F13, F14 claim none); the schema stays 2, no new bump. Payload of tag 9: `u8 mode; u32 nRole; nRole x (str role, u8 bus); u32 nChop; nChop x (u64 chopId, u8 bus)`. Limits: nRole <= 256, nChop <= limits::kMaxChops (256), bus <= 8, role string <= 64 bytes; any violation is `ErrorCode::Corrupt`, load is all-or-nothing as today. The block is written only when `mode != MainOnly || !roleBus.empty() || !chopBus.empty()`; a project that never used routing serializes byte-identically to before. Old projects (no block) load as `MainOnly`. A project saved with routing then opened in a v2 build without F11 skips tag 9 by its length (F01 rule for unknown tags). Route entries whose chop/role no longer exists are dropped at load with Info notice `"Some output routes were dropped because their chops changed."`.
 Pattern payload and `pattern::serialize` are untouched: golden hashes 2397844821793184813, 12084884237330071892, 13710596758976548913, 18237151833431327128 must not change.
 
 Host parameters: none added (routing is state, not automation). The parameter manifest stays at version 2 unless F07/F08 bump it.
@@ -165,7 +165,7 @@ Manual QA (REAPER first): 1) Load a drum loop, Smart Setup, Generate. 2) Outputs
 2. Renderer: `BusRouting`, `Playback::eventBus`, 4-arg `makePlayback`, `Trigger` index; tests for `busFor` and eventBus ordering (no behavior change yet).
 3. Renderer: per-bus `mix`, `Voice::bus`, `AuxOutputs` process overload, `clearAux`, fold-down; bit-identity, sum, allocation, block-size tests.
 4. `renderOfflineStems` + test; `renderOffline` forwards.
-5. composition: `OutputRouting`, setters, auto-assign, republish integration, trailing block (after F01 registry), integration tests.
+5. composition: `OutputRouting`, setters, auto-assign, republish integration, tag 9 extras block (after F01), integration tests.
 6. PluginProcessor: BusesProperties, layout rules, processBlock wiring, shell tests; run validator.
 7. ControlsPanel "Outputs" section + GUI tests.
 8. Docs update and manual QA in REAPER, record results in docs/BUILD_STATUS.md.

@@ -41,6 +41,18 @@ Hard dependencies: F01 needs F00. F02, F03, F05, F06, F09, F10, F13 need F00. F0
 
 Critical path (about 7 sequential items): F00, F01, F02, F04, F08, F07, F11. Everything else runs beside it.
 
+## 2b. Cross-spec decisions (resolved here so implementers do not have to ask)
+
+- **Panel names** are defined in F00 section 5 (authoritative). State sections and `ProjectExtras` are defined in F01; F03/F04/F09/F10/F11 append to it.
+- **Lazy state versioning (F01):** the session schema becomes 2 only when something new is persisted; feature-free projects keep their exact v1 bytes. Pattern and other module schemas stay 1, so golden hashes are unaffected. Evolve `enabled` is never persisted (a project never starts changing by itself).
+- **Space key (F04):** a plugin cannot control the host transport, so Space is left to the host and the editor shows a hint. It is not an audition key.
+- **Waveform clicks (F02):** single click auditions a chop; double click adds a marker (replaces today's click-adds-marker).
+- **Load Loop (F05):** asks for confirmation before replacing a loop that has a pattern.
+- **Shared helpers:** F12 and F14 both need a one-level "undo last source replace" store and `ProjectSession::sourceNeedsEmbed()`. Whichever lands first creates them under the name `SourceReplaceUndo` in `composition/src/source_replace.cpp`; the other reuses them (state this in the PR description).
+- **Pre-existing UI debt fixed by the specs:** Feature row C overflows 920 px (F00 preserves, F04 re-flows into four rows); notices from Evolve/loop-boundary steps pile up unseen (F05 drains them); `Renderer::activeVoices()` is read cross-thread (F05 publishes it via an atomic).
+- **Values to capture at implementation time** (cannot be known without building): the v1 fixture hash (F01), factory preset hash (F03), the F11 CPU ratio bound (1.5x target) and the F12 Keep copy time (250 ms target).
+- **Maintainer decisions still open:** minimum macOS version (specs assume 11.0), bundle id domain (assumed `com.chopfractal`), Windows signing route, whether Linux ships, Apple/Windows certificates, JUCE license route, factory preset content, Chaos mapping taste.
+
 ## 3. Branch, PR and merge rules
 
 - **One feature = one branch = one PR**, named `feat/<ID>-<slug>`, cut from the latest `main` **at the moment work starts**, and rebased/merged from `main` at least daily. PRs stay under about 800 changed lines (excluding tests and generated docs); split larger work using the spec's "Implementation steps", each step independently green.
