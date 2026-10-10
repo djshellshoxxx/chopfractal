@@ -12,11 +12,13 @@ Everything about the VST3 host boundary that needs no JUCE: the append-only auto
 - `translateHostTime(HostTimeInfo, manualBpm, fallbackMeter)` -> transport block + fallback flags
 - `isSupportedBusLayout(in, out)`
 - Manifest version 2 appends `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity`
+- `computeLoopPosition(TransportBlock, frames, sampleRate, patternQuarters)` -> `{boundary, midpoint, playheadQuarters}`: loop-boundary / loop-midpoint crossing and playhead position for one host block (extracted unchanged from the plugin's processBlock; pure and audio-thread safe)
 
 Public headers:
 
 - `include/chopfractal/plugin_host_adapter/parameters.hpp`
 - `include/chopfractal/plugin_host_adapter/host_time.hpp`
+- `include/chopfractal/plugin_host_adapter/loop_position.hpp`
 
 ## Contract
 

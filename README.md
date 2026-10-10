@@ -18,6 +18,8 @@ branch you can return to.
 - **Export:** WAV (16-bit, 24-bit or 32-bit float, up to 192 kHz) and a Producer Kit (every chop as its own WAV plus a MIDI file that replays the pattern on those slices).
 - **Variation family tree:** every Generate, Mutate and Zoom is kept as a branch you can return to.
 
+**Architecture and modularity:** [`docs/MODULARITY_MAP.md`](docs/MODULARITY_MAP.md). **IP records (public-safe, high level):** [`IP/README.md`](IP/README.md).
+
 **Where the build stands:** see [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md). Specifications live in
 [`docs/specs/`](docs/specs/README.md).
 
