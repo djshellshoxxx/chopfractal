@@ -24,7 +24,9 @@ performances into pattern content.
 
 ## 3. UX
 **Entry:** FeaturePanel gets a toggle **"Pads"** (title "Show the performance pads") that shows/hides **PadPanel** (new `plugin/src/panels/PadPanel.{h,cpp}`, a 132 px row docked below
-PatternPanel; hidden by default). **PadPanel contents** (left to right, each with `setTitle`):
+PatternPanel; hidden by default).
+
+**PadPanel contents** (left to right, each with `setTitle`):
 - 4x4 grid of `PadButton` (subclass of `juce::Button`, component names `"Pad 1"` .. `"Pad 16"`, `getButtonText()` = `"Pad N"`, titles `"Pad N: chop M, note C1"`). Pad N of page P is
   chop index `P*16 + N - 1` (0-based) in `ChopSnapshot` order; the pad paints `M`, the chop's role and the note name (convention C3 = MIDI 60, so 36 = C1). Mouse down = NoteOn, up or
   exit = NoteOff; velocity = `127 - round(87 * y / height)` (127 at the top edge, 40 at the bottom; ignored by the Fixed curve). Pads beyond the chop count are disabled and empty. A pad
@@ -64,7 +66,9 @@ struct PadBank { std::array<PadSlot, kPadNotes> slots{}; };  // indexed by MIDI 
 }
 ```
 `LiveInput` (declared by F08, final shape): `{ const GestureEvent* gestures; int numGestures; GestureParams gestureParams; const PadEvent* pads = nullptr; int numPads = 0; PadParams
-padParams; }`. If F07 merges first it declares `LiveInput` with the pad fields only and F08 adds the gesture fields. **Session settings** `PadSettings { std::uint8_t baseNote = 36;
+padParams; }`. If F07 merges first it declares `LiveInput` with the pad fields only and F08 adds the gesture fields.
+
+**Session settings** `PadSettings { std::uint8_t baseNote = 36;
 std::uint8_t midiChannel = 0; /*0 omni, 1..16*/ std::uint8_t quantizeDivision = 16; /*0 off, 4, 8, 16, 32*/ bool quantizeTriplet = false; std::uint8_t merge = 0; /*0 add, 1 replace*/
 std::map<std::uint64_t, std::uint8_t> chokeOverride; /*chop id -> 0 off, 1..4; absent = default (role "hat" -> 1, else off)*/ }`.
 
@@ -105,7 +109,9 @@ then iterate `juce::MidiBuffer` (`for (const auto meta : midi)`): `msg = meta.ge
 clamp(meta.samplePosition, 0, frames - 1)`; NoteOn with velocity > 0 -> `NoteOn{note, velocity}` (also `padActivity_[note >> 5] |= 1u << (note & 31)`); NoteOff or NoteOn velocity 0 ->
 `NoteOff`; `isAllNotesOff()`/`isAllSoundOff()` -> `AllNotesOff`; controllers go to F08's `gestureFromCc` when F08 is present; everything else ignored. At most 256 events; extras
 increment `padDropped_`. The MIDI buffer is not modified or cleared. Events are already sorted by sample position (JUCE guarantees); the UI events at frame 0 are placed first. Pad input
-is ignored (and held voices killed) while `effect_enable` is off, like all voices. **Renderer, per `NoteOn(note, vel)` at frame f** (the event is merged into the existing trigger loop
+is ignored (and held voices killed) while `effect_enable` is off, like all voices.
+
+**Renderer, per `NoteOn(note, vel)` at frame f** (the event is merged into the existing trigger loop
 in `processChunk`: render up to f, then act; at equal frames pattern triggers run first). The same merged loop is used by the pass-through branch (source loaded, no pattern yet), and
 pad events work with the transport stopped (like previews). Steps: (1) `slot = bank.slots[note]`; if `region.empty()` or `region.end > src.frames` -> ignore (counts `padUnmapped`). (2)
 Mono: `releaseVoice` every active, non-fading voice with `tag == 2`. (3) Gate: also release any voice with the same `padNote`. (4) Choke: if `slot.chokeGroup != 0`, `releaseVoice` every
@@ -238,3 +244,4 @@ still work, and the QA note in the manual says so. (8) Open the plugin in the va
    unit tests. 3. Renderer pad voices, `PadBank` mailbox, merged trigger loop, tests (bit-identical without pads, no-alloc). 4. Manifest v3 rows + host adapter tests. 5. Composition:
    bank publishing, `PadSettings`, `pads` section + tests. 6. Processor MIDI parse, UI pad queue, shell tests. 7. PadPanel (pads, settings) + GUI tests. 8. Recording: take queue,
    `mergeTake`, midpoint flush, tests. 9. Docs, host QA matrix (REAPER, Bitwig, Live), manual QA.
+

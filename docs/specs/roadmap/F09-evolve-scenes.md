@@ -218,7 +218,9 @@ the stored bytes); `playing_scenes_arms_the_next_scene_and_adopts_it_when_the_re
 `evolve_and_scenes_are_mutually_exclusive`; `scene_that_no_longer_fits_is_skipped_with_a_notice` (delete a chop used by scene 2); `saved_state_holds_the_real_pattern_while_scenes_play`;
 `scenes_section_roundtrips_is_absent_when_empty_and_hostile_sweep_is_safe`; `keep_scene_adds_a_child_of_the_active_node_and_one_undo_step`; `delete_and_move_are_refused_while_playing`;
 `export_scenes_writes_tsv_midi_and_wav_deterministically` (hash of `scenes.tsv` and the WAV for fixed inputs; second export without overwrite fails with the existing-file error);
-`export_wav_places_scenes_at_cumulative_offsets_and_overlaps_tails`. **GUI, `plugin/tests/test_scenes_gui.cpp`** (xvfb, F00 helpers): `scene_panel_captures_plays_and_exports`: load
+`export_wav_places_scenes_at_cumulative_offsets_and_overlaps_tails`.
+
+**GUI, `plugin/tests/test_scenes_gui.cpp`** (xvfb, F00 helpers): `scene_panel_captures_plays_and_exports`: load
 `drumLoop()`, Detect Chops, Generate; click "Scenes"; click "Capture Scene", click "Mutate", click "Capture Scene"; `findListBox("Scene list")->getNumRows() == 2`; select row 0, set
 "Scene loops" to 1 via `setValue(1, sendNotificationSync)`; click "Play Scenes" with a `FakePlayHead` playing from ppq 0 and run blocks across two loop boundaries calling
 `pollAudioFlags()` after each; assert `sceneStatus().playing` is scene 2 then (wrap) scene 1; click "Stop Scenes" and assert `pattern()` bytes equal the pre-play bytes; click "Clear
@@ -281,3 +283,4 @@ start again: sequencing resumes. (6) Press Generate: scenes stop with the notice
    + renderer tests (TSan, no-alloc). 3. Session: `buildPlayback` extraction, scenes state, capture/edit/remove/move, `displayPattern()`, `scenes` section + tests. 4. Playback:
    `playScenes`, `onSceneBoundary`, `onTransportChanged`, stop-on-edit hooks, processor wiring + integration tests. 5. Evolve recording hook + exclusivity. 6. Export (`buildPatternMidi`
    factor, TSV, MIDI, WAV) + tests. 7. ScenePanel + GUI tests. 8. Docs, QA matrix, snapshot review.
+

@@ -26,10 +26,10 @@ Wave 2 (parallel; depend on F01 state sections)
   F03 presets-and-favorites
   F06 rule-editor
   F13 midi-drag-out
-  F09 evolve-scenes
   F10 ab-morph
 
 Wave 3 (audio-engine changes; one at a time through renderer.cpp / PluginProcessor.cpp)
+  F09 evolve-scenes        (moved here: needs a sample-accurate armed loop-boundary switch in the renderer; start of Wave 3)
   F08 chaos-and-gestures   (parameter manifest v3, small renderer hook)
   F07 performance-pads     (MIDI input, audio-thread queue)
   F12 input-capture        (audio-thread ring buffer)
@@ -51,6 +51,8 @@ Critical path (about 7 sequential items): F00, F01, F02, F04, F08, F07, F11. Eve
 - **Shared helpers:** F12 and F14 both need a one-level "undo last source replace" store and `ProjectSession::sourceNeedsEmbed()`. Whichever lands first creates them under the name `SourceReplaceUndo` in `composition/src/source_replace.cpp`; the other reuses them (state this in the PR description).
 - **Pre-existing UI debt fixed by the specs:** Feature row C overflows 920 px (F00 preserves, F04 re-flows into four rows); notices from Evolve/loop-boundary steps pile up unseen (F05 drains them); `Renderer::activeVoices()` is read cross-thread (F05 publishes it via an atomic).
 - **Values to capture at implementation time** (cannot be known without building): the v1 fixture hash (F01), factory preset hash (F03), the F11 CPU ratio bound (1.5x target) and the F12 Keep copy time (250 ms target).
+- **Performance pads and hosts (F07):** Ableton Live cannot route MIDI to an Fx-category plugin and the plugin category stays `Fx`; on-screen pads are the guaranteed path. Adding an Instrument category is a product decision. Whether JUCE adds MIDI-CC emulation parameters once `acceptsMidi` is true, and the validator test count, must be checked when F07 lands.
+- **State sections API:** F01 defines the exact signature; F07/F08/F09 sections (`pads`, `chaos`, `scenes`) are written against "id + schema + bytes, optional, absent when default" and must be adjusted to F01's final form.
 - **Maintainer decisions still open:** minimum macOS version (specs assume 11.0), bundle id domain (assumed `com.chopfractal`), Windows signing route, whether Linux ships, Apple/Windows certificates, JUCE license route, factory preset content, Chaos mapping taste.
 
 ## 3. Branch, PR and merge rules
@@ -148,7 +150,7 @@ Developer prompt template (paste with the spec): "Implement `docs/specs/roadmap/
 | ID | Size | Days | ID | Size | Days |
 |---|---|---|---|---|---|
 | F00 | M | 3 | F08 | M | 3 |
-| F01 | L | 5 | F09 | M | 4 |
+| F01 | L | 5 | F09 | L | 6 |
 | F02 | L | 8 | F10 | M | 3 |
 | F03 | M | 4 | F11 | L | 6 |
 | F04 | M | 3 | F12 | L | 6 |
@@ -156,7 +158,7 @@ Developer prompt template (paste with the spec): "Implement `docs/specs/roadmap/
 | F06 | M | 5 | F14 | L | 8 |
 | F07 | L | 6 | F15 | L | 7 |
 
-Total about 76 engineer-days. With three parallel engineers following the waves: about 5 to 6 calendar weeks, bounded by the critical path (about 28 days) plus review and host-testing time. Add one week of dedicated real-host testing and fixes before any public beta.
+Total about 78 engineer-days. With three parallel engineers following the waves: about 5 to 6 calendar weeks, bounded by the critical path (about 28 days) plus review and host-testing time. Add one week of dedicated real-host testing and fixes before any public beta.
 
 ## 11. Release readiness checklist (after Wave 3)
 

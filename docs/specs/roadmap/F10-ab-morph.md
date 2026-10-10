@@ -79,7 +79,9 @@ naturally, and with F08 present the Chaos overlay is applied on top of the morph
 ## 6. Behavior details and edge cases
 **Preconditions (`morph`).** `a` and `b` must have equal `settings.bars`, `timeSignature` and `grid`, else `ErrorCode::Conflict` with the first UX message. Both must satisfy `validate`.
 Total distinct hits `matched + onlyA + onlyB` must be <= `min(a.maxEvents, b.maxEvents)` else `ErrorCode::LimitExceeded` ("A and B have too many different hits to morph (N > M).").
-Chops come from the current `ChopSnapshot`; an event whose chop is unknown is dropped from its side before matching (patterns are `sanitize`d first by the session). **Event matching**
+Chops come from the current `ChopSnapshot`; an event whose chop is unknown is dropped from its side before matching (patterns are `sanitize`d first by the session).
+
+**Event matching**
 (per bar index; events never match across bars; top-level events only; `g = gridTicks(settings.grid)`):
 1. *Identity pass:* A event `ea` and B event `eb` pair when `ea.id == eb.id`, `ea.chop == eb.chop` and `|ea.start - eb.start| <= g`. (Ids alone are not trusted: two branches that both
    continued from one ancestor reuse the same new ids for unrelated events.)
@@ -103,7 +105,9 @@ Chops come from the current `ChopSnapshot`; an event whose chop is unknown is dr
 | `probability` | lerp |
 | `enabled`, `sourceOverride`, `childActive`, `child` | switch (an event that has a child on the chosen side takes that side's `start`, `duration`, `chop`, `region` too, so the child window stays valid) |
 | `locked`, `userOwned` | `locked` from A; `userOwned = a.userOwned || b.userOwned` |
-The matched event keeps A's `id`. **Unmatched events** (presence crossfade by probability): A-only keep their id and get `probability = pA * (1 - t)`; B-only are re-identified with
+The matched event keeps A's `id`.
+
+**Unmatched events** (presence crossfade by probability): A-only keep their id and get `probability = pA * (1 - t)`; B-only are re-identified with
 fresh ids `max(a.nextId, b.nextId) + k` (k = rank by `(bar, start, original id)`, so ids are the same for every `t`) and get `probability = pB * t`. Because `probabilityPasses` compares
 a fixed per-id draw `u(id)` with the probability, the set of audible A-only events only shrinks and the set of B-only events only grows as `t` rises (monotone, no flicker). A B-only
 event that has a child tree keeps the tree; if the final `validate` reports a duplicate id (derived child ids can collide with another event's), all children of B-only events are
@@ -160,7 +164,9 @@ equal between `flatten(morph(..., false))` and `flatten(morph(..., true))` for 5
 `commit_creates_a_node_labelled_with_the_percent_and_one_undo_step` (label `"Morph A>B 37%"`, `undo()` restores the pre-commit pattern, `pattern()` equals the frozen result);
 `other_commands_end_the_morph` (loop over Generate, Mutate, undo, recall, activate, loadState, setEvolve: `morphActive()` false and the notice present);
 `store_slot_while_morphing_refreshes_the_preview`; `failed_set_morph_keeps_previous_preview`; `morph_survives_marker_edits_via_sanitize`; `ab_slots_persist_and_morph_works_after_reload`
-(needs F01 `ab`); `display_pattern_returns_the_preview_while_active`; `chaos_layers_on_top_of_the_morph` (when F08 is present). **GUI, `plugin/tests/test_morph_gui.cpp`** (xvfb, F00
+(needs F01 `ab`); `display_pattern_returns_the_preview_while_active`; `chaos_layers_on_top_of_the_morph` (when F08 is present).
+
+**GUI, `plugin/tests/test_morph_gui.cpp`** (xvfb, F00
 helpers): `morph_controls_enable_with_both_slots_and_commit_adds_a_node`: load `drumLoop()`, Detect Chops, click "Generate", "Store A", "Mutate", "Store B"; before storing B assert
 `findButton("Morph")->isEnabled()==false`; after: `static_cast<juce::ToggleButton*>(...)->setToggleState(true, sendNotificationSync)`, pump 100 ms; assert `s.morphActive()` and
 StatusBar text contains `"Morphing 50% toward B"`; `findSlider("Morph amount")->setValue(0.25, sendNotificationSync)`, pump 120 ms, assert `morphAmount()` within 0.005 of 0.25 and the
@@ -219,3 +225,4 @@ the preview updates immediately. (6) Press Generate while morphing: the preview 
 1. `probabilitySeedFor`/`probabilityPasses` refactor + `PatternSession::snapshot` + tests (goldens unchanged). 2. `morph.hpp/.cpp`: matching, interpolation, structure rebuild,
    validation fallback + unit tests. 3. Freeze mode + equality-with-preview test. 4. Session: `beginMorph/setMorph/commitMorph/cancelMorph`, `displayPattern`, `endMorph` hooks +
    integration tests. 5. FeaturePanel controls, badge, EditorModel accessor swap, coalescing + GUI tests. 6. Docs, QA, snapshot review.
+

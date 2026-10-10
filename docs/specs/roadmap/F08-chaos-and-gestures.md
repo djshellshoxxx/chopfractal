@@ -151,8 +151,10 @@ an undo step (it changes only the overlay seed). **Gestures (audio thread, all s
   (`tapeRate == 1.0`, no ramp) the buffers are not refilled and the factors are exactly 1.0, so output is bit-identical to the pre-F08 renderer. The pattern keeps scheduling during a
   tape stop (new voices start at the current slow rate).
 - Events whose state does not change (on while on) are ignored. Two simultaneous gestures combine: Stutter + Reverse retriggers reversed; Tape Stop slows everything including stutter
-  voices. **CC mapper** is pure and unit-tested here; F07 calls `gestureFromCc` for `juce::MidiMessage::isController()` messages and adds the result to `LiveInput` at the message's
-  sample position.
+  voices.
+
+**CC mapper** is pure and unit-tested here; F07 calls `gestureFromCc` for `juce::MidiMessage::isController()` messages and adds the result to `LiveInput` at the message's sample
+position.
 
 **Interactions.** Locks: locked scopes are bit-identical at Chaos 100 %. Undo/A-B/history are unaffected by Chaos. Evolve and Chaos run together (Chaos is applied to each new evolved
 pattern). Scenes (F09) arm playbacks built by `installPlayback`/its builder, so Chaos applies to scenes. Offline render (`renderOffline`) takes no gestures. Host bypass (`effect_enable`
@@ -248,3 +250,4 @@ pitch falls and stops in 0.4 s, no DC thump; release: spins up in 0.15 s. (8) Fr
    `chaos` + host adapter tests. 5. Session integration (`installPlayback`, `setChaos`, bias, freeze, re-roll, `chaos` section) + composition tests. 6. Processor poll + ControlsPanel
    slider + shell test. 7. Renderer gesture engine, `LiveInput` overload, CC mapper + unit tests. 8. Processor gesture queue, GesturePanel, GUI tests. 9. Docs, module manifests, manual
    QA.
+

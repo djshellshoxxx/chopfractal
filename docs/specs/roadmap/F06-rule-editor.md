@@ -271,3 +271,4 @@ blocked counts line and an unchanged pattern (press Undo: nothing to undo). (7) 
    change. 4. `composition/src/rules.cpp` (`clearRole`, notes, `explainEvent`, `previewRules`) + composition tests. 5. RulesPanel Rules tab (list, form, templates) and footer
    Apply/Revert/Apply and Mutate + GUI tests 1-2. 6. Roles tab and Problems/Why area + GUI tests 3-5. 7. Docs, module manifest regeneration, snapshot review (`CHOPFRACTAL_SNAPSHOT`),
    manual QA run.
+
