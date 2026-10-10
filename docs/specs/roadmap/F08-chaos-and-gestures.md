@@ -28,11 +28,13 @@ Density/Swing. **GesturePanel** (new `plugin/src/panels/GesturePanel.{h,cpp}`, a
   `"Stutter (latched)"` etc.): **"Stutter"**, **"Reverse"**, **"Tape Stop"** (titles `"Hold to stutter the last hit"`, `"Hold to play backwards"`, `"Hold to slow to a stop"`).
 - ComboBox **"Stutter rate"**: `"1/8"`, `"1/16"` (default), `"1/32"`.
 - Sliders **"Tape stop time"** (50 to 2000 ms, default 400, suffix ` ms`) and **"Tape spin-up"** (20 to 1000 ms, default 150).
-- Buttons **"Freeze Chaos"** (enabled when Chaos > 0 and a pattern exists) and **"Re-roll"**, ToggleButton **"Chaos affects edited hits"** (default off). Enable rules: gesture buttons
-  are enabled whenever a source with chops is loaded; Stutter does nothing without a previously played hit (see 6). Messages (StatusBar): `"Chaos applied to the playback; Freeze Chaos
-  keeps it as a variation."` (first time Chaos > 0 in a session, Info), `"Frozen: Chaos 63 % is now variation 'Chaos 63%'."`, `"Chaos could not be applied: <module message>"` (the value
-  snaps back to its previous step), `"Nothing to freeze: Chaos is 0."`. Tab order: Chaos, Stutter, Reverse, Tape Stop, Stutter rate, Tape stop time, Tape spin-up, Freeze Chaos, Re-roll,
-  toggle.
+- Buttons **"Freeze Chaos"** (enabled when Chaos > 0 and a pattern exists) and **"Re-roll"**, ToggleButton **"Chaos affects edited hits"** (default off).
+
+Enable rules: gesture buttons are enabled whenever a source with chops is loaded; Stutter does nothing without a previously played hit (see 6).
+
+Messages (StatusBar): `"Chaos applied to the playback; Freeze Chaos keeps it as a variation."` (first time Chaos > 0 in a session, Info), `"Frozen: Chaos 63 % is now variation 'Chaos
+63%'."`, `"Chaos could not be applied: <module message>"` (the value snaps back to its previous step), `"Nothing to freeze: Chaos is 0."`. Tab order: Chaos, Stutter, Reverse, Tape Stop,
+Stutter rate, Tape stop time, Tape spin-up, Freeze Chaos, Re-roll, toggle.
 
 ## 4. Data model and state
 **Host parameter (manifest version 3, appended after `fx_intensity`):** `{"chaos", "Chaos", "%", ParamKind::Float, 0.0, 1.0, 0.0, 0.0, 20.0, 3, nullptr}`, new `ParamIndex kChaos` (= 14
@@ -112,7 +114,9 @@ childActive`; the child plays instead).
 | 8 | 9 | filter | `allowFilter` and `!fx.active()` | `0.35 k` | `m = fxIntensity * k * (0.5 + 0.5 r2)`; type = LowPass if `r1 < 0.5` else HighPass; LowPass `cutoff = 1 - 0.85 m`, HighPass `cutoff = 0.7 m`; `resonance = clamp(0.6 m r3, 0, 1)` |
 | 9 | 10 | glide | `allowGlide` and `!fx.active()` | `0.20 k` | `glideSemitones = (r1 < 0.5 ? -1 : 1) * 12 * fxIntensity * k * (0.5 + 0.5 r2)` |
 | 10 | 11 | crunch | `allowCrunch` and `!fx.active()` | `0.20 k` | `crush = clamp(0.8 * fxIntensity * k * (0.5 + 0.5 r1), 0, 1)` |
-Each fx step tests `!fx.active()` against the event as it is when the step runs, so at most one of filter, glide, crunch is added to an event. **Ghost hits (density up):** after the
+Each fx step tests `!fx.active()` against the event as it is when the step runs, so at most one of filter, glide, crunch is added to an event.
+
+**Ghost hits (density up):** after the
 pass, for every grid slot (`gridTicks`, swing ignored) of every unlocked beat (not hand-placed unless `affectEdited`) that has no event starting inside it: if `u < 0.25 * k * (1
 - settings.density)` add a new event (id from `nextId`, ascending bar/beat/slot order): chop = the chop of the nearest earlier event in the phrase (else the first chop), `level = 0.5`,
   `duration = min(gridTicks, barTicks - start)`, not userOwned, no effects. The total never exceeds `settings.maxEvents` (excess ghosts are skipped in order). Unaffected by Chaos:
@@ -123,9 +127,13 @@ saved state and `pattern()` always hold the un-chaosed pattern. Every existing p
 `installPlayback`, so Chaos follows all of them. WAV export renders `playback_` and therefore includes Chaos (what you hear); Producer Kit MIDI uses `pattern()` and does not (Freeze
 first). Order with other features: `base pattern (F10 morph preview if active, else patterns_.current())` -> Chaos -> `flatten` -> `makePlayback`. Performance budget: `applyChaos` on
 512 events under 1 ms; whole rebuild under 10 ms on the message thread (logged by a benchmark test, not asserted). Updates are coalesced by the 30 Hz poll and the 0.01 quantization (at
-most 100 distinct rebuilds across the full range). **Mutate/Evolve bias.** `amountEff = min(1.0, amount + 0.5 * k)` is applied to the local copy of `MutateOptions.amount` inside
+most 100 distinct rebuilds across the full range).
+
+**Mutate/Evolve bias.** `amountEff = min(1.0, amount + 0.5 * k)` is applied to the local copy of `MutateOptions.amount` inside
 `ProjectSession::mutate()` and to each `Step.amount` in `evolveStep()`, so a high Chaos makes Evolve change more per step. Generate ignores Chaos. With Chaos 0, `amountEff == amount`
-exactly (no float drift: the add is skipped), keeping Evolve's documented replay property. **Freeze.** `freezeChaos(label)`: if `chaos_.k <= 0` -> `ErrorCode::InvalidArgument` "Nothing
+exactly (no float drift: the add is skipped), keeping Evolve's documented replay property.
+
+**Freeze.** `freezeChaos(label)`: if `chaos_.k <= 0` -> `ErrorCode::InvalidArgument` "Nothing
 to freeze: Chaos is 0."; else `q = applyChaos(current, ..., erase = true)`, temporarily set `chaos_.k = 0`, `finalize(q, label.empty() ? "Chaos NN%" : label)` (history node + one undo
 step), and the editor then sets the parameter to 0 with `setValueNotifyingHost`. If `finalize` fails the previous `k` is restored. **Re-roll** increments `rerolls`, rebuilds, and is not
 an undo step (it changes only the overlay seed). **Gestures (audio thread, all sample-accurate at the event frame or at the block start for queued GUI events).** State lives in
@@ -144,9 +152,11 @@ an undo step (it changes only the overlay seed). **Gestures (audio thread, all s
   tape stop (new voices start at the current slow rate).
 - Events whose state does not change (on while on) are ignored. Two simultaneous gestures combine: Stutter + Reverse retriggers reversed; Tape Stop slows everything including stutter
   voices. **CC mapper** is pure and unit-tested here; F07 calls `gestureFromCc` for `juce::MidiMessage::isController()` messages and adds the result to `LiveInput` at the message's
-  sample position. **Interactions.** Locks: locked scopes are bit-identical at Chaos 100 %. Undo/A-B/history are unaffected by Chaos. Evolve and Chaos run together (Chaos is applied to
-  each new evolved pattern). Scenes (F09) arm playbacks built by `installPlayback`/its builder, so Chaos applies to scenes. Offline render (`renderOffline`) takes no gestures. Host
-  bypass (`effect_enable` off) clears gesture state.
+  sample position.
+
+**Interactions.** Locks: locked scopes are bit-identical at Chaos 100 %. Undo/A-B/history are unaffected by Chaos. Evolve and Chaos run together (Chaos is applied to each new evolved
+pattern). Scenes (F09) arm playbacks built by `installPlayback`/its builder, so Chaos applies to scenes. Offline render (`renderOffline`) takes no gestures. Host bypass (`effect_enable`
+off) clears gesture state.
 
 ## 7. Test plan
 **Unit, `modules/pattern_engine/tests/test_chaos.cpp`:** `chaos_curve_endpoints_and_midpoint` (0 -> 0, 1 -> 1, 0.5 -> 0.35355339 +-1e-9, input clamped);
@@ -164,8 +174,12 @@ a reverse event render sample by sample for new voices); `tape_stop_ramps_to_zer
 < 1e-4 and not a constant nonzero run; spin-up restores 1.0 within `spinUpMs`); `gestures_are_block_size_independent` (block sizes 64, 333, 512, 2048 give identical output with the same
 event times); `oversize_host_blocks_rebase_gesture_frames`; `gesture_path_performs_no_heap_allocation` (extends the replaced-operator-new harness of
 `process_performs_no_heap_allocation`); `cc_mapper_hysteresis_zones_and_unmapped_ccs`; `spsc_queue_preserves_order_and_never_loses_or_duplicates_across_threads` (producer/consumer, 1e6
-items, run under TSan); `spsc_queue_reports_full_and_empty`. **Host adapter, `test_host_adapter.cpp`:** golden manifest list gains `chaos` (id, range 0..1, default 0, step 0, smoothing
-20, sinceVersion 3); `kManifestVersion == 3`; existing IDs and ranges unchanged. **Integration, `composition/tests/test_chaos.cpp`:**
+items, run under TSan); `spsc_queue_reports_full_and_empty`.
+
+**Host adapter, `test_host_adapter.cpp`:** golden manifest list gains `chaos` (id, range 0..1, default 0, step 0, smoothing
+20, sinceVersion 3); `kManifestVersion == 3`; existing IDs and ranges unchanged.
+
+**Integration, `composition/tests/test_chaos.cpp`:**
 `chaos_overlay_changes_playback_but_not_the_stored_pattern` (pattern bytes identical; `playback()->events` differ at 0.8, equal at 0);
 `chaos_zero_playback_is_identical_to_the_pre_feature_playback`; `mutate_and_evolve_use_the_biased_amount` (spy via equal seed: amount 0.2 + chaos 1.0 -> 0.7 produces the same pattern as
 `mutate({seed, 0.7})`); `evolve_replay_is_unchanged_with_chaos_zero`; `freeze_creates_a_node_one_undo_step_and_resets_chaos`; `freeze_with_zero_chaos_is_refused`;
@@ -176,8 +190,12 @@ differs from chaos 0 and is repeatable; back to 0: hash equals baseline); `gestu
 baseline, `setGesture(...,false)` restores); `released_editor_clears_stuck_gestures`. GUI (xvfb, F00 recursive helpers): `gesture_buttons_are_momentary`: `b = findButton("Stutter");
 b->setState(juce::Button::buttonDown); pump; CHECK(proc.gestureActive(Stutter)); b->setState(juce::Button::buttonNormal); pump; CHECK(!...)`; Shift-latch: simulate `mouseDown` with
 shift, assert stays on after `buttonNormal`, plain click clears; `freeze_chaos_button`: set Chaos slider 0.5, pump 100 ms, click "Freeze Chaos", assert history node count +1 and slider
-value 0 and StatusBar contains `"Frozen: Chaos 35 %"`; all new controls have titles. **Real-time / sanitizer:** TSan on `test_gestures` (queue + process); ASan/UBSan on all; process()
-allocation test passes; the hostile-state sweep covers the `chaos` section. **Manual QA:** (1) Generate a 4-bar groove, play. (2) Raise Chaos slowly to 100 %: events thin and ghost
+value 0 and StatusBar contains `"Frozen: Chaos 35 %"`; all new controls have titles.
+
+**Real-time / sanitizer:** TSan on `test_gestures` (queue + process); ASan/UBSan on all; process()
+allocation test passes; the hostile-state sweep covers the `chaos` section.
+
+**Manual QA:** (1) Generate a 4-bar groove, play. (2) Raise Chaos slowly to 100 %: events thin and ghost
 notes appear, effects appear only for the Allow toggles that are on. (3) Lock bar 1 (Lock Bar) and repeat: bar 1 never changes. (4) Return to 0: the original pattern, exactly. (5)
 Automate Chaos in the DAW, bounce twice: identical audio. (6) Hold Stutter on the pad of your choice: the last hit repeats on 1/16, release: groove resumes in time. (7) Hold Tape Stop:
 pitch falls and stops in 0.4 s, no DC thump; release: spins up in 0.15 s. (8) Freeze Chaos at 60 %, press Undo: previous pattern returns.

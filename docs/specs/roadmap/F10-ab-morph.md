@@ -28,13 +28,16 @@ tool, and the building block for smooth transitions.
   applied when it differs from the applied one by at least 0.005, and the final value is always applied on mouse-up).
 - Buttons **"Commit Morph"** (enabled while the preview is active) and **"Cancel Morph"** (same).
 - PatternPanel/OrbitPanel draw `ProjectSession::displayPattern()` (the morphed pattern while previewing) and PatternPanel shows the text badge **"Morph preview"** in its top-right
-  corner (text, not colour only). **Messages (StatusBar, exact):** `"Store A and B first."`; `"A and B differ in pattern length, meter or grid, so they cannot be morphed."`; `"A and B
-  have too many different hits to morph (560 > 512)."` (numbers filled in); `"Morphing 37% toward B. Commit Morph to keep it, or Cancel Morph."`; `"Committed the morph as a new
-  variation."`; `"Morph cancelled; your pattern is unchanged."`; `"Morph ended because the pattern was changed."` (when another command cancels it); `"Cancel the scene playback before
-  morphing."` (F09 present). **Interactions and enabling:** Store A / Store B stay enabled while morphing and refresh the preview immediately from the new slot content. Recall A/B,
-  Generate, Mutate, Fractal, Zoom, Collapse, direct edits (F02), Undo/Redo, family-tree activation, Evolve steps, loading a project or source all end the morph with the "ended" message.
-  Evolve cannot be switched on while morphing (`"Cancel the morph before switching Evolve on."`). Keyboard: Tab order Store A, Recall A, Store B, Recall B, Morph, Morph amount, Commit
-  Morph, Cancel Morph; the slider responds to arrow keys in 0.01 steps (JUCE default), Page Up/Down 0.1.
+  corner (text, not colour only).
+
+**Messages (StatusBar, exact):** `"Store A and B first."`; `"A and B differ in pattern length, meter or grid, so they cannot be morphed."`; `"A and B have too many different hits to
+morph (560 > 512)."` (numbers filled in); `"Morphing 37% toward B. Commit Morph to keep it, or Cancel Morph."`; `"Committed the morph as a new variation."`; `"Morph cancelled; your
+pattern is unchanged."`; `"Morph ended because the pattern was changed."` (when another command cancels it); `"Cancel the scene playback before morphing."` (F09 present).
+
+**Interactions and enabling:** Store A / Store B stay enabled while morphing and refresh the preview immediately from the new slot content. Recall A/B, Generate, Mutate, Fractal, Zoom,
+Collapse, direct edits (F02), Undo/Redo, family-tree activation, Evolve steps, loading a project or source all end the morph with the "ended" message. Evolve cannot be switched on while
+morphing (`"Cancel the morph before switching Evolve on."`). Keyboard: Tab order Store A, Recall A, Store B, Recall B, Morph, Morph amount, Commit Morph, Cancel Morph; the slider
+responds to arrow keys in 0.01 steps (JUCE default), Page Up/Down 0.1.
 
 ## 4. Data model and state
 No change to any persisted format and no host parameter (`kManifestVersion` unchanged by this feature). The morph is transient: it is never saved; the A/B slots themselves are persisted
@@ -104,20 +107,32 @@ The matched event keeps A's `id`. **Unmatched events** (presence crossfade by pr
 fresh ids `max(a.nextId, b.nextId) + k` (k = rank by `(bar, start, original id)`, so ids are the same for every `t`) and get `probability = pB * t`. Because `probabilityPasses` compares
 a fixed per-id draw `u(id)` with the probability, the set of audible A-only events only shrinks and the set of B-only events only grows as `t` rises (monotone, no flicker). A B-only
 event that has a child tree keeps the tree; if the final `validate` reports a duplicate id (derived child ids can collide with another event's), all children of B-only events are
-dropped and `report->childrenDropped = true`. **Result structure.** Output = copy of `a` with every beat's events cleared, then each result event inserted into the beat containing its
+dropped and `report->childrenDropped = true`.
+
+**Result structure.** Output = copy of `a` with every beat's events cleared, then each result event inserted into the beat containing its
 `start` (`start / beatTicks`, last beat clamped) sorted by `(start, id)`. Scope ids, `locked`, `copyOf` come from `a`; `userOwned` of a bar/beat = either side's. Settings: `bars`,
 `timeSignature`, `grid`, `seed` (= `a.settings.seed`, so the probability draws of A's own events are stable while sliding), `swing`, `density`, `variation.*`, `fxIntensity` = lerp;
 `allow*` flags = OR; `pitchRange`, `maxRetrigger`, `maxShiftTicks` = max; `maxEvents` = min; `engineVersion` as both. `nextId` = base + number of B-only events. The result must pass
-`validate`. **Endpoints.** `t <= 0` returns `a`, `t >= 1` returns `b`, byte-identical (a test compares `serialize`). Morphing a pattern with itself gives itself for any `t` (every event
-matches, all lerps are identity, no unmatched events). **Commit.** `commitMorph(label)`: `q = morph(a, b, t, chops, freeze = true)`; with `freeze` an unmatched event is kept iff
+`validate`.
+
+**Endpoints.** `t <= 0` returns `a`, `t >= 1` returns `b`, byte-identical (a test compares `serialize`). Morphing a pattern with itself gives itself for any `t` (every event
+matches, all lerps are identity, no unmatched events).
+
+**Commit.** `commitMorph(label)`: `q = morph(a, b, t, chops, freeze = true)`; with `freeze` an unmatched event is kept iff
 `probabilityPasses(probabilitySeedFor(q.settings.seed), newId, weight)` for its scaled weight, and kept events get their base probability back (A-only `pA`, B-only `pB`; matched events
 keep the interpolated value); `finalize(Result(q), label.empty() ? "Morph A>B 37%" : label)` records the family-tree node (seed = A's seed, parent = active node) and one undo step; the
 morph preview ends and the committed pattern is what plays (identical to the preview: same ids, same draws; test asserts equal flattened id lists and event fields). Percent in the label
-= `lround(t * 100)`. **Live preview mechanics.** `setMorph` runs on the message thread: `morph` (O(events^2) per bar, under 1 ms for 512 events) + `installPlayback`. Rapid slider moves
+= `lround(t * 100)`.
+
+**Live preview mechanics.** `setMorph` runs on the message thread: `morph` (O(events^2) per bar, under 1 ms for 512 events) + `installPlayback`. Rapid slider moves
 publish at most every 50 ms; `Mailbox::publish` frees superseded playbacks only after the audio thread acknowledged newer ones, so there is no unbounded growth. A failed `setMorph` (for
-example a limit after Store A with a denser pattern) keeps the previous preview, shows the error, and leaves the toggle on. **Missing source / no chops.** The preview needs a loaded
+example a limit after Store A with a denser pattern) keeps the previous preview, shows the error, and leaves the toggle on.
+
+**Missing source / no chops.** The preview needs a loaded
 source with matching chops; without them `beginMorph` returns `InvalidArgument` "load a source first". If chops changed since the slots were stored, `sanitize` drops dead events on each
-side before matching (same repair rule as variation activation). **Interactions.** Locks: locks in A's structure are copied as metadata; the morph blends two finished snapshots and does
+side before matching (same repair rule as variation activation).
+
+**Interactions.** Locks: locks in A's structure are copied as metadata; the morph blends two finished snapshots and does
 not enforce locks inside the blend (documented in the tooltip of "Morph"). Roles/rules: not consulted (no generation happens). Undo history and the family tree are untouched until
 Commit. Evolve and scenes: mutually exclusive (see UX). Chaos: layered on top for playback only. Determinism: same `(a, b, t, chops)` -> byte-identical `serialize(result)` within a
 platform and build (float lerps use plain `+ - *` and `llround`; compilers may fuse operations differently across platforms, which can differ in the last float bit; this is acceptable
@@ -137,7 +152,9 @@ binomial 3-sigma band for 200 events); `b_only_ids_are_stable_across_t`; `refuse
 `result_validates_and_flattens_for_random_pairs` (200 pairs generated with different seeds and settings, t in {0.1, 0.5, 0.9}); `freeze_matches_preview_flatten` (ids, starts, levels
 equal between `flatten(morph(..., false))` and `flatten(morph(..., true))` for 50 pairs); `morph_is_deterministic_run_to_run`; the four golden hashes pass untouched.
 **`modules/chop_contracts/tests`:** `probability_helpers_match_flatten_behavior` (events with probability 0.3, 0.7, 1.0: `probabilityPasses` agrees with the presence of the event in
-`flattenInto` output for 1000 ids); existing event tests unchanged. **Integration, `composition/tests/test_morph.cpp`:** `begin_requires_both_slots_and_a_source`;
+`flattenInto` output for 1000 ids); existing event tests unchanged.
+
+**Integration, `composition/tests/test_morph.cpp`:** `begin_requires_both_slots_and_a_source`;
 `preview_publishes_a_playback_without_touching_pattern_history_or_undo` (pattern bytes, `history().listAll().size()`, `canUndo()` equal before/after `setMorph`);
 `preview_audio_at_the_endpoints_equals_a_and_b` (`renderOffline` of the preview at t = 0 equals the render of A byte for byte, t = 1 equals B);
 `commit_creates_a_node_labelled_with_the_percent_and_one_undo_step` (label `"Morph A>B 37%"`, `undo()` restores the pre-commit pattern, `pattern()` equals the frozen result);
@@ -150,8 +167,12 @@ StatusBar text contains `"Morphing 50% toward B"`; `findSlider("Morph amount")->
 PatternPanel badge component `"Morph preview"` `isVisible()`; click "Commit Morph"; assert `morphActive()==false`, history node count +1, newest label `"Morph A>B 25%"`, `canUndo()`;
 click "Undo" and assert pattern bytes equal the pre-commit bytes; click "Morph" on again then "Cancel Morph": bytes unchanged, message `"Morph cancelled; your pattern is unchanged."`.
 Also `slider_coalesces_rapid_changes` (50 `setValue` calls within 20 ms cause <= 3 session `setMorph` applications, counted through a test hook on the command layer) and the
-accessibility-title check. **Determinism / sanitizers / real-time:** ASan/UBSan on morph fuzz; no audio-thread code changes, so the allocation test stays as is; the preview path is
-message-thread only (a TSan run of the existing mailbox stress covers publication). **Manual QA:** (1) Generate with seed 1, Store A; Generate with another seed, Store B. (2) Enable
+accessibility-title check.
+
+**Determinism / sanitizers / real-time:** ASan/UBSan on morph fuzz; no audio-thread code changes, so the allocation test stays as is; the preview path is
+message-thread only (a TSan run of the existing mailbox stress covers publication).
+
+**Manual QA:** (1) Generate with seed 1, Store A; Generate with another seed, Store B. (2) Enable
 Morph, loop playing: at A the loop equals A (Recall A and compare by ear), at B equals B. (3) Drag slowly: hits fade in/out one by one, levels and filters glide, no clicks beyond normal
 voice behavior. (4) Commit at 40 %, then play: identical to the preview; Undo returns to the previous pattern; the family tree shows "Morph A>B 40%". (5) Press Store A while morphing:
 the preview updates immediately. (6) Press Generate while morphing: the preview ends and the message appears.

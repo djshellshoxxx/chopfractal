@@ -23,7 +23,9 @@ sample-accurate switch fixes the audible late-downbeat of today's quantized vari
 
 ## 3. UX
 **Entry:** FeaturePanel toggle **"Scenes"** (title "Show the scene list") shows/hides **ScenePanel** (`plugin/src/panels/ScenePanel.{h,cpp}`, a 200 px row docked under PatternPanel;
-hidden by default). **ScenePanel (component name `"ScenePanel"`):**
+hidden by default).
+
+**ScenePanel (component name `"ScenePanel"`):**
 - `ListBox` **"Scene list"** (max 32 rows), row text `"3  Evolve step 2   4 loops   > next"` (number = position + 1; the sequence marker `>` is followed by `next`, `repeat`, `stop`, or
   `jump to 5`); the playing row ends with `"  [Playing, loop 2 of 4]"`, the armed row with `"  [Next]"` (text, not colour only). Rows whose pattern no longer fits the chops end with `"
   (does not fit the chops)"`.
@@ -35,15 +37,17 @@ hidden by default). **ScenePanel (component name `"ScenePanel"`):**
 - ToggleButtons **"Rec Scenes"** (title "Record scenes while Evolve runs"), **"Play Scenes"** (title "Play the scenes in sequence"), **"Wrap"** (default on: after the last scene
   continue with the first). Button **"Stop Scenes"**.
 - Status label (10 Hz): `"Scene 3 of 7, loop 2 of 4"`, `"Scenes stopped"`, `"Waiting for the host to play"` (armed but transport stopped), `"Recording scenes: waiting for Evolve"`.
-  **Enable rules:** Capture/Rec need a pattern; Play needs at least one scene, a source and the transport not necessarily running (see 6); Move/Delete/Update/Keep need a selection;
-  Delete, Clear All, Move are disabled while scenes play (tooltip `"Stop scene playback first."`); Update and Keep are allowed while playing and stop playback first (they change the
-  current pattern). Keyboard: list supports Up/Down; Tab order list, form fields, buttons in the order above. **Messages (StatusBar, exact):** `"Captured Scene 3."`; `"The scene list is
-  full (32). Delete a scene to capture more."`; `"Scene recording stopped: the list is full (32)."`; `"Capture at least one scene first."`; `"Scenes need a pattern and a source."`;
-  `"Playing scenes from Scene 1."`; `"Scene sequence finished at Scene 7; it keeps looping."`; `"Scene 3 no longer fits the chops and was skipped."` (Warning); `"No scene fits the
-  current chops; scene playback stopped."`; `"Scene playback stopped because you changed the pattern."`; `"Evolve was switched off: scenes and Evolve cannot run together."`; `"Scene
-  playback stopped: Evolve was switched on."`; `"Cancel the morph before playing scenes."`; `"Kept Scene 3 as a new variation."`; `"Exported 7 scenes to <folder>."`; `"Delete all
-  scenes?"` / `"This cannot be undone."` (AlertWindow, buttons `"Delete All"` / `"Cancel"`). Empty state of the list: `"No scenes yet. Press Capture Scene, or turn on Rec Scenes and
-  start Evolve."`
+
+**Enable rules:** Capture/Rec need a pattern; Play needs at least one scene, a source and the transport not necessarily running (see 6); Move/Delete/Update/Keep need a selection;
+Delete, Clear All, Move are disabled while scenes play (tooltip `"Stop scene playback first."`); Update and Keep are allowed while playing and stop playback first (they change the
+current pattern). Keyboard: list supports Up/Down; Tab order list, form fields, buttons in the order above.
+
+**Messages (StatusBar, exact):** `"Captured Scene 3."`; `"The scene list is full (32). Delete a scene to capture more."`; `"Scene recording stopped: the list is full (32)."`; `"Capture
+at least one scene first."`; `"Scenes need a pattern and a source."`; `"Playing scenes from Scene 1."`; `"Scene sequence finished at Scene 7; it keeps looping."`; `"Scene 3 no longer
+fits the chops and was skipped."` (Warning); `"No scene fits the current chops; scene playback stopped."`; `"Scene playback stopped because you changed the pattern."`; `"Evolve was
+switched off: scenes and Evolve cannot run together."`; `"Scene playback stopped: Evolve was switched on."`; `"Cancel the morph before playing scenes."`; `"Kept Scene 3 as a new
+variation."`; `"Exported 7 scenes to <folder>."`; `"Delete all scenes?"` / `"This cannot be undone."` (AlertWindow, buttons `"Delete All"` / `"Cancel"`). Empty state of the list: `"No
+scenes yet. Press Capture Scene, or turn on Rec Scenes and start Evolve."`
 
 ## 4. Data model and state
 New portable module `modules/scenes` (`chopfractal::scenes`, header `include/chopfractal/scenes/scenes.hpp`, depends only on `chop_contracts` for `Result/Status` and `bytes.hpp`;
@@ -93,7 +97,9 @@ current one starts. **StateSection `scenes` (schema 1, F01 API; absent when the 
 count (<= 32)`, per scene: `u32 id`, `str name (<= 32)`, `i32 loops`, `u8 next`, `u32 jumpTo`, `u64 seed`, `u64 evolveStep`, `u32 eventCount`, `i32 bars`, `u32 patternSize (<= 1 MiB)`,
 `bytes pattern`. Whole section <= 32 MiB (about 1.3 MB typical). The loader validates every field and each pattern with `pattern::deserialize`; any error rejects the project load
 all-or-nothing (same policy as the other modules). Runtime state (running, current, loopIndex, armed, recording flag) is never saved; a project always loads with scenes stopped. **Host
-parameters:** none (manifest unchanged). **Renderer types (`audio_renderer/renderer.hpp`):**
+parameters:** none (manifest unchanged).
+
+**Renderer types (`audio_renderer/renderer.hpp`):**
 ```cpp
 struct ArmedSwitch { std::shared_ptr<const Playback> playback; std::uint64_t token = 0; };  // playback == nullptr cancels the pending switch
 ```
@@ -128,10 +134,14 @@ session calls on the message thread under `withSession`; the sequencer is only t
 ## 6. Behavior details and edge cases
 **Capture.** `captureScene` serializes `patterns_.current()`; name default `"Scene N"` (N = list size + 1) or `"Evolve step K"` when recorded (K = step index + 1); `loops` = Evolve
 `everyLoops` if Evolve runs else 4; `evolveStep` = `evolve_.stepsTaken() - 1` while running else `kManual`; skipped (returns the last scene's id, no new scene, Info notice not shown) if
-the bytes equal the last scene's pattern. Errors: no pattern `InvalidArgument`; full `LimitExceeded` with the message above; a pattern over 1 MiB `LimitExceeded`. **Recording.**
+the bytes equal the last scene's pattern. Errors: no pattern `InvalidArgument`; full `LimitExceeded` with the message above; a pattern over 1 MiB `LimitExceeded`.
+
+**Recording.**
 `setRecordScenes(true)` immediately captures the starting pattern as `"Scene 1 (start)"` if the list is empty or the last scene differs, then `evolveStep()` (features.cpp, one added
 call) captures after every successful step while recording. When the list reaches 32 recording turns itself off with the message. Recording does not create family-tree nodes (Evolve's
-rule stands). **Playback and the armed switch.** `playScenes(first, when)`: refuses (messages above) without pattern/source/scenes or during a morph; stops Evolve if running (notice);
+rule stands).
+
+**Playback and the armed switch.** `playScenes(first, when)`: refuses (messages above) without pattern/source/scenes or during a morph; stops Evolve if running (notice);
 builds `scenes::Sequencer::start`. With `Quantize::LoopBoundary` and the host playing, the first scene is **armed** like any later one (it begins at the next loop boundary); otherwise
 (`Immediate`, or transport stopped) it is installed at once. Installing a scene = `sceneOverride_ = deserialize + sanitize` and `publish(buildPlayback(...))`; `patterns_`, history and
 undo are **not touched** (scene playback is an override, so saved state always holds the user's real pattern and a 30-minute run cannot evict undo history). A scene that fails
@@ -146,17 +156,31 @@ the spans, `armed_ = nullptr`, `appliedToken_.store(token, release)`. Sounding v
 scene at tick `B` starts at frame `off` of the block (+-1 frame, the same rounding as `schedule()`). *Message thread:* on each observed boundary (`onSceneBoundary(appliedToken)`): call
 `Sequencer::onBoundary`; if it reports `switched`, set `sceneOverride_` to the new scene's pattern and `publish` the same `Playback` pointer into the **main** mailbox (the RT thread
 sees an unchanged `current_`, no voices are killed); if it reports `arm`, build and publish the next `ArmedSwitch`; if `finished`, post `"Scene sequence finished at Scene N; it keeps
-looping."` and set `running = false` (the last scene simply keeps looping). **Late arm fallback:** if a switch is due but `appliedToken < armedToken_` (the arm arrived after the
+looping."` and set `running = false` (the last scene simply keeps looping).
+
+**Late arm fallback:** if a switch is due but `appliedToken < armedToken_` (the arm arrived after the
 boundary), install the scene immediately through the main mailbox (up to one 30 Hz tick late, the existing behavior) and cancel the arm with `ArmedSwitch{nullptr, ++token}`.
 `publish(pb)` (the private method, called by every other path) cancels any pending arm unless `pb == armedHold_`, so an edit or a loaded project can never be overwritten by a stale
 scene. *Transport:* `onTransportChanged(false)` -> `Sequencer::onTransportStopped` + cancel token; scene stays the displayed one. `onTransportChanged(true)` -> `onTransportStarted`
-(re-arms for `loops == 1`). Seeks/loop jumps are not tracked beyond the boundary flag; the worst case is one scene counted short or long, corrected at the next switch. **Stopping.**
+(re-arms for `loops == 1`). Seeks/loop jumps are not tracked beyond the boundary flag; the worst case is one scene counted short or long, corrected at the next switch.
+
+**Stopping.**
 `stopScenes()` (button, or any command that changes the pattern: Generate, Mutate, Fractal, Zoom, Collapse, `edit`, `recallSnapshot`, `activate`, `undo`, `redo`, `loadState`,
 `loadSource`, `reset`, `setEvolve(enabled=true)`) clears the override, cancels the arm and `republish()`es the real pattern (done in `finalize`/the listed entry points by one call
-`stopScenesForEdit()` defined in scenes.cpp; hot-file diff is one line each). **Evolve interaction.** Mutually exclusive: starting scenes switches Evolve off; switching Evolve on stops
+`stopScenesForEdit()` defined in scenes.cpp; hot-file diff is one line each).
+
+**Evolve interaction.** Mutually exclusive: starting scenes switches Evolve off; switching Evolve on stops
 scenes. Recording needs Evolve running to produce steps beyond the starting scene. Replaying a recorded wander reproduces the recorded patterns exactly (they are stored, not
-regenerated). **Variation tree.** Scenes are independent of the tree; `keepScene` stops playback, `finalize`s the scene's pattern (one history node labelled `"Scene N"`, child of the
-active node, one undo step). Deleting tree nodes never affects scenes. **A/B:** untouched. **Locks/userOwned:** preserved inside the stored pattern bytes. **Chaos (F08) / Morph (F10).**
+regenerated).
+
+**Variation tree.** Scenes are independent of the tree; `keepScene` stops playback, `finalize`s the scene's pattern (one history node labelled `"Scene N"`, child of the
+active node, one undo step). Deleting tree nodes never affects scenes.
+
+**A/B:** untouched.
+
+**Locks/userOwned:** preserved inside the stored pattern bytes.
+
+**Chaos (F08) / Morph (F10).**
 Scenes are patterns; `buildPlayback` applies the Chaos overlay when F08 is present, so Chaos rides on scenes. Morph preview is refused while scenes play and vice versa. **Export
 (`exportScenes`).** Files in `directory` (created if missing, atomic writes, refuse existing files unless `overwrite`): `scenes.tsv` (header
 `number\tname\tloops\tnext\tjump_to\tseed\tevolve_step\tevents\tbars`, one row per scene, names with tabs/newlines replaced by spaces, `evolve_step` is `-` for manual, `jump_to` is a
@@ -165,7 +189,11 @@ the Producer Kit's `pattern.mid` (factor that loop in `features.cpp` into a shar
 when requested: each scene i is rendered with `render::renderOffline(playback_i, {cycles = loops_i, tailSeconds = 0.5})` and mixed (sum) into one buffer at offset `sum_{j<i}
 ceil(loops_j * lengthTicks_j / tpf)` frames, so tails overlap the next scene like live ring-over; export order is list order and ignores `next`/`jump`; encoded with the same
 `wav::encode`/`writeFileAtomic` path as `exportWav`. The WAV equals the live result only when tails do not overlap voices that would be stolen live; this is documented in the UI tooltip
-of "Export Scenes...". **Limits.** 32 scenes, 64 loops, 1 MiB per pattern. **Determinism.** No randomness; the sequencer is a pure function of (list, boundary count); the audio switch
+of "Export Scenes...".
+
+**Limits.** 32 scenes, 64 loops, 1 MiB per pattern.
+
+**Determinism.** No randomness; the sequencer is a pure function of (list, boundary count); the audio switch
 frame is a pure function of host position. The four pattern_engine golden hashes are untouched (this feature never calls generate/mutate itself).
 
 ## 7. Test plan
@@ -173,7 +201,9 @@ frame is a pure function of host position. The four pattern_engine golden hashes
 `remove_clears_dangling_jump_targets`; `serialize_roundtrips_and_rejects_truncation_and_bitflips` (every prefix length and 2000 random byte flips: either `Corrupt`/`UnsupportedVersion`
 or a list that passes `validate`); `sequencer_trace_matches_the_table` (list A loops 2 Advance, B loops 1 Advance, C loops 3 Stop, wrap off; `start(A)` -> arm 0; boundary 1 -> arm B; 2
 -> switched B and arm C; 3 -> switched C; 4 -> nothing; 5 -> finishing; 6 -> finished, running false); `single_loop_scenes_arm_immediately`; `wrap_repeat_and_jump`;
-`transport_stop_resets_loop_index_and_clears_arm`; `sequencer_is_deterministic_for_a_boundary_count`. **Unit, `modules/audio_renderer/tests/test_armed_switch.cpp`:**
+`transport_stop_resets_loop_index_and_clears_arm`; `sequencer_is_deterministic_for_a_boundary_count`.
+
+**Unit, `modules/audio_renderer/tests/test_armed_switch.cpp`:**
 `armed_switch_lands_exactly_on_the_loop_boundary_frame` (scene A: one click event at tick 0, scene B: a different click chop at tick 0; 120 BPM, 48 kHz, 1-bar loop = 96000 frames; arm B
 before the boundary; a 512-frame block straddling frame 96000: A's click at frame 0 of loop 1 only, B's click first sample at the exact frame +-1; no A event after the boundary);
 `switch_is_identical_for_block_sizes_1_7_64_333_512_2048`; `voices_ring_over_the_switch` (a long chop started before the boundary is still sounding after it);
@@ -193,8 +223,12 @@ the stored bytes); `playing_scenes_arms_the_next_scene_and_adopts_it_when_the_re
 "Scene loops" to 1 via `setValue(1, sendNotificationSync)`; click "Play Scenes" with a `FakePlayHead` playing from ppq 0 and run blocks across two loop boundaries calling
 `pollAudioFlags()` after each; assert `sceneStatus().playing` is scene 2 then (wrap) scene 1; click "Stop Scenes" and assert `pattern()` bytes equal the pre-play bytes; click "Clear
 All" and answer the AlertWindow via `AlertWindow::getCurrentlyModalComponent` button "Delete All"; assert 0 rows and the empty-state text. Also `rec_scenes_with_evolve`: toggle "Evolve"
-and "Rec Scenes", advance 8 loops of midpoints, assert >= 3 rows. All controls have titles. **Real-time / sanitizer:** TSan on `test_armed_switch` and the module tests; ASan/UBSan on
-all; the plugin shell `process()` allocation test unchanged and passing. **Manual QA:** (1) Generate a 2-bar groove with density 0.7, play, switch Evolve on (every 2 loops, amount 0.3),
+and "Rec Scenes", advance 8 loops of midpoints, assert >= 3 rows. All controls have titles.
+
+**Real-time / sanitizer:** TSan on `test_armed_switch` and the module tests; ASan/UBSan on
+all; the plugin shell `process()` allocation test unchanged and passing.
+
+**Manual QA:** (1) Generate a 2-bar groove with density 0.7, play, switch Evolve on (every 2 loops, amount 0.3),
 press Rec Scenes, wait for 6 steps, switch both off. (2) Scenes list shows 7 rows with sensible names. (3) Press Play Scenes: each scene lasts 2 loops and the downbeat of each new scene
 is clean (no old-scene hit on beat 1; check by soloing a kick-only source). (4) Set scene 3 to Repeat for 4 loops, scene 5 "Jump to 2": sequence follows. (5) Stop the host transport and
 start again: sequencing resumes. (6) Press Generate: scenes stop with the notice and your original pattern is unchanged. (7) Keep Scene 4, then Undo. (8) Export with WAV on: open

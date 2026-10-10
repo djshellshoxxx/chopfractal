@@ -34,12 +34,15 @@ PatternPanel; hidden by default). **PadPanel contents** (left to right, each wit
   `"Hard"`, `"Fixed"`; default Linear), both through `ComboBoxAttachment`.
 - Slider **"Base note"** (0 to 111 integer, default 36, text `"C1 (36)"`), ComboBox **"MIDI channel"** (`"Omni"` default, `"1"` to `"16"`).
 - ToggleButton **"Record"** (title "Record pad hits into the pattern"), ComboBox **"Quantize"** (`"Off"`, `"1/4"`, `"1/8"`, `"1/16"` default, `"1/32"`, `"1/16T"`), ComboBox **"Merge"**
-  (`"Add to pattern"` default, `"Replace slots"`), Button **"Discard Take"**. **Enable rules:** pads and settings need a loaded source with chops (otherwise the panel shows `"Load a
-  source and detect chops to play the pads."`); Record needs a pattern; Discard Take enabled while uncommitted hits exist (label shows `"N hits waiting"`). Tab order: pads (row-major),
-  page, mode, curve, base note, channel, Record, Quantize, Merge, Discard Take. **Messages (StatusBar):** `"Recording armed: start the transport and play the pads."`, `"Recording needs
-  the host to report its song position."`, `"Recorded 5 hits."`, `"Recorded 5 hits. 2 skipped: their beat is locked."`, `"... 1 skipped: the event cap (512) is reached."`, `"... 3
-  skipped: they matched no chop."`, `"Take buffer full (4096 hits); extra hits were ignored."`, `"Pads need a source with chops."`, `"This host does not send MIDI to effects; use the
-  on-screen pads."` (shown once, if a Record is armed and no MIDI note has ever arrived after 20 s of playback - informational only).
+  (`"Add to pattern"` default, `"Replace slots"`), Button **"Discard Take"**.
+
+**Enable rules:** pads and settings need a loaded source with chops (otherwise the panel shows `"Load a source and detect chops to play the pads."`); Record needs a pattern; Discard
+Take enabled while uncommitted hits exist (label shows `"N hits waiting"`). Tab order: pads (row-major), page, mode, curve, base note, channel, Record, Quantize, Merge, Discard Take.
+
+**Messages (StatusBar):** `"Recording armed: start the transport and play the pads."`, `"Recording needs the host to report its song position."`, `"Recorded 5 hits."`, `"Recorded 5
+hits. 2 skipped: their beat is locked."`, `"... 1 skipped: the event cap (512) is reached."`, `"... 3 skipped: they matched no chop."`, `"Take buffer full (4096 hits); extra hits were
+ignored."`, `"Pads need a source with chops."`, `"This host does not send MIDI to effects; use the on-screen pads."` (shown once, if a Record is armed and no MIDI note has ever arrived
+after 20 s of playback - informational only).
 
 ## 4. Data model and state
 **Host parameters (manifest version 3, appended; IDs permanent; positions follow merge order):** `{"perf_mode", "Pad Mode", "", ParamKind::Choice, 0, 2, 0, 1, 0, 3, "Poly|Mono|Gate"}`
@@ -63,10 +66,14 @@ struct PadBank { std::array<PadSlot, kPadNotes> slots{}; };  // indexed by MIDI 
 `LiveInput` (declared by F08, final shape): `{ const GestureEvent* gestures; int numGestures; GestureParams gestureParams; const PadEvent* pads = nullptr; int numPads = 0; PadParams
 padParams; }`. If F07 merges first it declares `LiveInput` with the pad fields only and F08 adds the gesture fields. **Session settings** `PadSettings { std::uint8_t baseNote = 36;
 std::uint8_t midiChannel = 0; /*0 omni, 1..16*/ std::uint8_t quantizeDivision = 16; /*0 off, 4, 8, 16, 32*/ bool quantizeTriplet = false; std::uint8_t merge = 0; /*0 add, 1 replace*/
-std::map<std::uint64_t, std::uint8_t> chokeOverride; /*chop id -> 0 off, 1..4; absent = default (role "hat" -> 1, else off)*/ }`. **StateSection `pads` (schema 1, F01 API):** `u8
+std::map<std::uint64_t, std::uint8_t> chokeOverride; /*chop id -> 0 off, 1..4; absent = default (role "hat" -> 1, else off)*/ }`.
+
+**StateSection `pads` (schema 1, F01 API):** `u8
 baseNote, u8 midiChannel, u8 quantizeDivision, bool triplet, u8 merge, u32 n (<= 256), n x {u64 chop, u8 group}`. Written only if any field differs from the defaults above, so a project
 that never touches pads is byte-identical to the previous build; loader validates ranges (`baseNote <= 111`, `midiChannel <= 16`, division in {0,4,8,16,32}, group <= 4) and fails the
-load with `ErrorCode::Corrupt` otherwise. Pad mode and curve live in the APVTS state. Takes are never saved (transient). **Take types (composition):** `struct TakeHit { double ppqOn;
+load with `ErrorCode::Corrupt` otherwise. Pad mode and curve live in the APVTS state. Takes are never saved (transient).
+
+**Take types (composition):** `struct TakeHit { double ppqOn;
 double ppqOff; /* < 0 = none */ std::uint8_t note; std::uint8_t velocity; };` `struct TakeOptions { int quantizeDivision = 16; bool triplet = false; std::uint8_t merge = 0;
 render::VelocityCurve curve; render::PadMode mode; int baseNote = 36; };` `struct TakeReport { int added = 0, replaced = 0, skippedLocked = 0, skippedCap = 0, skippedUnmapped = 0,
 skippedDuplicate = 0; };` Limits: 128 MIDI notes; 256 pad events per block (excess dropped and counted in `padDropped()`); UI->audio pad queue 128 events; audio->UI take queue 1024
@@ -91,7 +98,9 @@ events; take buffer 4096 hits.
 ## 6. Behavior details and edge cases
 **CMake / plugin declaration.** `plugin/CMakeLists.txt`: `NEEDS_MIDI_INPUT TRUE` (JUCE then defines `JucePlugin_WantsMidiInput=1` and the VST3 wrapper adds one event input bus);
 `IS_SYNTH FALSE`, `VST3_CATEGORIES Fx`, `NEEDS_MIDI_OUTPUT FALSE`, `IS_MIDI_EFFECT FALSE` unchanged; `isBusesLayoutSupported` unchanged (stereo/mono in == out). `getLatencySamples()`
-stays 0: a pad costs no look-ahead. **MIDI parse in `processBlock` (audio thread, no allocation).** Before `renderer_.process`: drain `uiPadQueue_` into `padEvents_` with `frame = 0`;
+stays 0: a pad costs no look-ahead.
+
+**MIDI parse in `processBlock` (audio thread, no allocation).** Before `renderer_.process`: drain `uiPadQueue_` into `padEvents_` with `frame = 0`;
 then iterate `juce::MidiBuffer` (`for (const auto meta : midi)`): `msg = meta.getMessage()`; skip if `padChannel_ != 0 && msg.getChannel() != padChannel_`; `frame =
 clamp(meta.samplePosition, 0, frames - 1)`; NoteOn with velocity > 0 -> `NoteOn{note, velocity}` (also `padActivity_[note >> 5] |= 1u << (note & 31)`); NoteOff or NoteOn velocity 0 ->
 `NoteOff`; `isAllNotesOff()`/`isAllSoundOff()` -> `AllNotesOff`; controllers go to F08's `gestureFromCc` when F08 is present; everything else ignored. At most 256 events; extras
@@ -104,9 +113,13 @@ active voice with `tag == 2 && chokeGroup == slot.chokeGroup` (not pattern voice
 it); gate = `ceil(region.length / rate)` with `rate = (src.sampleRate / cfg.sampleRate)`, so the whole chop plays; fades from the slot (0 = renderer defaults 32/64 frames);
 `allocateVoice()` as for pattern voices (quietest voice stolen with a fade), then set `tag = 2`, `padNote`, `chokeGroup`. `NoteOff` in Gate mode: `releaseVoice` for voices with that
 `padNote` (64-frame fade, `kKillFade`); in Poly/Mono it is ignored (one-shot). `AllNotesOff`: release all `tag == 2` voices. Pad voices survive transport stop, seek and loop wrap
-(`releaseAll()` skips `tag == 2`); they are killed by `hardKillAll` (source change, bypass) and `Renderer::reset()`. **Latency and budgets.** Added plugin latency: 0 samples; the voice
+(`releaseAll()` skips `tag == 2`); they are killed by `hardKillAll` (source change, bypass) and `Renderer::reset()`.
+
+**Latency and budgets.** Added plugin latency: 0 samples; the voice
 starts at the note's sample; the first non-zero output sample is at `f + 1` (attack ramp starts from 0; the 32-frame default attack is about 0.7 ms at 48 kHz). Worst-case extra
-audio-thread work per block: 256 events x O(voices = 16) comparisons, no allocation. UI pad press to sound: one block (the event is applied at frame 0 of the next block). **Velocity.**
+audio-thread work per block: 256 events x O(voices = 16) comparisons, no allocation. UI pad press to sound: one block (the event is applied at frame 0 of the next block).
+
+**Velocity.**
 Table in section 4. v = 127 is exactly 1.0 for Linear, Soft, Hard; Fixed is 1.0 for all; the result multiplies the chop's natural level (the chop's samples are not normalized).
 **Recording.** `recordArmed_` is set by the Record toggle. In `processBlock`, when armed and `tt.block.playing && tt.block.positionValid`, every pad NoteOn/NoteOff (MIDI and UI) is also
 pushed to `takeQueue_` with `ppq = tt.block.ppq + frame * tt.block.bpm / (60 * sampleRate)` (UI events use frame 0); a full queue increments `takeDropped_`. `pollAudioFlags()` (30 Hz)
@@ -120,14 +133,20 @@ on) and at least `g` (or 30 ticks when off); otherwise `g` (Quantize on) or `gri
 event with the same chop and `start` (`skippedDuplicate`). Replace mode: for each distinct `(bar, slot)` first `deleteEvent` every unlocked event whose `start` lies in `[slotStart,
 slotStart + g)` (`replaced`), then add. Add via `addEvent(p, bar, chop, start, duration, chops)` (sets `userOwned`, so Mutate/Evolve keep it), find the new id as `result.nextId - 1`,
 then `setEventTransform(p, id, tx)` with `tx.level = velocityGain(curve, velocity)`. `ErrorCode::Blocked` -> `skippedLocked`; `LimitExceeded` -> `skippedCap` and stop adding. If nothing
-changed, `edit()` is not called (no undo entry). Hits are applied in time order (`ppqOn`, then note). **Edge cases.** Record armed but the host reports no ppq: pads still sound, nothing
+changed, `edit()` is not called (no undo entry). Hits are applied in time order (`ppqOn`, then note).
+
+**Edge cases.** Record armed but the host reports no ppq: pads still sound, nothing
 is recorded, status message above. Seek/loop in the host during recording: hits keep their own ppq, which maps to the pattern loop by `fmod`; no special handling. Pattern replaced while
 a take is waiting (Generate/Mutate/load): the take is kept and merges into the new pattern (hits are positions, not event refs); loading a project or `clearSource` discards it. Mono
 mode with a very short chop: the previous voice's 64-frame release overlaps; this is intended. Poly with 8 voices busy: the quietest voice is stolen with a fade (existing logic); pad
 voices are not protected. Chop count above 128 - baseNote: the extra chops have no note (pads page still plays them through `padTrigger` with `note` clamped: pad N of page P sends note
 `baseNote + P*16 + N - 1` only if <= 127, otherwise the pad is disabled with tooltip `"No MIDI note available for this chop; lower the base note."`). Audition (existing preview voices)
-is unchanged and independent. **Determinism.** No randomness is introduced. Same MIDI + block partition -> same audio; pad timing is independent of block size because events are applied
-at their exact frame (tested). Pattern generation and the four golden hashes are untouched. **Interactions.** Evolve: recorded events are userOwned, so Evolve/Mutate preserve them;
+is unchanged and independent.
+
+**Determinism.** No randomness is introduced. Same MIDI + block partition -> same audio; pad timing is independent of block size because events are applied
+at their exact frame (tested). Pattern generation and the four golden hashes are untouched.
+
+**Interactions.** Evolve: recorded events are userOwned, so Evolve/Mutate preserve them;
 Evolve steps and merge both run at the midpoint (message thread, same lock, sequential). Locks: locked beats/bars refuse hits (counted). F08 gestures: Reverse and Tape Stop apply to pad
 voices too; Stutter freezes the pattern only (pad voices unaffected). F10 morph / F09 scenes: recording is refused while a morph preview or scene playback is active (`"Stop scenes or
 cancel the morph before recording."`).
@@ -140,7 +159,9 @@ cancel the morph before recording."`).
 `choke_group_releases_same_group_pad_voices_only`; `all_notes_off_releases_every_pad_voice`; `pads_sound_with_stopped_transport_and_in_pass_through_playback`;
 `pad_voices_survive_transport_stop_seek_and_loop_wrap`; `unmapped_notes_and_regions_outside_the_source_are_ignored`; `pad_events_are_block_size_independent` (blocks 64, 333, 512, 2048
 produce identical output); `oversize_host_blocks_rebase_pad_frames`; `output_without_pads_is_bit_identical_to_the_six_argument_process`; `pad_path_performs_no_heap_allocation`;
-`pad_bank_mailbox_handoff_across_threads` (TSan); `uipad_queue_order_and_overflow` (full queue returns false, nothing lost or duplicated). **Host adapter, `test_host_adapter.cpp`:**
+`pad_bank_mailbox_handoff_across_threads` (TSan); `uipad_queue_order_and_overflow` (full queue returns false, nothing lost or duplicated).
+
+**Host adapter, `test_host_adapter.cpp`:**
 manifest golden gains `perf_mode` and `perf_velocity_curve` (ranges, defaults 0, step 1, `sinceVersion` 3, choice strings exactly as above); `kManifestVersion == 3`. **Integration,
 `composition/tests/test_pads.cpp`:** `pad_bank_maps_chops_in_snapshot_order_from_the_base_note` (base 36, 5 chops -> slots 36..40 mapped, 35 and 41 empty; base 126 -> only 2 mapped);
 `bank_is_republished_after_marker_edits_roles_and_settings`; `hat_role_defaults_to_choke_group_1_and_override_wins`;
@@ -158,8 +179,12 @@ in the composition test, run to the loop midpoint, `pollAudioFlags()`, assert ev
 1")->setState(buttonDown)`, pump, run 10 blocks: output peak > 0.05 and `padActivity_` bit set; `setState(buttonNormal)`; set "Record" toggle on, play the FakePlayHead, press "Pad 2" at
 a known ppq, run to the midpoint, assert one new userOwned event with `chop == chops[1]`; right-click menu choice sets `chokeOverride`; all controls have titles. **Validator and
 platform:** `tools/validate_vst3.sh` must report 0 failed (47/47 or more; the count may rise because the wrapper now exposes an event input bus); the shell test counts
-`getParameters().size() == manifest.size()`. **Real-time / sanitizer:** allocation test with pad events, TSan on queues + mailbox, ASan/UBSan on all new tests incl. the `pads`
-hostile-state sweep. **Manual QA:** (1) Load a loop, Detect Chops, open Pads. (2) Click pad 1 (hold, then release): sound plays; all 16 pads trigger the right slice. (3) In REAPER or
+`getParameters().size() == manifest.size()`.
+
+**Real-time / sanitizer:** allocation test with pad events, TSan on queues + mailbox, ASan/UBSan on all new tests incl. the `pads`
+hostile-state sweep.
+
+**Manual QA:** (1) Load a loop, Detect Chops, open Pads. (2) Click pad 1 (hold, then release): sound plays; all 16 pads trigger the right slice. (3) In REAPER or
 Bitwig route a MIDI keyboard to the plugin: note C1 triggers pad 1; velocity changes loudness (Linear). (4) Mode Mono: hitting pads rapidly never overlaps; Gate: releasing the key stops
 the sound in about 1.3 ms. (5) Right-click a hat pad, Choke group 1 on two hats: the second silences the first. (6) Generate, press play, arm Record, play a 1/8 pattern on pads for two
 loops: the hits appear in PatternPanel as protected events on the grid and Undo removes the last pass. (7) In a host that cannot route MIDI to effects (Ableton Live): the on-screen pads
@@ -209,8 +234,7 @@ still work, and the QA note in the manual says so. (8) Open the plugin in the va
 - **Merging into a pattern changed meanwhile.** Takes store positions only; covered by a test.
 
 ## 11. Implementation steps
-1. CMake `NEEDS_MIDI_INPUT TRUE`, `acceptsMidi() true`, updated shell assertion; run the validator (alone, revertible).
-   2. `spsc_queue.hpp` (if F08 absent) + `pads.hpp`/`velocityGain` + unit tests. 3. Renderer pad voices, `PadBank` mailbox, merged trigger loop, tests (bit-identical without pads,
-      no-alloc). 4. Manifest v3 rows + host adapter tests.
-   5. Composition: bank publishing, `PadSettings`, `pads` section + tests. 6. Processor MIDI parse, UI pad queue, shell tests. 7. PadPanel (pads, settings) + GUI tests. 8. Recording:
-      take queue, `mergeTake`, midpoint flush, tests. 9. Docs, host QA matrix (REAPER, Bitwig, Live), manual QA.
+1. CMake `NEEDS_MIDI_INPUT TRUE`, `acceptsMidi() true`, updated shell assertion; run the validator (alone, revertible). 2. `spsc_queue.hpp` (if F08 absent) + `pads.hpp`/`velocityGain` +
+   unit tests. 3. Renderer pad voices, `PadBank` mailbox, merged trigger loop, tests (bit-identical without pads, no-alloc). 4. Manifest v3 rows + host adapter tests. 5. Composition:
+   bank publishing, `PadSettings`, `pads` section + tests. 6. Processor MIDI parse, UI pad queue, shell tests. 7. PadPanel (pads, settings) + GUI tests. 8. Recording: take queue,
+   `mergeTake`, midpoint flush, tests. 9. Docs, host QA matrix (REAPER, Bitwig, Live), manual QA.

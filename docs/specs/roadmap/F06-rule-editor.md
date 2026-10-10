@@ -183,14 +183,20 @@ stay applied and the failure text is shown (they are two independent commands).
 ## 7. Test plan
 **Unit, `modules/chop_roles_grammar/tests/test_grammar.cpp`:** `describe_renders_every_action_kind_in_plain_english` (the five pinned strings above plus MaxCount `Allow at most 3 hat
 per bar`, Preserve with chop id, beat range, Avoid wording at weight 0.5 -> `Avoid ... (x0.5)`); `preserving_rule_returns_first_matching_enabled_preserve_rule_or_zero` (disabled rule
-skipped; none -> 0); `describe_never_exceeds_200_chars_and_is_deterministic` (fuzz 500 random valid rules). **Unit, `modules/pattern_engine/tests/test_pattern_engine.cpp`:**
+skipped; none -> 0); `describe_never_exceeds_200_chars_and_is_deterministic` (fuzz 500 random valid rules).
+
+**Unit, `modules/pattern_engine/tests/test_pattern_engine.cpp`:**
 `candidate_query_for_matches_the_query_used_during_generation` (spy `ICandidatePolicy` records every `CandidateQuery`; for each placed event find the spy query with equal chop,
 `startInBar`, bar; assert `recent`, `barSoFar`, `firstInBar`, `scope` equal `candidateQueryFor`); `candidate_query_for_unknown_id_returns_invalid_chop`; the existing
-`golden_output_is_pinned_across_compilers_and_platforms` must pass untouched. **Unit, `modules/plugin_ui_adapter/tests/test_rule_editor.cpp`:**
+`golden_output_is_pinned_across_compilers_and_platforms` must pass untouched.
+
+**Unit, `modules/plugin_ui_adapter/tests/test_rule_editor.cpp`:**
 `add_rule_uses_next_free_id_and_never_reuses_after_delete_within_session` (ids 1,2,3; delete 2; add -> 4); `templates_build_the_same_rules_as_the_module_builders` (compare field-wise to
 `templates::*`); `exclude_template_converts_one_based_bars_and_rejects_bad_ranges`; `update_derives_scope_from_action`; `rows_are_in_engine_order`;
 `issues_include_module_errors_and_ui_warnings` (count limit 0 -> error text equals the module message; barMin 5 on a 4-bar pattern -> the outside-pattern warning);
-`apply_is_blocked_by_errors_and_enabled_by_fixes`; `limit_of_64_disables_add`; `duplicate_copies_fields_and_truncates_label_to_128`. **Integration, `composition/tests/test_rules.cpp`:**
+`apply_is_blocked_by_errors_and_enabled_by_fixes`; `limit_of_64_disables_add`; `duplicate_copies_fields_and_truncates_label_to_128`.
+
+**Integration, `composition/tests/test_rules.cpp`:**
 `explain_event_reports_weighting_protection_and_hand_placed_conflicts` (Prefer x2 on kick, Preserve first kick, hand-placed hat under Forbid hat: assert the three texts and `rules`);
 `explain_event_without_policy_says_nothing_constrains_it`; `last_rule_notes_record_blocks_and_clear_on_reset_and_load` (Forbid every chop but one at one bar -> notes with rule id, bar,
 beat; `reset()` empties); `preview_rules_counts_blocks_without_changing_state` (pattern bytes, history size, undo depth, notices unchanged before/after);
@@ -207,13 +213,15 @@ beat; `reset()` empties); `preview_rules_counts_blocks_without_changing_state` (
 3. `why_button_explains_the_selected_hit`: Generate with a Prefer rule applied; select the first event via the F00 `EditorModel::select(id)`; click "Why?"; assert status text starts
    with `"Kept"` or `"Rejected"` and contains `"rule"`; with no selection assert `"Select a hit first; Why? explains that hit."`.
 4. `roles_tab_assigns_and_clears`: switch tab "Roles", set the combo for chop 1 to "snare", assert `roleMap().roleOf(chop)=="snare"`, set "(none)", assert empty.
-5. Accessibility: every RulesPanel button/ComboBox/Slider/TextEditor has a non-empty title (same loop as the existing test's last block). **Other checks:** the four golden hashes
-   unchanged; `process()` allocation test unchanged (no audio-thread change); ASan/UBSan over the new tests including a truncation/byte-flip sweep of a rules payload through `loadState`
-   (reuse the hostile-file helper in `test_composition.cpp`). **Manual QA:** (1) Load a drum loop, Detect Chops, Smart Setup, Accept Roles. (2) Open Rules; add "Keep first" for kick and
-   "No repeats"; Apply. Expected: status line as above. (3) Press Generate five times with different seeds; expected: a kick opens every bar, no chop repeats back-to-back. (4) Add
-   Forbid hat bars 1-2 via the template, delete bar-to text to leave it blank, expected row becomes `Forbid hat from bar 1`. (5) Type `0` in Count of a count rule; expected the error
-   appears at once and Apply greys out. (6) Test Rules; expected the blocked counts line and an unchanged pattern (press Undo: nothing to undo). (7) Select a hit, Why?; read text. (8)
-   Save the project, reload, reopen Rules; expected the same rows.
+5. Accessibility: every RulesPanel button/ComboBox/Slider/TextEditor has a non-empty title (same loop as the existing test's last block).
+
+**Other checks:** the four golden hashes unchanged; `process()` allocation test unchanged (no audio-thread change); ASan/UBSan over the new tests including a truncation/byte-flip sweep
+of a rules payload through `loadState` (reuse the hostile-file helper in `test_composition.cpp`).
+
+**Manual QA:** (1) Load a drum loop, Detect Chops, Smart Setup, Accept Roles. (2) Open Rules; add "Keep first" for kick and "No repeats"; Apply. Expected: status line as above. (3)
+Press Generate five times with different seeds; expected: a kick opens every bar, no chop repeats back-to-back. (4) Add Forbid hat bars 1-2 via the template, delete bar-to text to leave
+it blank, expected row becomes `Forbid hat from bar 1`. (5) Type `0` in Count of a count rule; expected the error appears at once and Apply greys out. (6) Test Rules; expected the
+blocked counts line and an unchanged pattern (press Undo: nothing to undo). (7) Select a hit, Why?; read text. (8) Save the project, reload, reopen Rules; expected the same rows.
 
 ## 8. Acceptance criteria
 - [ ] A producer can create all six action kinds from the form and all six templates from the strip; each produces a rule that `validateRules` accepts and that survives save/reload
