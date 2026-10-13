@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
 
+#include <chopfractal/plugin_host_adapter/loop_position.hpp>
+
 #include <cmath>
 #include <cstring>
 
@@ -97,18 +99,13 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
 
   renderer_.process(tt.block, cf::host::toRenderParams(pv), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
 
-  // Tell the message thread when the playhead crosses the pattern's loop point (for quantized variation switches).
-  const double quarters = patternQuarters_.load(std::memory_order_relaxed);
-  if (tt.block.playing && tt.block.positionValid && quarters > 0.0) {
-    const double end = tt.block.ppq + static_cast<double>(frames) * tt.block.bpm / (60.0 * sampleRate_.load(std::memory_order_relaxed));
-    if (std::floor(tt.block.ppq / quarters) != std::floor(end / quarters)) boundaryFlag_.store(true, std::memory_order_relaxed);
-    if (std::floor((tt.block.ppq - 0.5 * quarters) / quarters) != std::floor((end - 0.5 * quarters) / quarters)) midpointFlag_.store(true, std::memory_order_relaxed);
-    double ph = std::fmod(tt.block.ppq, quarters);
-    if (ph < 0.0) ph += quarters;
-    playheadQuarters_.store(ph, std::memory_order_relaxed);
-  } else {
-    playheadQuarters_.store(-1.0, std::memory_order_relaxed);
-  }
+  // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
+  // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
+  const cf::host::LoopPosition lp = cf::host::computeLoopPosition(tt.block, frames, sampleRate_.load(std::memory_order_relaxed),
+                                                                   patternQuarters_.load(std::memory_order_relaxed));
+  if (lp.boundary) boundaryFlag_.store(true, std::memory_order_relaxed);
+  if (lp.midpoint) midpointFlag_.store(true, std::memory_order_relaxed);
+  playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
 }
 
 void ChopFractalProcessor::pollAudioFlags() {
