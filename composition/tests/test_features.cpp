@@ -158,6 +158,57 @@ CHOP_TEST(fractal_rhythm_respects_locks_and_the_event_cap) {
   CHECK(!none.applyFractal(fs).ok());
 }
 
+CHOP_TEST(evolve_on_a_fully_locked_pattern_stops_instead_of_flooding_the_undo_stack) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(7, 2)).ok());
+  CHECK(s.edit([](const pattern::Pattern& p, const ChopSnapshot&) { return pattern::setLock(p, pattern::ScopeRef{ScopeLevel::Phrase, 0, 0, EventId{}}, true); }).ok());
+  evolve::Settings es;
+  es.enabled = true;
+  es.everyLoops = 1;
+  es.amount = 1.0;
+  CHECK(s.setEvolve(es).ok() && s.evolveRunning());
+  const auto before = pattern::serialize(*s.pattern());
+  for (int i = 0; i < 6; ++i) {
+    auto r = s.evolveStep();
+    CHECK(r.ok() && !r.value());  // nothing changed, so nothing was applied
+  }
+  CHECK(!s.evolveRunning());      // three no-op steps stop Evolve
+  CHECK(pattern::serialize(*s.pattern()) == before);
+}
+
+CHOP_TEST(a_locked_zoom_protects_its_bar_from_fractal_and_bar_duplication) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(5, 2)).ok());
+  // Zoom into a hit of bar 0, lock its child tree, then try to rewrite bar 0.
+  const Event* hit = nullptr;
+  for (const auto& bt : s.pattern()->bars[0].beats)
+    if (!bt.events.empty()) hit = &bt.events.front();
+  CHECK(hit != nullptr);
+  if (!hit) return;
+  const EventId id = hit->id;
+  CHECK(s.zoomIn(id, zoom::Settings{}, 3).ok());
+  CHECK(s.edit([&](const pattern::Pattern& p, const ChopSnapshot&) -> Result<pattern::Pattern> {
+    pattern::Pattern q = p;
+    for (auto& bt : q.bars[0].beats)
+      for (Event& e : bt.events)
+        if (e.id == id && e.child) {
+          auto c = std::make_shared<NestedPattern>(*e.child);
+          c->locked = true;
+          e.child = c;
+        }
+    return q;
+  }).ok());
+  CHECK(pattern::barHasLock(*s.pattern(), 0));
+  const auto before = pattern::serialize(*s.pattern());
+  CHECK(!s.applyFractal(fractal::Settings{}, {0}).ok());                       // explicit bar: refused
+  CHECK(s.edit([](const pattern::Pattern& p, const ChopSnapshot&) { return pattern::duplicateBar(p, 1, 0); }).ok() == false);
+  CHECK(pattern::serialize(*s.pattern()) == before);
+  CHECK(!pattern::barHasLock(*s.pattern(), 1));
+  CHECK(!pattern::barHasLock(pattern::clearLocks(*s.pattern()), 0));           // Clear locks reaches the zoom tree
+}
+
 CHOP_TEST(evolve_steps_in_place_keeps_locks_and_does_not_flood_history) {
   ProjectSession s, twin;
   for (ProjectSession* p : {&s, &twin}) {

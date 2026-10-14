@@ -236,6 +236,13 @@ CHOP_TEST(requirements_resolve_to_a_chop_only_when_unsatisfied_and_in_scope) {
   byChop.scope = RuleScope::Beat;
   byChop.when.chop = ChopId{4};
   CHECK(policyOf({byChop}).required(sc, {}).size() == 1);
+
+  // A rule naming a chop that is not (or no longer) among the enabled chops cannot be required: it would make
+  // generation fail with "unknown chop".
+  Rule gone = rule(3, ActionKind::Require);
+  gone.scope = RuleScope::Beat;
+  gone.when.chop = ChopId{999};
+  CHECK(policyOf({gone}).required(sc, {}).empty());
 }
 
 CHOP_TEST(preserve_rules_keep_matching_events) {

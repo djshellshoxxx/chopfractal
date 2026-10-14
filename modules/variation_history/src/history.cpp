@@ -240,7 +240,9 @@ Result<VariationTree> VariationTree::deserialize(const std::uint8_t* data, std::
     return makeError(ErrorCode::Corrupt, "invalid history configuration");
   VariationTree tree(cfg);
   tree.nextId_ = r.u64();
+  if (tree.nextId_ == 0 || tree.nextId_ > (1ull << 62)) return makeError(ErrorCode::Corrupt, "history id counter is out of range");
   tree.nextOrder_ = r.u64();
+  if (tree.nextOrder_ == 0 || tree.nextOrder_ > (1ull << 62)) return makeError(ErrorCode::Corrupt, "history order counter is out of range");
   tree.active_ = r.u64();
   const std::uint32_t count = r.count(static_cast<std::uint32_t>(cfg.maxNodes), 60);
   if (!r.ok()) return makeError(ErrorCode::Corrupt, "invalid node count");

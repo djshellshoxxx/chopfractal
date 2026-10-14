@@ -15,7 +15,7 @@ Result<ChopMap> ChopMap::create(SourceInfo info, std::int64_t minRegionFrames) {
   if (info.frames <= 0 || info.frames > kMaxSourceFrames) return makeError(ErrorCode::InvalidArgument, "source length is zero or exceeds the limit");
   if (info.channels < 1 || info.channels > 2) return makeError(ErrorCode::InvalidArgument, "only mono and stereo sources are supported");
   if (info.sampleRate < 8000 || info.sampleRate > 384000) return makeError(ErrorCode::InvalidArgument, "unsupported sample rate");
-  if (minRegionFrames < 1 || minRegionFrames * 2 > info.frames) return makeError(ErrorCode::InvalidArgument, "invalid minimum region length");
+  if (minRegionFrames < 1 || minRegionFrames > info.frames / 2) return makeError(ErrorCode::InvalidArgument, "invalid minimum region length");
   if (info.name.size() > 256 || info.path.size() > 1024) return makeError(ErrorCode::InvalidArgument, "name or path too long");
   return ChopMap(std::move(info), minRegionFrames);
 }

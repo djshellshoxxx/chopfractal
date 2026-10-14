@@ -518,6 +518,49 @@ CHOP_TEST(mailbox_hands_off_immutable_data_across_threads_without_freeing_live_o
   CHECK(box.retainedForTesting() <= 2);  // everything older than the acknowledged object has been freed
 }
 
+CHOP_TEST(first_block_starts_at_the_target_gain_and_exact_render_lengths_do_not_grow) {
+  // Output gain: the first block after prepare() must already be at the target, not ramping down from unity.
+  Renderer r;
+  Config cfg;
+  cfg.sampleRate = 48000.0;
+  cfg.maxBlock = 512;
+  r.prepare(cfg);
+  r.mailbox().publish(playback(makeSource(1, 48000, 48000, dc), {ev(1, 24000, 0, 960)}));
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  tb.ppq = 0.0;
+  std::vector<float> inL(512, 0.f), inR(512, 0.f), outL(512, 0.f), outR(512, 0.f);
+  const float* in[2] = {inL.data(), inR.data()};
+  float* out[2] = {outL.data(), outR.data()};
+  RenderParams p;
+  p.outputGainDb = -12.f;
+  r.process(tb, p, in, out, 2, 512);
+  float loud = 0.f;
+  for (int i = 100; i < 400; ++i) loud = std::max(loud, std::fabs(outL[static_cast<std::size_t>(i)]));
+  CHECK(loud > 0.2f && loud < 0.3f);  // -12 dB is 0.251; before the fix it started near 1.0
+
+  // 3840 ticks at 225 BPM and 44.1 kHz is exactly 47040 frames; floating-point must not add one.
+  auto pb = playback(makeSource(1, 44100, 44100, dc), {ev(1, 20000, 0, 480)});
+  CHECK_EQ(renderWith(pb, 512, 1, 0.0, 225.0, 44100.0)[0].size(), 47040u);
+}
+
+CHOP_TEST(retrigger_sub_hits_never_start_past_the_loop_end_and_tiny_regions_are_audible) {
+  FlatEvent late = ev(1, 20000, 3800, 100);  // runs past the end of a 3840-tick loop
+  late.tx.retrigger = 4;
+  auto pb = playback(makeSource(1, 48000, 48000, dc), {late});
+  CHECK(pb != nullptr);
+  if (pb)
+    for (const FlatEvent& e : pb->events) CHECK(e.start >= 0 && e.start < pb->lengthTicks);
+
+  // A 64-frame region must reach nearly full level: the end fade covers at most half the region (it peaked at 0.48 before).
+  auto tiny = playback(makeSource(1, 48000, 48000, dc), {ev(1, 64, 0, 960)});
+  const auto out = renderWith(tiny);
+  float peakv = 0.f;
+  for (float x : out[0]) peakv = std::max(peakv, std::fabs(x));
+  CHECK(peakv > 0.8f);
+}
+
 CHOP_TEST(offline_render_is_deterministic_and_validates_settings) {
   auto pb = playback(makeSource(1, 48000, 24000, ramp), {ev(1, 24000, 0, 960), ev(2, 12000, 1000, 480)});
   CHECK(renderWith(pb) == renderWith(pb));

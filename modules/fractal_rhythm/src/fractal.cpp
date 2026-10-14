@@ -121,7 +121,8 @@ std::size_t soundingHits(const Settings& s) {
   for (char c : s.motif)
     if (c != '.') ++active;
   std::size_t total = 1;
-  for (int d = 0; d < s.depth; ++d) total *= active;
+  const int depth = std::max(0, std::min(s.depth, kMaxDepth));  // public and callable before validate(): never overflow
+  for (int d = 0; d < depth; ++d) total *= active;
   return total;
 }
 

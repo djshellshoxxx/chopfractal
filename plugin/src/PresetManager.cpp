@@ -33,7 +33,7 @@ std::vector<PresetManager::Entry> PresetManager::list(int* skipped) {
   std::vector<Entry> user;
   const juce::File dir = userFolder();
   if (dir.isDirectory())
-    for (const auto& f : dir.findChildFiles(juce::File::findFiles, false, "*.cfpreset")) {
+    for (const auto& f : dir.findChildFiles(juce::File::findFiles | juce::File::ignoreHiddenFiles, false, "*.cfpreset")) {
       juce::MemoryBlock mb;
       bool ok = f.getSize() > 0 && f.getSize() <= 4096 && f.loadFileAsData(mb);
       if (ok) {

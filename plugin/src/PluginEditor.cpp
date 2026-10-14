@@ -24,13 +24,19 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   load_.onClick = [this] { chooseFile(); };
   detect_.onClick = [this] {
     const int mode = detectMode_.getSelectedId();
+    const int hostBeats = proc_.hostBeatsPerBar.load(), hostUnit = std::max(1, proc_.hostBeatUnit.load());
+    static const int kBars[] = {1, 2, 4, 8};
+    const int loopBars = kBars[std::max(0, std::min(3, static_cast<int>(std::lround(proc_.currentParams().get(cf::host::kPatternBars)))))];
     run([=](cf::composition::ProjectSession& s) {
       cf::composition::DetectOptions d;
       d.merge = (mode == 2) ? cf::source::MergeMode::Merge : cf::source::MergeMode::Replace;  // Merge keeps the markers you placed
       if (mode >= 3) {
         d.mode = cf::composition::DetectMode::EvenGrid;
         d.grid.division = mode == 3 ? 8 : 16;
-        d.grid.loopBeats = 4.0 * (s.pattern() ? s.pattern()->settings.bars : 1);
+        // Quarter notes in the loop: bars x beats per bar x (4 / beat unit), from the pattern if there is one, else the host meter and Length control.
+        const cf::TimeSignature ts = s.pattern() ? s.pattern()->settings.timeSignature : cf::TimeSignature{hostBeats, hostUnit};
+        const int bars = s.pattern() ? s.pattern()->settings.bars : loopBars;
+        d.grid.loopBeats = static_cast<double>(bars) * static_cast<double>(ts.numerator) * 4.0 / static_cast<double>(ts.denominator);
       }
       return s.applyChops(d);
     });
@@ -133,7 +139,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   dragWav_.setTooltip("Drag the current pattern into your DAW as a WAV file");
   addAndMakeVisible(dragMidi_);
   addAndMakeVisible(dragWav_);
-  dragout::cleanupOlderThanDays(90);
+  // Dropped files are not auto-deleted: DAWs commonly link them in place, so removing them would break projects.
   setWantsKeyboardFocus(true);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_, &acceptRoles_, &useTempo_, &fractal_, &keep_, &exportWav_, &exportKit_}) {
@@ -366,6 +372,8 @@ void ChopFractalEditor::doGenerate() {
   const cf::host::ParamValues params = proc_.currentParams();
   cf::pattern::Settings base;
   base.seed = currentSeed();
+  const cf::TimeSignature hostMeter{proc_.hostBeatsPerBar.load(), proc_.hostBeatUnit.load()};
+  if (hostMeter.valid()) base.timeSignature = hostMeter;  // bars follow the host's meter (4/4 when it gives none)
   const double v = params.get(cf::host::kVariationAmount);
   base.variation = {v, v, v, v};
   cf::pattern::Settings s = cf::composition::settingsFromParams(params, base);
@@ -459,8 +467,8 @@ void ChopFractalEditor::doExportWav() {
                         [this](const juce::FileChooser& fc) {
                           juce::File f = fc.getResult();
                           if (f == juce::File()) return;
-                          const bool extensionAdded = f.getFileExtension().isEmpty();
-                          if (extensionAdded) f = f.withFileExtension("wav");
+                          const bool extensionAdded = !f.hasFileExtension("wav");
+                          if (extensionAdded) f = f.getParentDirectory().getChildFile(f.getFileName() + ".wav");  // "my.loop" becomes "my.loop.wav", not a WAV named .loop
                           cf::composition::ExportWavOptions o;
                           static const cf::wav::Format kFmt[] = {cf::wav::Format::Pcm16, cf::wav::Format::Pcm24, cf::wav::Format::Float32};
                           static const int kRate[] = {44100, 48000, 88200, 96000};
@@ -644,9 +652,11 @@ void ChopFractalEditor::refresh(bool force) {
     acceptRoles_.setEnabled(false);
     useTempo_.setEnabled(false);
     for (juce::Button* b : std::initializer_list<juce::Button*>{&detect_, &generate_, &smart_}) b->setEnabled(haveSource);
-    for (juce::Button* b : std::initializer_list<juce::Button*>{&mutate_, &fractal_, &exportWav_, &exportKit_}) b->setEnabled(havePattern);
-    dragMidi_.setEnabled(havePattern);
-    dragWav_.setEnabled(havePattern);
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&mutate_, &fractal_}) b->setEnabled(havePattern);
+    const bool canExport = havePattern && !sourceMissing_;  // exports render the source audio
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&exportWav_, &exportKit_}) b->setEnabled(canExport);
+    dragMidi_.setEnabled(canExport);
+    dragWav_.setEnabled(canExport);
   }
   if (embed_.getToggleState() != proc_.embedSource.load()) embed_.setToggleState(proc_.embedSource.load(), juce::dontSendNotification);
   const bool playing = proc_.playheadQuarters() >= 0.0;
@@ -656,6 +666,12 @@ void ChopFractalEditor::refresh(bool force) {
     repaint(patternArea_);
   }
   lastPlaying_ = playing;
+  // Messages arrive from other threads' work too (file loading, Evolve, restore): repaint the status strip when it changes.
+  const juce::String statusKey = proc_.statusMessage() + (proc_.usedFallbackTempo.load() ? "|t" : "") + (proc_.usedFallbackMeter.load() ? "|m" : "") + juce::String(proc_.manualBpm.load());
+  if (statusKey != lastStatusKey_) {
+    lastStatusKey_ = statusKey;
+    repaint(getLocalBounds().removeFromBottom(24));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -878,17 +894,16 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
       const cf::Ticks total = barTicks_ * barCount_;
       const auto pos = cf::ui::splitTick(cf::ui::snapDown(cf::ui::xToTick(static_cast<double>(pt.x - patternArea_.getX()), w, total), gridTicks_), barTicks_, barCount_);
       const cf::Ticks dur = std::min<cf::Ticks>(gridTicks_, barTicks_ - pos.startInBar);
-      run([=](cf::composition::ProjectSession& s) {
-        return s.edit([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
-          if (lane >= static_cast<int>(chops.chops.size())) return cf::makeError(cf::ErrorCode::OutOfRange, "no chop in that lane");
-          return cf::pattern::addEvent(p, pos.bar, chops.chops[static_cast<std::size_t>(lane)].id, pos.startInBar, dur, chops);
-        });
+      editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
+        if (lane >= static_cast<int>(chops.chops.size())) return cf::makeError(cf::ErrorCode::OutOfRange, "no chop in that lane");
+        return cf::pattern::addEvent(p, pos.bar, chops.chops[static_cast<std::size_t>(lane)].id, pos.startInBar, dur, chops);
       });
     }
     repaint();
   } else if (orbitArea_.contains(pt)) {
     const double R = std::min(orbitArea_.getWidth(), orbitArea_.getHeight()) / 2.0 - 4.0;
     const auto c = orbitArea_.getCentre();
+    grabKeyboardFocus();
     selected_ = cf::ui::hitTest(orbit_, static_cast<double>(pt.x - c.x), static_cast<double>(pt.y - c.y), R);
     repaint();
   } else if (historyArea_.contains(pt)) {
@@ -926,7 +941,11 @@ void ChopFractalEditor::mouseDoubleClick(const juce::MouseEvent& e) {
 // ---------------------------------------------------------------------------------------------
 
 void ChopFractalEditor::editSelected(const std::function<cf::Result<cf::pattern::Pattern>(const cf::pattern::Pattern&, const cf::ChopSnapshot&)>& fn) {
-  run([=](cf::composition::ProjectSession& s) { return s.edit(fn); });
+  run([=](cf::composition::ProjectSession& s) {
+    cf::Status st = s.edit(fn);
+    if (st.ok()) st = s.commitEdit("Edited hits");  // each finished gesture becomes a variation you can return to
+    return st;
+  });
 }
 
 void ChopFractalEditor::mouseDrag(const juce::MouseEvent& e) {
@@ -964,10 +983,12 @@ void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
     const cf::Ticks absStart = static_cast<cf::Ticks>(loc->bar) * barT + ev->start;
     if (mode == DragMode::Resize) {
       const cf::Ticks absEnd = cf::ui::snapNearest(absStart + ev->duration + dTicks, grid);
-      const cf::Ticks dur = std::max<cf::Ticks>(1, std::min(absEnd - absStart, barT - ev->start));
+      const cf::Ticks minDur = std::min(grid, barT - ev->start);  // never shrink a hit to an inaudible sliver
+      const cf::Ticks dur = std::max(minDur, std::min(absEnd - absStart, barT - ev->start));
       return cf::pattern::resizeEvent(p, id, dur);
     }
-    const auto pos = cf::ui::splitTick(cf::ui::snapNearest(std::max<cf::Ticks>(0, absStart + dTicks), grid), barT, bars);
+    const cf::Ticks lastSlot = std::max<cf::Ticks>(0, barT * bars - grid);  // snapping may round up to the very end: keep a full cell
+    const auto pos = cf::ui::splitTick(std::min(lastSlot, cf::ui::snapNearest(std::max<cf::Ticks>(0, absStart + dTicks), grid)), barT, bars);
     cf::Result<cf::pattern::Pattern> r = cf::makeError(cf::ErrorCode::InvalidArgument, "unreachable");
     if (copy) {
       if (pos.bar != loc->bar) return cf::makeError(cf::ErrorCode::InvalidArgument, "Alt-drag copies within the same bar.");
@@ -984,6 +1005,8 @@ void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
 
 bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
   if (!selected_.valid()) return false;
+  const auto mods = k.getModifiers();
+  if (mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown()) return false;  // leave the host's own shortcuts alone
   const cf::EventId id = selected_;
   if (k.getKeyCode() == juce::KeyPress::leftKey || k.getKeyCode() == juce::KeyPress::rightKey) {
     nudgeSelected(k.getKeyCode() == juce::KeyPress::leftKey ? -1 : 1, k.getModifiers().isShiftDown());
@@ -1166,8 +1189,8 @@ juce::File ChopFractalEditor::makeDragFile(bool wav) {
 }
 
 juce::Point<int> ChopFractalEditor::treePos(const cf::ui::TreeNodeView& n) const {
-  const int stepX = treeCols_ > 0 ? std::min(64, std::max(14, (historyArea_.getWidth() - 60) / treeCols_)) : 64;
-  const int stepY = treeRows_ > 0 ? std::min(30, std::max(14, (historyArea_.getHeight() - 40) / treeRows_)) : 30;
+  const int stepX = treeCols_ > 0 ? std::min(64, std::max(6, (historyArea_.getWidth() - 60) / treeCols_)) : 64;
+  const int stepY = treeRows_ > 0 ? std::min(30, std::max(6, (historyArea_.getHeight() - 40) / treeRows_)) : 30;
   return {historyArea_.getX() + 24 + n.column * stepX, historyArea_.getY() + 22 + n.depth * stepY};
 }
 
@@ -1181,9 +1204,9 @@ void ChopFractalEditor::nudgeSelected(int cells, bool resize) {
     const cf::Event* ev = cf::pattern::findEvent(p, id);
     const auto loc = cf::pattern::locate(p, id);
     if (!ev || !loc) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
-    if (resize) return cf::pattern::resizeEvent(p, id, std::max<cf::Ticks>(1, std::min(ev->duration + cells * grid, barT - ev->start)));
+    if (resize) return cf::pattern::resizeEvent(p, id, std::max(std::min(grid, barT - ev->start), std::min(ev->duration + cells * grid, barT - ev->start)));
     const cf::Ticks abs = static_cast<cf::Ticks>(loc->bar) * barT + ev->start + cells * grid;
-    if (abs < 0 || abs >= barT * bars) return cf::makeError(cf::ErrorCode::OutOfRange, "the hit is already at the edge of the pattern");
+    if (abs < 0 || abs > barT * bars - grid) return cf::makeError(cf::ErrorCode::OutOfRange, "the hit is already at the edge of the pattern");
     const auto pos = cf::ui::splitTick(abs, barT, bars);
     return cf::pattern::moveEvent(p, id, pos.bar, pos.startInBar);
   });

@@ -58,7 +58,7 @@ bool findNested(const std::vector<Event>& events, EventId id, int depth, SampleR
       return true;
     }
     if (e.child && findNested(e.child->events, id, depth + 1, resolved, chops, event, outDepth, bounds, lockedPath)) {
-      if (e.child->locked) lockedPath = true;
+      if (e.child->locked || e.locked) lockedPath = true;  // a locked ancestor hit protects everything below it
       return true;
     }
   }
@@ -199,7 +199,7 @@ void ProjectSession::recordHistory(const std::string& label) {
   const pattern::Pattern& p = patterns_.current();
   history::Metadata meta;
   meta.seed = p.settings.seed;
-  meta.label = label;
+  meta.label = label.size() > 256 ? label.substr(0, 256) : label;  // addSnapshot rejects longer labels
   meta.payloadSchema = pattern::kSchemaVersion;
   auto r = history_.addSnapshot(history_.active(), pattern::serialize(p), meta);
   if (!r.ok()) {
@@ -249,6 +249,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   chops_ = chopMap_->snapshot();
   roles_ = roles::RoleMap{};
   rules_ = roles::RuleSet{};  // rules can name chop ids, which restart at 1 for a new source
+  foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -261,6 +262,7 @@ void ProjectSession::clearSource() {
   chops_.reset();
   roles_ = roles::RoleMap{};
   rules_ = roles::RuleSet{};
+  foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -474,7 +476,7 @@ Status ProjectSession::chooseTarget(const pattern::Pattern& p, EventId id, Targe
             out.top = &e;
             out.depth = depth;
             out.bounds = bounds;
-            out.lockedPath = lockedPath || e.child->locked;
+            out.lockedPath = lockedPath || e.child->locked || e.locked;
             return {};
           }
         }
@@ -508,7 +510,7 @@ Status ProjectSession::zoomIn(EventId id, const zoom::Settings& zs, std::uint64_
   Target t;
   Status s = chooseTarget(p, id, t);
   if (!s.ok()) return s;
-  if (t.lockedPath || t.event->locked) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
+  if (t.lockedPath || t.event->locked || (t.event->child && t.event->child->locked)) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
   auto ctx = zoomContext(p, t);
   if (!ctx.ok()) return ctx.error();
   Event parent = *t.event;
@@ -539,7 +541,7 @@ Status ProjectSession::collapse(EventId id) {
   Target t;
   Status s = chooseTarget(p, id, t);
   if (!s.ok()) return s;
-  if (t.lockedPath || t.event->locked) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
+  if (t.lockedPath || t.event->locked || (t.event->child && t.event->child->locked)) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
   return finalize(withChild(p, t, nullptr), nullptr);
 }
 
@@ -658,6 +660,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     mw.u64(es.startSeed);
   }
   st.modules[kModSession] = {kSessionSchemaVersion, std::move(meta)};
+  for (const auto& kv : foreignModules_) st.modules.emplace(kv.first, kv.second);  // never overwrites a module this build wrote
   auto enc = codec::encode(st);
   if (!enc.ok()) return convert(enc.error());
   return enc.value();
@@ -679,6 +682,10 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     return {};
   };
 
+  std::map<std::string, codec::ModulePayload> foreign;  // anything this build does not know stays attached to the project
+  for (const auto& kv : st.modules)
+    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession)
+      foreign.insert(kv);
   std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes;
   bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
@@ -796,6 +803,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   chops_ = std::move(newChops);
   roles_ = std::move(newRoles.roles);
   rules_ = std::move(newRoles.rules);
+  foreignModules_ = std::move(foreign);
   history_ = std::move(newHistory);
   pendingActivation_ = history::kNoNode;
   patterns_.reset();

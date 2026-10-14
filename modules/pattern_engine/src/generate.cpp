@@ -314,12 +314,13 @@ class Gen {
       for (const Event& e : bt.events) v.push_back(e.chop);
       return v;
     };
+    std::unordered_set<std::uint64_t> rewritten;  // events already used to satisfy an earlier requirement in this beat
     for (const Requirement& rq : policy_->required(sc, placedChops())) {
       const std::vector<ChopId> placed = placedChops();
       if (std::find(placed.begin(), placed.end(), rq.chop) != placed.end()) continue;
       Event* target = nullptr;
       for (auto it = bt.events.rbegin(); it != bt.events.rend(); ++it)
-        if (fresh.count(it->id.value)) {
+        if (fresh.count(it->id.value) && !rewritten.count(it->id.value)) {
           target = &*it;
           break;
         }
@@ -333,6 +334,7 @@ class Gen {
         continue;
       }
       target->chop = rq.chop;
+      rewritten.insert(target->id.value);
     }
   }
 

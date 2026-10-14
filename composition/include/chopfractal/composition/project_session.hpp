@@ -27,6 +27,7 @@
 #include <chopfractal/fractal_rhythm/fractal.hpp>
 #include <chopfractal/wav_export/wav.hpp>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -212,6 +213,7 @@ class ProjectSession {
   ChopSnapshotPtr chops_;
   roles::RoleMap roles_;
   roles::RuleSet rules_;
+  std::map<std::string, codec::ModulePayload> foreignModules_;  // modules written by a newer build: kept and re-saved untouched
   pattern::PatternSession patterns_;
   history::VariationTree history_;
   history::NodeId pendingActivation_ = history::kNoNode;

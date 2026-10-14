@@ -21,6 +21,27 @@ bool locationLocked(const Pattern& p, const Location& l) {
   return p.phraseLocked || b.locked || bt.locked || e.locked || (e.child && e.child->locked);  // a locked child tree protects its parent too
 }
 
+// True when the event, its child tree, or any event inside that tree is locked.
+bool treeLocked(const Event& e) {
+  if (e.locked) return true;
+  if (!e.child) return false;
+  if (e.child->locked) return true;
+  for (const Event& c : e.child->events)
+    if (treeLocked(c)) return true;
+  return false;
+}
+
+Event clearedTree(Event e) {
+  e.locked = false;
+  if (e.child) {
+    auto c = std::make_shared<NestedPattern>(*e.child);
+    c->locked = false;
+    for (Event& ce : c->events) ce = clearedTree(std::move(ce));
+    e.child = std::move(c);
+  }
+  return e;
+}
+
 bool scopeLocked(const Pattern& p, int bar, int beat) {
   const Bar& b = p.bars[static_cast<std::size_t>(bar)];
   return p.phraseLocked || b.locked || (beat >= 0 && b.beats[static_cast<std::size_t>(beat)].locked);
@@ -65,6 +86,7 @@ Status validate(const Pattern& p) {
   if (!s.ok()) return s;
   if (!p.phraseId.valid()) return makeError(ErrorCode::Corrupt, "pattern has no phrase id");
   if (static_cast<int>(p.bars.size()) != p.settings.bars) return makeError(ErrorCode::Corrupt, "bar count does not match settings");
+  if (p.nextId == 0 || p.nextId > (kDerivedIdBit >> 1)) return makeError(ErrorCode::Corrupt, "id counter is out of range");  // a hostile file must not wrap new ids into the derived range
   const Ticks barT = barTicks(p.settings);
   const std::size_t beats = static_cast<std::size_t>(p.settings.timeSignature.numerator);
   std::unordered_set<std::uint64_t> ids;
@@ -142,15 +164,7 @@ Pattern clearLocks(const Pattern& p) {
     b.locked = false;
     for (Beat& bt : b.beats) {
       bt.locked = false;
-      for (Event& e : bt.events) {
-        e.locked = false;
-        if (e.child) {
-          auto c = std::make_shared<NestedPattern>(*e.child);
-          c->locked = false;
-          for (Event& ce : c->events) ce.locked = false;
-          e.child = std::move(c);
-        }
-      }
+      for (Event& e : bt.events) e = clearedTree(std::move(e));  // every nesting level, not just the first two
     }
   }
   return q;
@@ -318,6 +332,18 @@ std::pair<Pattern, EventId> reserveIds(const Pattern& p, std::uint64_t count) {
   return {std::move(q), first};
 }
 
+bool barHasLock(const Pattern& p, int bar) {
+  if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return false;
+  const Bar& b = p.bars[static_cast<std::size_t>(bar)];
+  if (p.phraseLocked || b.locked) return true;
+  for (const Beat& bt : b.beats) {
+    if (bt.locked) return true;
+    for (const Event& e : bt.events)
+      if (treeLocked(e)) return true;
+  }
+  return false;
+}
+
 Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> events, const ChopSnapshot& chops) {
   if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return makeError(ErrorCode::OutOfRange, "bar index out of range");
   const Bar& old = p.bars[static_cast<std::size_t>(bar)];
@@ -325,7 +351,7 @@ Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> event
   for (const Beat& bt : old.beats) {
     if (bt.locked) return blocked("a beat in this bar");
     for (const Event& e : bt.events)
-      if (e.locked) return blocked("an event in this bar");
+      if (treeLocked(e)) return blocked("an event (or its zoomed pattern) in this bar");
   }
   const Ticks bt = barTicks(p.settings);
   Pattern q = p;
@@ -358,7 +384,7 @@ Result<Pattern> duplicateBar(const Pattern& p, int fromBar, int toBar) {
   for (const Beat& bt : p.bars[static_cast<std::size_t>(toBar)].beats) {
     if (bt.locked) return blocked("a beat in the destination bar");
     for (const Event& e : bt.events)
-      if (e.locked) return blocked("an event in the destination bar");
+      if (treeLocked(e)) return blocked("an event (or its zoomed pattern) in the destination bar");
   }
   Pattern q = p;
   Bar& dst = q.bars[static_cast<std::size_t>(toBar)];

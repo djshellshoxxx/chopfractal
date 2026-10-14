@@ -15,6 +15,7 @@ concurrency:
 jobs:
   # Portability protocol: manifests, dependency graph, includes, forbidden host/GUI headers, current docs.
   portability:
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +27,7 @@ jobs:
   # Every module and the composition root, on each supported compiler/OS. The golden determinism hashes in
   # pattern_engine make a cross-platform divergence fail loudly here.
   build-test:
+    timeout-minutes: 60
     name: build-test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -50,6 +52,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
   sanitizers:
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +70,7 @@ jobs:
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
   transfer-smoke:
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +80,7 @@ jobs:
   # The JUCE VST3 shell: builds the plugin, runs the headless shell tests (including the editor under a
   # virtual display), and runs Steinberg's official validator on the bundle.
   plugin-linux:
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +103,7 @@ jobs:
       - name: Shell tests (headless, then with a virtual display for the editor)
         run: |
           env -u DISPLAY ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
-          xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+          CHOPFRACTAL_REQUIRE_DISPLAY=1 xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
       - name: VST3 validator
         run: tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3
       - name: Package alpha (Linux VST3 + CLAP)
@@ -114,10 +119,12 @@ jobs:
         with:
           name: chopfractal-alpha-linux
           path: chopfractal-0.1.0-alpha-linux-x86_64-*
+          if-no-files-found: error
 
   # Windows (MSVC) VST3 + CLAP. The headless shell tests run here; the editor tests need a display and are
   # covered on Linux. The Steinberg validator script is Linux-only.
   plugin-windows:
+    timeout-minutes: 60
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -141,6 +148,7 @@ jobs:
         with:
           name: chopfractal-alpha-windows
           path: chopfractal-0.1.0-alpha-windows-x64-*
+          if-no-files-found: error
       - name: Package stand-alone (Windows)
         shell: pwsh
         run: |
@@ -154,10 +162,12 @@ jobs:
         with:
           name: chopfractal-standalone-windows
           path: chopfractal-0.1.0-standalone-windows-x64-*
+          if-no-files-found: error
 
   # macOS (universal) VST3 + CLAP. Unsigned and not notarized, so non-blocking until it has run green once;
   # Gatekeeper will quarantine downloaded builds until they are signed.
   plugin-macos:
+    timeout-minutes: 60
     runs-on: macos-14
     continue-on-error: true
     steps:
@@ -182,3 +192,4 @@ jobs:
         with:
           name: chopfractal-alpha-macos
           path: chopfractal-0.1.0-alpha-macos-universal-*
+          if-no-files-found: error

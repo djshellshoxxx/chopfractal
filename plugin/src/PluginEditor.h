@@ -104,6 +104,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   std::int64_t barTicks_ = 0, gridTicks_ = 0;
   int barCount_ = 0;
   int treeCols_ = 0, treeRows_ = 0;
+  juce::String lastStatusKey_;
   juce::TooltipWindow tooltip_{this};
 
   // Feature controls (not host parameters: they act on the project).

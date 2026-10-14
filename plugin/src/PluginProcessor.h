@@ -60,6 +60,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> hostPlaying{false};
   std::atomic<bool> usedFallbackTempo{true};
   std::atomic<bool> usedFallbackMeter{true};
+  std::atomic<int> hostBeatsPerBar{4};   // the meter the host last reported (4/4 when it gives none)
+  std::atomic<int> hostBeatUnit{4};
   std::atomic<double> activeBpm{120.0};        // tempo the last block used (host tempo, else the manual fallback)
   // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
   double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }
@@ -79,8 +81,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};
   std::atomic<double> patternQuarters_{0.0};
-  std::atomic<bool> boundaryFlag_{false};
-  std::atomic<bool> midpointFlag_{false};  // set by the audio thread at each loop midpoint (drives Evolve)
+  std::atomic<std::uint32_t> boundaryCount_{0};
+  std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};
   double freeRunQuarters_ = 0.0;  // audio thread only: local clock for hosts without a position
   juce::ThreadPool loadPool_{juce::ThreadPool::Options{}.withNumberOfThreads(1)};  // file decoding; drained in the destructor

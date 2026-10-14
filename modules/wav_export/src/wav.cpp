@@ -200,7 +200,8 @@ Status writeFileAtomic(const std::string& path, const std::vector<std::uint8_t>&
     }
   }
   fs::rename(tmp, target, ec);  // replaces an existing file atomically on POSIX
-  if (ec && overwrite && fs::exists(target)) {
+  std::error_code existsEc;
+  if (ec && overwrite && fs::exists(target, existsEc)) {
     // Windows-style filesystems refuse to rename over an existing file: keep a backup so a failure cannot lose it.
     fs::path backup = tmp;
     backup += ".old";

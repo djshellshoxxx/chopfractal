@@ -2,6 +2,7 @@
 
 #include <chopfractal/plugin_host_adapter/loop_position.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -96,6 +97,8 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   usedFallbackTempo.store(tt.usedFallbackTempo, std::memory_order_relaxed);
   usedFallbackMeter.store(tt.usedFallbackMeter, std::memory_order_relaxed);
   activeBpm.store(tt.block.bpm, std::memory_order_relaxed);
+  hostBeatsPerBar.store(tt.timeSignature.numerator, std::memory_order_relaxed);
+  hostBeatUnit.store(tt.timeSignature.denominator, std::memory_order_relaxed);
 
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
@@ -120,8 +123,9 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     freeRunQuarters_ = 0.0;
   }
   const cf::host::LoopPosition lp = cf::host::computeLoopPosition(lpBlock, frames, sr, patternQuarters_.load(std::memory_order_relaxed));
-  if (lp.boundary) boundaryFlag_.store(true, std::memory_order_relaxed);
-  if (lp.midpoint) midpointFlag_.store(true, std::memory_order_relaxed);
+  // Counters, not flags: a fast offline bounce crosses several loop points between two timer ticks.
+  if (lp.boundary) boundaryCount_.fetch_add(1, std::memory_order_relaxed);
+  if (lp.midpoint) midpointCount_.fetch_add(1, std::memory_order_relaxed);
   playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
 }
 
@@ -131,14 +135,21 @@ void ChopFractalProcessor::pollAudioFlags() {
     withSession([](cf::composition::ProjectSession& s) {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
-  if (boundaryFlag_.exchange(false)) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
-  if (midpointFlag_.exchange(false)) {
-    // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins.
+  if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
+  if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
+    // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
+    // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).
     const double chaos = currentParams().get(cf::host::kChaos);
-    withSession([this, chaos](cf::composition::ProjectSession& s) {
-      auto r = s.evolveStep(chaos);
-      if (!r.ok()) setStatusMessage("Evolve: " + juce::String(r.error().message));
-      else if (r.value()) setStatusMessage("Evolve stepped");
+    const std::uint32_t steps = std::min<std::uint32_t>(crossings, 16);
+    withSession([this, chaos, steps](cf::composition::ProjectSession& s) {
+      for (std::uint32_t i = 0; i < steps; ++i) {
+        auto r = s.evolveStep(chaos);
+        if (!r.ok()) {
+          setStatusMessage("Evolve: " + juce::String(r.error().message));
+          break;
+        }
+        if (r.value()) setStatusMessage("Evolve stepped");
+      }
     });
   }
 }
@@ -262,9 +273,14 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
 }
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
+  ++loadTicket_;  // a file load still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};
-  if (in.read(magic, 4) != 4 || std::memcmp(magic, kStateMagic, 4) != 0 || in.readInt() != kStateVersion) return;  // foreign or newer: ignore safely
+  if (in.read(magic, 4) != 4 || std::memcmp(magic, kStateMagic, 4) != 0) return;  // not ours: ignore safely
+  if (in.readInt() != kStateVersion) {
+    setStatusMessage("This project was saved by a different version of ChopFractal and could not be loaded.");
+    return;
+  }
   const juce::String xmlText = in.readString();
   const int blobSize = in.readInt();
   if (blobSize < 0 || static_cast<juce::int64>(blobSize) > in.getNumBytesRemaining()) return;

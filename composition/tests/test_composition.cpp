@@ -271,6 +271,31 @@ CHOP_TEST(history_cap_keeps_recording_by_dropping_the_oldest_nodes_with_a_visibl
   CHECK(newest.ok() && newest.value().meta.seed == 70u);  // the newest variation really was recorded
 }
 
+CHOP_TEST(modules_written_by_a_newer_build_survive_a_load_and_re_save) {
+  ProjectSession a;
+  CHECK(ready(a));
+  CHECK(a.generate(settings(3, 2)).ok());
+  auto saved = a.saveState(false);
+  CHECK(saved.ok());
+  if (!saved.ok()) return;
+  auto dec = codec::decode(saved.value().data(), saved.value().size());
+  CHECK(dec.ok());
+  if (!dec.ok()) return;
+  codec::ProjectState st = dec.value();
+  st.modules["future_feature"] = {7, {1, 2, 3, 4}};
+  auto enc = codec::encode(st);
+  CHECK(enc.ok());
+  if (!enc.ok()) return;
+  ProjectSession b;
+  CHECK(b.loadState(enc.value().data(), enc.value().size(), [](const source::SourceInfo&) { return std::shared_ptr<const render::SourceData>(); }).ok());
+  auto again = b.saveState(false);
+  CHECK(again.ok());
+  if (!again.ok()) return;
+  auto dec2 = codec::decode(again.value().data(), again.value().size());
+  CHECK(dec2.ok() && dec2.value().modules.count("future_feature") == 1);
+  if (dec2.ok() && dec2.value().modules.count("future_feature")) CHECK(dec2.value().modules.at("future_feature").bytes == (std::vector<std::uint8_t>{1, 2, 3, 4}));
+}
+
 CHOP_TEST(missing_source_keeps_markers_and_pattern_and_relinking_restores_audio) {
   ProjectSession s;
   CHECK(ready(s));
