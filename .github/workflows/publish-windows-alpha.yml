@@ -32,7 +32,7 @@ jobs:
           gh run watch "$BUILD_RUN" --exit-status --interval 15
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
           jq -e --arg sha "$BUILD_SHA" '.head_sha == $sha and .head_branch == "main" and .conclusion == "success"' run.json
-          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?filter=all&per_page=100" > jobs.json
           jq -e '.jobs | any(.name == "plugin-windows" and .conclusion == "success")' jobs.json
       - name: Download and verify Windows packages
         run: |
@@ -44,6 +44,20 @@ jobs:
           cd ../chopfractal-standalone-windows
           sha256sum --check *.sha256
           unzip -t *.zip
+      - name: Verify current main has the tested application code
+        run: |
+          set -euo pipefail
+          release_sha=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          source_tree=$(gh api "repos/$GH_REPO/commits/$BUILD_SHA" --jq .commit.tree.sha)
+          release_tree=$(gh api "repos/$GH_REPO/commits/$release_sha" --jq .commit.tree.sha)
+          for revision in "$source_tree" "$release_tree"; do
+            gh api "repos/$GH_REPO/git/trees/$revision" --jq '.tree | map(select(.path != "docs" and .path != ".github")) | sort_by(.path) | map({path,mode,type,sha})' > "$revision.json"
+          done
+          diff -u "$source_tree.json" "$release_tree.json"
+          source_ci=$(gh api "repos/$GH_REPO/contents/.github/workflows/ci.yml?ref=$BUILD_SHA" --jq .sha)
+          release_ci=$(gh api "repos/$GH_REPO/contents/.github/workflows/ci.yml?ref=$release_sha" --jq .sha)
+          test "$source_ci" = "$release_ci"
+          echo "RELEASE_SHA=$release_sha" >> "$GITHUB_ENV"
       - name: Publish alpha release
         run: |
           set -euo pipefail
@@ -65,6 +79,8 @@ jobs:
           - Plugin ZIP: contains VST3 and CLAP. Install in your host's plugin folders and rescan.
           - SHA256 checksum files are included.
 
+          The release tag includes publication and QA documentation updates. Application source and the CI build definition are verified identical to the tested build commit above.
+
           First use: drop a loop (or Load Loop), Detect Chops, Generate, then Play.
 
           QA: the shell suite checks four essentials (real dropped sample loading, standalone Play/Stop, section selection and Zoom, embedded project save/restore), then runs at least 35 seconds of randomized editor/audio QA. The release is published only after the source CI succeeds; archive integrity and checksums are verified again before upload. See docs/QA_ALPHA2.md for the minor follow-ups, and docs/BUILD_STATUS.md for existing alpha limitations. Physical Windows audio devices and real DAW behavior still need human validation.
@@ -74,8 +90,8 @@ jobs:
           LICENSE and THIRD_PARTY_NOTICES.md are included in each ZIP.
           NOTES
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "ChopFractal 0.1.0 Alpha 2 — Windows" --notes-file notes.md --prerelease --draft
+            gh release create "$RELEASE_TAG" --target "$RELEASE_SHA" --title "ChopFractal 0.1.0 Alpha 2 — Windows" --notes-file notes.md --prerelease --draft
           fi
-          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish | jq -e --arg sha "$BUILD_SHA" '.targetCommitish == $sha'
+          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish | jq -e --arg sha "$RELEASE_SHA" '.targetCommitish == $sha'
           gh release upload "$RELEASE_TAG" assets/chopfractal-alpha-windows/* assets/chopfractal-standalone-windows/* --clobber
           gh release edit "$RELEASE_TAG" --draft=false --prerelease
