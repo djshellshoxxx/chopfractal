@@ -14,6 +14,17 @@ if(CHOPFRACTAL_JUCE_DIR)
 else()
   FetchContent_Declare(juce GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG ${CHOPFRACTAL_JUCE_TAG} GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(juce)
+  # Tags can be moved: fail loudly if the fetched commit is not the one this project was tested with.
+  set(CHOPFRACTAL_JUCE_COMMIT "91ad83ae34a81e0833b1a2b0866f54846370ae53" CACHE STRING "Expected JUCE commit for CHOPFRACTAL_JUCE_TAG (empty disables the check)")
+  if(CHOPFRACTAL_JUCE_COMMIT AND CHOPFRACTAL_JUCE_TAG STREQUAL "8.0.15")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${juce_SOURCE_DIR}" rev-parse HEAD OUTPUT_VARIABLE _juce_head OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+      if(_juce_head AND NOT _juce_head STREQUAL CHOPFRACTAL_JUCE_COMMIT)
+        message(FATAL_ERROR "JUCE ${CHOPFRACTAL_JUCE_TAG} resolved to ${_juce_head}, expected ${CHOPFRACTAL_JUCE_COMMIT}. The tag moved or the cache is stale.")
+      endif()
+    endif()
+  endif()
 endif()
 
 juce_add_plugin(ChopFractal
@@ -27,7 +38,7 @@ juce_add_plugin(ChopFractal
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT FALSE
   IS_MIDI_EFFECT FALSE
-  EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+  EDITOR_WANTS_KEYBOARD_FOCUS TRUE
   COPY_PLUGIN_AFTER_BUILD FALSE)
 
 # Optional CLAP format via clap-juce-extensions (MIT; wraps the same JUCE processor, no source changes).
@@ -47,6 +58,14 @@ endif()
 
 target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
 target_include_directories(ChopFractal PRIVATE src)
+# Warnings for our own plugin sources only (JUCE's module sources are compiled into the same target and stay untouched).
+set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp tests/test_plugin_shell.cpp)
+if(MSVC)
+  set(_cf_warn /W4 $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:/WX>)
+else()
+  set(_cf_warn -Wall -Wextra $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:-Werror>)
+endif()
+set_source_files_properties(${CHOPFRACTAL_PLUGIN_SOURCES} PROPERTIES COMPILE_OPTIONS "${_cf_warn}")
 target_compile_definitions(ChopFractal PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
 target_link_libraries(ChopFractal

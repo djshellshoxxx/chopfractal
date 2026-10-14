@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace dragout {
-// <system temp>/ChopFractal/drag (or the override, used by tests).
+// <user data>/ChopFractal/Dropped (or the override, used by tests). Files are kept for 90 days.
 juce::File folder();
 void setFolderOverride(const juce::File& f);
 // Writes `bytes` to a new unique file "<stem>-<n>.<ext>" in folder(); returns juce::File() on failure.

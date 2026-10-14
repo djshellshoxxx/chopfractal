@@ -22,6 +22,13 @@ CHOP_TEST(factory_presets_are_valid_distinct_and_round_trip) {
   }
 }
 
+CHOP_TEST(file_names_avoid_windows_reserved_device_names) {
+  CHECK(fileNameFor("CON") == "preset-con.cfpreset");
+  CHECK(fileNameFor("lpt1") == "preset-lpt1.cfpreset");
+  CHECK(fileNameFor("console") == "console.cfpreset");
+  CHECK(fileNameFor("") == "untitled.cfpreset");
+}
+
 CHOP_TEST(validation_rejects_every_out_of_range_field) {
   auto bad = [](auto mutate) {
     Preset p;
@@ -71,7 +78,9 @@ CHOP_TEST(file_names_are_safe_and_stable) {
   CHECK(fileNameFor("My Preset #1") == "my_preset_1.cfpreset");
   CHECK(fileNameFor("../../etc/passwd") == "etc_passwd.cfpreset");
   CHECK(fileNameFor("") == "untitled.cfpreset");
-  CHECK(fileNameFor("!!!") == "untitled.cfpreset");
+  CHECK(fileNameFor("!!!").rfind("untitled-", 0) == 0);                       // lossy names keep a hash so they do not collide
+  CHECK(fileNameFor("!!!") != fileNameFor("???"));
+  CHECK(fileNameFor("\xE3\x82\xAD\xE3\x83\x83\xE3\x82\xAF") != fileNameFor("\xE3\x82\xB9\xE3\x83\x8D\xE3\x82\xA2"));
   CHECK(fileNameFor(std::string(100, 'Z')).size() == 48 + 9);
   CHECK(fileNameFor("Kick-01") == "kick-01.cfpreset");
 }

@@ -82,6 +82,9 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> boundaryFlag_{false};
   std::atomic<bool> midpointFlag_{false};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};
+  double freeRunQuarters_ = 0.0;  // audio thread only: local clock for hosts without a position
+  juce::ThreadPool loadPool_{juce::ThreadPool::Options{}.withNumberOfThreads(1)};  // file decoding; drained in the destructor
+  std::atomic<std::uint64_t> loadTicket_{0};
   juce::String status_;
   mutable juce::CriticalSection statusLock_;
 

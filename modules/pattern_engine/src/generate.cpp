@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <set>
 #include <unordered_set>
 
 #include "internal.hpp"
@@ -491,7 +492,7 @@ class Gen {
     const int remaining = std::max(0, s_.maxEvents - total);
     const int k = static_cast<int>(targets.size());
     std::unordered_set<std::uint64_t> fresh;
-    std::unordered_set<int> touched;
+    std::set<int> touched;  // ordered: hash-set iteration order differs between standard libraries
     for (int i = 0; i < k; ++i) {
       const int budget = remaining / k + (i < remaining % k ? 1 : 0);
       const Target& tg = targets[static_cast<std::size_t>(i)];

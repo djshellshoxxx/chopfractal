@@ -257,15 +257,18 @@ CHOP_TEST(marker_edits_reconcile_the_pattern_and_stay_valid) {
   CHECK(!s.setRules(bad).ok());
 }
 
-CHOP_TEST(history_cap_degrades_gracefully_with_a_visible_notice) {
+CHOP_TEST(history_cap_keeps_recording_by_dropping_the_oldest_nodes_with_a_visible_notice) {
   ProjectSession s;
   CHECK(ready(s));
   for (std::uint64_t i = 1; i <= 70; ++i) CHECK(s.generate(settings(i, 1)).ok());  // every generate still succeeds
   CHECK(s.history().size() <= 64u);
-  bool warned = false;
-  for (const Notice& n : s.notices()) warned = warned || n.text.find("family tree") != std::string::npos;
-  CHECK(warned);
+  bool told = false;
+  for (const Notice& n : s.notices()) told = told || n.text.find("history limit") != std::string::npos;
+  CHECK(told);                                       // the user is told older snapshots were removed
   CHECK(s.pattern()->settings.seed == 70u);
+  CHECK(s.history().active() != history::kNoNode);
+  auto newest = s.history().getSnapshot(s.history().active());
+  CHECK(newest.ok() && newest.value().meta.seed == 70u);  // the newest variation really was recorded
 }
 
 CHOP_TEST(missing_source_keeps_markers_and_pattern_and_relinking_restores_audio) {

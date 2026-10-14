@@ -161,7 +161,26 @@ std::string fileNameFor(const std::string& name) {
     if (s.size() >= 48) break;
   }
   while (!s.empty() && s.back() == '_') s.pop_back();
-  return (s.empty() ? std::string("untitled") : s) + ".cfpreset";
+  if (s.empty()) {
+    s = "untitled";
+    // Names with no ASCII letters or digits (for example non-Latin scripts) would all collide on "untitled".
+    if (!name.empty()) {
+      std::uint32_t h = 2166136261u;
+      for (char ch : name) h = (h ^ static_cast<unsigned char>(ch)) * 16777619u;
+      static const char* const hex = "0123456789abcdef";
+      s += '-';
+      for (int shift = 20; shift >= 0; shift -= 4) s += hex[(h >> shift) & 0xFu];
+    }
+  }
+  // Windows reserves these device names whatever the extension.
+  static const char* const kReserved[] = {"con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+                                          "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"};
+  for (const char* r : kReserved)
+    if (s == r) {
+      s = "preset-" + s;
+      break;
+    }
+  return s + ".cfpreset";
 }
 
 }  // namespace chopfractal::presets

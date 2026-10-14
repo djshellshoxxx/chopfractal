@@ -72,8 +72,23 @@ Result<AddResult> VariationTree::addSnapshot(NodeId parent, std::vector<std::uin
         victim = id;
       }
     }
-    if (victim == kNoNode)
-      return makeError(ErrorCode::LimitExceeded, "history is full and every snapshot is protected", static_cast<std::int64_t>(config_.maxNodes));
+    if (victim == kNoNode) {
+      // A straight chain has no leaf to drop (the tail is the active node). Splice out the oldest node that is
+      // not a favorite, the active node or the new node's parent, and hand its children to its own parent.
+      victimOrder = ~0ull;
+      for (const auto& [id, node] : nodes_) {
+        if (id == parent || id == active_ || node.meta.favorite) continue;
+        if (node.order < victimOrder) {
+          victimOrder = node.order;
+          victim = id;
+        }
+      }
+      if (victim == kNoNode)
+        return makeError(ErrorCode::LimitExceeded, "history is full and every snapshot is protected", static_cast<std::int64_t>(config_.maxNodes));
+      const NodeId grand = nodes_.at(victim).parent;
+      for (auto& [id, node] : nodes_)
+        if (node.parent == victim) node.parent = grand;
+    }
     nodes_.erase(victim);
     result.pruned.push_back(victim);
   }

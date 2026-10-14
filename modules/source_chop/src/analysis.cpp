@@ -135,6 +135,7 @@ std::int64_t snapToNearest(std::int64_t position, const std::vector<std::int64_t
 
 std::int64_t snapToZeroCrossing(const float* channel, std::int64_t frames, std::int64_t position, std::int64_t radius) {
   if (!channel || frames < 2) return position;
+  radius = std::min(radius, frames);  // beyond this both sides are out of range; also keeps position +/- d from overflowing
   for (std::int64_t d = 0; d <= radius; ++d) {
     for (int sign = -1; sign <= 1; sign += 2) {
       const std::int64_t i = position + sign * d;

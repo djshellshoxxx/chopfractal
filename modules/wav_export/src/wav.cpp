@@ -49,7 +49,7 @@ Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& 
     for (float x : c)
       if (std::isfinite(x)) peak = std::max(peak, std::fabs(x));
   float gain = 1.f;
-  if (o.normalize && peak > 0.f) gain = static_cast<float>(std::pow(10.0, static_cast<double>(o.ceilingDb) / 20.0)) / peak;
+  if (o.normalize && peak > 1e-9f) gain = static_cast<float>(std::pow(10.0, static_cast<double>(o.ceilingDb) / 20.0)) / peak;
 
   std::vector<std::uint8_t> out;
   out.reserve(static_cast<std::size_t>(dataBytes) + 64);
@@ -86,7 +86,9 @@ Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& 
           double v = static_cast<double>(x) * 32768.0;
           if (o.dither) {
             Rng& r = c == 0 ? dither0 : dither1;
-            v += r.uniform01() - r.uniform01();
+            const double d1 = r.uniform01();  // two statements: the evaluation order of operands is unspecified
+            const double d2 = r.uniform01();
+            v += d1 - d2;
           }
           std::int64_t q = std::llround(v);
           if (q > 32767) {
@@ -166,6 +168,7 @@ Result<Decoded> decode(const std::uint8_t* d, std::size_t n) {
           } else {
             const std::uint32_t b = get32(p);
             std::memcpy(&v, &b, 4);
+            if (!std::isfinite(v)) v = 0.f;
           }
           out.planar[c][i] = v;
         }
@@ -180,7 +183,7 @@ Status writeFileAtomic(const std::string& path, const std::vector<std::uint8_t>&
   namespace fs = std::filesystem;
   std::error_code ec;
   if (path.empty()) return makeError(ErrorCode::InvalidArgument, "empty path");
-  const fs::path target(path);
+  const fs::path target = fs::u8path(path);  // paths are UTF-8; plain fs::path(std::string) would use the ANSI code page on Windows
   if (fs::exists(target, ec) && !overwrite) return makeError(ErrorCode::Conflict, "a file already exists at " + path);
   static std::atomic<std::uint64_t> counter{0};
   fs::path tmp = target;

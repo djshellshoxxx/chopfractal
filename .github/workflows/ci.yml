@@ -5,9 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never cancel a main-branch run
 
 jobs:
   # Portability protocol: manifests, dependency graph, includes, forbidden host/GUI headers, current docs.
@@ -86,7 +89,8 @@ jobs:
           path: |
             ~/.cache/chopfractal-vst3sdk
             build-plugin/_deps
-          key: plugin-deps-${{ hashFiles('plugin/CMakeLists.txt', 'tools/validate_vst3.sh') }}
+          key: plugin-deps-${{ runner.os }}-${{ hashFiles('plugin/CMakeLists.txt', 'CMakeLists.txt', 'tools/validate_vst3.sh') }}
+          restore-keys: plugin-deps-${{ runner.os }}-
       - name: Build plugin and shell tests
         run: |
           cmake -S . -B build-plugin -G Ninja -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCMAKE_BUILD_TYPE=Release
@@ -102,11 +106,14 @@ jobs:
           mkdir -p dist
           cp -r build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
           cp build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
-          tar -czf chopfractal-prebeta-linux-x86_64.tar.gz -C dist .
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          name="chopfractal-0.1.0-prebeta-linux-x86_64-${GITHUB_SHA::8}"
+          tar -czf "$name.tar.gz" -C dist .
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: chopfractal-prebeta-linux
-          path: chopfractal-prebeta-linux-x86_64.tar.gz
+          path: chopfractal-0.1.0-prebeta-linux-x86_64-*
 
   # Windows (MSVC) VST3 + CLAP. The headless shell tests run here; the editor tests need a display and are
   # covered on Linux. The Steinberg validator script is Linux-only.
@@ -126,8 +133,39 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item -Recurse build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
           Copy-Item build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
-          Compress-Archive -Path dist/* -DestinationPath chopfractal-prebeta-windows-x64.zip
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md dist/
+          $name = "chopfractal-0.1.0-prebeta-windows-x64-$($env:GITHUB_SHA.Substring(0,8))"
+          Compress-Archive -Path dist/* -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: chopfractal-prebeta-windows
-          path: chopfractal-prebeta-windows-x64.zip
+          path: chopfractal-0.1.0-prebeta-windows-x64-*
+
+  # macOS (universal) VST3 + CLAP. Unsigned and not notarized, so non-blocking until it has run green once;
+  # Gatekeeper will quarantine downloaded builds until they are signed.
+  plugin-macos:
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build plugin, CLAP and shell tests (arm64 + x86_64)
+        run: |
+          cmake -S . -B build-plugin -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build build-plugin --config Release --parallel --target ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
+      - name: Shell tests (headless)
+        run: ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+      - name: Package pre-beta (macOS VST3 + CLAP)
+        run: |
+          mkdir -p dist
+          cp -r build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
+          cp -r build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          name="chopfractal-0.1.0-prebeta-macos-universal-${GITHUB_SHA::8}"
+          (cd dist && zip -qr "../$name.zip" .)
+          shasum -a 256 "$name.zip" > "$name.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopfractal-prebeta-macos
+          path: chopfractal-0.1.0-prebeta-macos-universal-*

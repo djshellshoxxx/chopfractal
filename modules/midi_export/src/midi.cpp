@@ -196,6 +196,7 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
         auto it = open.find({ch, a});
         if (it == open.end()) return bad("note ended without a start");
         if (now <= it->second.first) return bad("zero-length note");
+        if (spec.notes.size() >= kMaxNotes) return bad("too many notes");
         spec.notes.push_back({a, it->second.second, it->second.first, now - it->second.first, ch});
         open.erase(it);
       }

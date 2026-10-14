@@ -133,7 +133,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   dragWav_.setTooltip("Drag the current pattern into your DAW as a WAV file");
   addAndMakeVisible(dragMidi_);
   addAndMakeVisible(dragWav_);
-  dragout::cleanupOlderThanDays(7);
+  dragout::cleanupOlderThanDays(90);
   setWantsKeyboardFocus(true);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_, &acceptRoles_, &useTempo_, &fractal_, &keep_, &exportWav_, &exportKit_}) {
@@ -502,8 +502,13 @@ void ChopFractalEditor::historyMenu(cf::history::NodeId id) {
       });
       ed->run([=](cf::composition::ProjectSession& s) { return s.setFavorite(id, !now); });
     } else if (choice == 2) {
+      juce::String currentName;
+      ed->proc_.withSession([&](cf::composition::ProjectSession& s) {
+        for (const auto& n : s.history().listAll())
+          if (n.id == id) currentName = juce::String(n.label);
+      });
       auto* w = new juce::AlertWindow("Rename variation", "Name:", juce::MessageBoxIconType::NoIcon);
-      w->addTextEditor("name", "");
+      w->addTextEditor("name", currentName);
       w->addButton("OK", 1);
       w->addButton("Cancel", 0);
       w->enterModalState(true, juce::ModalCallbackFunction::create([self, w, id](int r) {
@@ -577,6 +582,7 @@ void ChopFractalEditor::doToggleLock() {
 void ChopFractalEditor::refresh(bool force) {
   juce::String sig;
   bool rebuilt = false;
+  bool havePattern = false, haveSource = false;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<int>(s.history().size()) << "|"
         << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1);
@@ -621,14 +627,34 @@ void ChopFractalEditor::refresh(bool force) {
       }
     }
     tree_ = cf::ui::layoutHistoryTree(s.history().listAll(), s.history().active());
+    treeCols_ = treeRows_ = 0;
+    for (const auto& n : tree_) {
+      treeCols_ = std::max(treeCols_, n.column);
+      treeRows_ = std::max(treeRows_, n.depth);
+    }
+    haveSetup_ = false;  // Smart Setup suggestions belong to the chops they were made for
+    havePattern = s.pattern() != nullptr;
+    haveSource = sourceFrames_ > 0;
     bool stillThere = false;
     for (const auto& r : pattern_.rects) stillThere = stillThere || r.id == selected_;
     if (!stillThere) selected_ = cf::EventId{};
   });
   locate_.setEnabled(sourceMissing_);
+  if (rebuilt) {
+    acceptRoles_.setEnabled(false);
+    useTempo_.setEnabled(false);
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&detect_, &generate_, &smart_}) b->setEnabled(haveSource);
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&mutate_, &fractal_, &exportWav_, &exportKit_}) b->setEnabled(havePattern);
+    dragMidi_.setEnabled(havePattern);
+    dragWav_.setEnabled(havePattern);
+  }
   if (embed_.getToggleState() != proc_.embedSource.load()) embed_.setToggleState(proc_.embedSource.load(), juce::dontSendNotification);
   const bool playing = proc_.playheadQuarters() >= 0.0;
-  if (force || rebuilt || playing || lastPlaying_) repaint();
+  if (force || rebuilt) repaint();
+  else if (playing || lastPlaying_) {  // only the playhead views change while the transport runs
+    repaint(orbitArea_);
+    repaint(patternArea_);
+  }
   lastPlaying_ = playing;
 }
 
@@ -713,12 +739,13 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   g.setColour(juce::Colour(0xff20252d));
   g.fillRect(historyArea_);
   for (const auto& n : tree_) {
-    const int x = historyArea_.getX() + 24 + n.column * 64;
-    const int y = historyArea_.getY() + 22 + n.depth * 30;
+    const auto np = treePos(n);
+    const int x = np.x, y = np.y;
     for (const auto& p : tree_)
       if (p.id == n.parent) {
         g.setColour(juce::Colours::grey);
-        g.drawLine(static_cast<float>(historyArea_.getX() + 24 + p.column * 64), static_cast<float>(historyArea_.getY() + 22 + p.depth * 30), static_cast<float>(x), static_cast<float>(y));
+        const auto pp = treePos(p);
+        g.drawLine(static_cast<float>(pp.x), static_cast<float>(pp.y), static_cast<float>(x), static_cast<float>(y));
       }
     g.setColour(n.active ? juce::Colour(0xff7cf29a) : (n.favorite ? juce::Colour(0xffffc857) : juce::Colour(0xff9aa4b2)));
     g.fillEllipse(static_cast<float>(x - 8), static_cast<float>(y - 8), 16.0f, 16.0f);
@@ -763,8 +790,8 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     }
     g.setColour(juce::Colours::white.withAlpha(0.9f));
     g.setFont(10.0f);
-    const double w = (R - 0.25 * R) / std::max(1, orbit_.rings);
-    for (int ring = 0; ring < orbit_.rings; ++ring) g.drawText(juce::String(ring + 1), static_cast<int>(c.x) - 8, static_cast<int>(c.y - R + ring * w), 16, 10, juce::Justification::centred);
+    const double ringW = (R - 0.25 * R) / std::max(1, orbit_.rings);
+    for (int ring = 0; ring < orbit_.rings; ++ring) g.drawText(juce::String(ring + 1), static_cast<int>(c.x) - 8, static_cast<int>(c.y - R + ring * ringW), 16, 10, juce::Justification::centred);
     if (posTicks >= 0.0) {
       const double a = cf::ui::playheadAngle(ph, orbit_.lengthTicks);
       g.setColour(juce::Colour(0xff7cf29a));
@@ -836,9 +863,10 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
     for (auto it = pattern_.rects.rbegin(); it != pattern_.rects.rend(); ++it)
       if (it->chopIndex == lane && fx >= it->x0 && fx <= it->x1) {
         selected_ = it->id;
-        if (it->depth == 0 && !it->locked) {  // only top-level, unlocked hits can be dragged
+        if (it->depth == 0 && !it->locked && !e.mods.isPopupMenu()) {  // only top-level, unlocked hits can be dragged
           const double edgePx = (it->x1 - fx) * w;
-          dragMode_ = edgePx <= 6.0 ? DragMode::Resize : DragMode::Move;
+          const double edgeZone = std::min(6.0, (it->x1 - it->x0) * w / 3.0);  // narrow hits keep a move zone
+          dragMode_ = edgePx <= edgeZone ? DragMode::Resize : DragMode::Move;
           dragId_ = it->id;
           dragStart_ = dragNow_ = pt;
           dragLane_ = lane;
@@ -865,8 +893,8 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
     repaint();
   } else if (historyArea_.contains(pt)) {
     for (const auto& n : tree_) {
-      const int x = historyArea_.getX() + 24 + n.column * 64;
-      const int y = historyArea_.getY() + 22 + n.depth * 30;
+      const auto np = treePos(n);
+      const int x = np.x, y = np.y;
       if (std::abs(pt.x - x) < 11 && std::abs(pt.y - y) < 11) {
         const cf::history::NodeId id = n.id;
         if (e.mods.isPopupMenu()) {
@@ -918,6 +946,7 @@ void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
     repaint(patternArea_);
     return;  // a click, not a drag
   }
+  repaint(patternArea_);
   if (gridTicks_ <= 0 || barTicks_ <= 0 || barCount_ <= 0) return;
   const cf::EventId id = dragId_;
   const cf::Ticks total = barTicks_ * barCount_;
@@ -956,6 +985,10 @@ void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
 bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
   if (!selected_.valid()) return false;
   const cf::EventId id = selected_;
+  if (k.getKeyCode() == juce::KeyPress::leftKey || k.getKeyCode() == juce::KeyPress::rightKey) {
+    nudgeSelected(k.getKeyCode() == juce::KeyPress::leftKey ? -1 : 1, k.getModifiers().isShiftDown());
+    return true;
+  }
   if (k == juce::KeyPress::deleteKey || k == juce::KeyPress::backspaceKey) {
     editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) { return cf::pattern::deleteEvent(p, id); });
     return true;
@@ -1014,7 +1047,11 @@ cf::presets::Preset ChopFractalEditor::currentPreset(const juce::String& name) c
 
 void ChopFractalEditor::applyPreset(const cf::presets::Preset& p) {
   auto setParam = [this](const char* id, double plain) {
-    if (auto* prm = proc_.apvts.getParameter(id)) prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
+    if (auto* prm = proc_.apvts.getParameter(id)) {
+      prm->beginChangeGesture();  // hosts in touch/latch automation modes expect a gesture around each change
+      prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
+      prm->endChangeGesture();
+    }
   };
   setParam("density", p.density);
   setParam("swing", p.swing);
@@ -1101,6 +1138,12 @@ juce::File ChopFractalEditor::makeDragFile(bool wav) {
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     if (wav) {
       cf::composition::ExportWavOptions o;
+      static const cf::wav::Format kFmt[] = {cf::wav::Format::Pcm16, cf::wav::Format::Pcm24, cf::wav::Format::Float32};
+      static const int kRate[] = {44100, 48000, 88200, 96000};
+      static const int kLoops[] = {1, 2, 4, 8, 16};
+      o.wav.format = kFmt[std::max(0, std::min(2, exportFormat_.getSelectedId() - 1))];  // same choices as Export WAV
+      o.wav.sampleRate = kRate[std::max(0, std::min(3, exportRate_.getSelectedId() - 1))];
+      o.loops = kLoops[std::max(0, std::min(4, exportLoops_.getSelectedId() - 1))];
       o.bpm = proc_.activeBpm.load();
       auto r = s.renderWavBytes(o);
       if (r.ok()) bytes = std::move(r.value()); else status = r.error();
@@ -1120,4 +1163,28 @@ juce::File ChopFractalEditor::makeDragFile(bool wav) {
   proc_.setStatusMessage(status_);
   repaint();
   return f;
+}
+
+juce::Point<int> ChopFractalEditor::treePos(const cf::ui::TreeNodeView& n) const {
+  const int stepX = treeCols_ > 0 ? std::min(64, std::max(14, (historyArea_.getWidth() - 60) / treeCols_)) : 64;
+  const int stepY = treeRows_ > 0 ? std::min(30, std::max(14, (historyArea_.getHeight() - 40) / treeRows_)) : 30;
+  return {historyArea_.getX() + 24 + n.column * stepX, historyArea_.getY() + 22 + n.depth * stepY};
+}
+
+// Keyboard equivalent of the drag gestures: arrows nudge the selected hit by one grid cell, Shift+arrows resize it.
+void ChopFractalEditor::nudgeSelected(int cells, bool resize) {
+  if (!selected_.valid() || gridTicks_ <= 0 || barTicks_ <= 0 || barCount_ <= 0) return;
+  const cf::EventId id = selected_;
+  const cf::Ticks grid = gridTicks_, barT = barTicks_;
+  const int bars = barCount_;
+  editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) -> cf::Result<cf::pattern::Pattern> {
+    const cf::Event* ev = cf::pattern::findEvent(p, id);
+    const auto loc = cf::pattern::locate(p, id);
+    if (!ev || !loc) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
+    if (resize) return cf::pattern::resizeEvent(p, id, std::max<cf::Ticks>(1, std::min(ev->duration + cells * grid, barT - ev->start)));
+    const cf::Ticks abs = static_cast<cf::Ticks>(loc->bar) * barT + ev->start + cells * grid;
+    if (abs < 0 || abs >= barT * bars) return cf::makeError(cf::ErrorCode::OutOfRange, "the hit is already at the edge of the pattern");
+    const auto pos = cf::ui::splitTick(abs, barT, bars);
+    return cf::pattern::moveEvent(p, id, pos.bar, pos.startInBar);
+  });
 }

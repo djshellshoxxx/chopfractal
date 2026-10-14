@@ -379,12 +379,6 @@ juce::Button* findButton(juce::Component& root, const juce::String& text) {
       if (b->getButtonText() == text) return b;
   return nullptr;
 }
-juce::ComboBox* findCombo(juce::Component& root, const juce::String& title) {
-  for (auto* c : root.getChildren())
-    if (auto* b = dynamic_cast<juce::ComboBox*>(c))
-      if (b->getTitle() == title) return b;
-  return nullptr;
-}
 std::vector<std::uint8_t> patternBytes(ChopFractalProcessor& p) {
   std::vector<std::uint8_t> out;
   p.withSession([&](cf::composition::ProjectSession& s) {
@@ -462,7 +456,6 @@ CHOP_TEST(editor_buttons_drive_the_session) {
   // Every visible button must have a title for accessibility.
   for (auto* c : ed->getChildren())
     if (auto* b = dynamic_cast<juce::Button*>(c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
-  (void)findCombo;
 }
 
 namespace {

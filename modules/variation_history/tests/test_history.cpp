@@ -50,15 +50,37 @@ CHOP_TEST(prune_removes_oldest_unprotected_leaf_and_reports_it) {
   NodeId c = t.addSnapshot(a, bytesOf(3), meta(3)).value().id;
   CHECK(t.setActive(c).ok());
   CHECK(t.setFavorite(b, true).ok());
-  // Leaves: b (favorite), c (active). Nothing is safe to prune.
+  CHECK(t.setFavorite(root, true).ok());
+  CHECK(t.setFavorite(a, true).ok());
+  // Everything is a favorite, the active node or the new node's parent: nothing may be dropped.
   auto full = t.addSnapshot(c, bytesOf(9), meta(9));
   CHECK(!full.ok() && full.error().code == ErrorCode::LimitExceeded);
   CHECK(t.setFavorite(b, false).ok());
   auto ok = t.addSnapshot(c, bytesOf(9), meta(9));
   CHECK(ok.ok());
-  CHECK(ok.value().pruned == (std::vector<NodeId>{b}));
+  CHECK(ok.value().pruned == (std::vector<NodeId>{b}));  // the unprotected leaf goes first
   CHECK(t.contains(root) && t.contains(a) && t.contains(c) && !t.contains(b));
   CHECK_EQ(t.size(), 4u);
+}
+
+CHOP_TEST(a_long_straight_chain_keeps_recording_by_splicing_out_the_oldest_node) {
+  Config cfg;
+  cfg.maxNodes = 8;
+  VariationTree t(cfg);
+  NodeId prev = kNoNode;
+  for (int i = 0; i < 100; ++i) {
+    auto r = t.addSnapshot(prev, bytesOf(static_cast<std::uint8_t>(i)), meta(static_cast<std::uint64_t>(i)));
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    CHECK(t.setActive(r.value().id).ok());
+    prev = r.value().id;
+  }
+  CHECK_EQ(t.size(), 8u);
+  CHECK(t.contains(prev));
+  auto snap = t.getSnapshot(prev);
+  CHECK(snap.ok() && snap.value().meta.seed == 99);
+  auto saved = t.serialize();
+  CHECK(VariationTree::deserialize(saved.data(), saved.size()).ok());  // the spliced tree is still a valid saved tree
 }
 
 CHOP_TEST(delete_branch_refuses_active_and_favorites) {

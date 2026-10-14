@@ -1,5 +1,7 @@
 #include "PresetManager.h"
 
+#include "AppPaths.h"
+
 #include <algorithm>
 
 namespace cf = chopfractal;
@@ -13,7 +15,7 @@ juce::File& folderOverride() {
 
 juce::File PresetManager::userFolder() {
   if (folderOverride() != juce::File()) return folderOverride();
-  return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("ChopFractal").getChildFile("Presets");
+  return apppaths::dataRoot().getChildFile("Presets");
 }
 
 void PresetManager::setFolderOverride(const juce::File& folder) { folderOverride() = folder; }
@@ -61,7 +63,7 @@ cf::Status PresetManager::save(const cf::presets::Preset& p, bool overwrite) {
   const juce::File target = dir.getChildFile(juce::String(cf::presets::fileNameFor(p.name)));
   if (target.existsAsFile() && !overwrite) return cf::makeError(cf::ErrorCode::Conflict, "a preset with this name already exists");
   const auto bytes = cf::presets::serialize(p);
-  juce::TemporaryFile tmp(target);
+  juce::TemporaryFile tmp(target, juce::TemporaryFile::useHiddenFile);  // hidden temp name, never matches *.cfpreset
   if (!tmp.getFile().replaceWithData(bytes.data(), bytes.size())) return cf::makeError(cf::ErrorCode::InvalidArgument, "could not write the preset");
   if (!tmp.overwriteTargetFileWithTemporary()) return cf::makeError(cf::ErrorCode::InvalidArgument, "could not finish writing the preset");
   return {};
