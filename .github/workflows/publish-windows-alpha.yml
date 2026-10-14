@@ -17,17 +17,18 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: "38508080718"
-      BUILD_SHA: "8dc43bae8574d19632f5c35839fd7938bfd9c56e"
-      RELEASE_TAG: v0.1.0-alpha.1
+      BUILD_RUN: "38510702415"
+      BUILD_SHA: "103c612dd7be1916a507ff60f1802210c566d21d"
+      RELEASE_TAG: v0.1.0-alpha.2
     steps:
       - name: Verify the tested build
         run: |
           set -euo pipefail
+          gh run watch "$BUILD_RUN" --exit-status --interval 15
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
           jq -e --arg sha "$BUILD_SHA" '.head_sha == $sha and .head_branch == "main" and .conclusion == "success"' run.json
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
@@ -46,23 +47,32 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Windows x64 alpha for preliminary GUI and feature testing, built from commit 8dc43bae8574d19632f5c35839fd7938bfd9c56e after audit round 5 (PR #9).
+          Windows x64 alpha 2, built from commit 103c612dd7be1916a507ff60f1802210c566d21d.
+
+          Fixes and usability changes:
+          - Green Play and red Stop: local pattern playback works in the standalone app without a DAW and restarts from the beginning.
+          - Long status messages wrap and scroll, and text can be selected/copied.
+          - Plain click and drag selects source sections and pattern hits; Move / resize hits enables the editing gestures. Delete and M apply to selected hits together.
+          - Zoom In subdivides selected pattern hits and gives a visible result or actionable error.
+          - Drop an audio sample into the window to load it through the existing asynchronous decoder.
+          - The standalone input-muted notice has an X button that dismisses it while preserving the feedback-loop input mute.
+          - Hover help covers controls and waveform, pattern, history and Orbit views.
 
           Downloads:
           - Standalone ZIP: extract and run ChopFractal.exe.
-          - Plugin ZIP: includes VST3 and CLAP. Copy ChopFractal.vst3 to your VST3 folder and ChopFractal.clap to your CLAP folder, then rescan your host.
-          - SHA256 files are included for both packages.
+          - Plugin ZIP: contains VST3 and CLAP. Install in your host's plugin folders and rescan.
+          - SHA256 checksum files are included.
 
-          Includes deterministic chopping and variations, recursive Hit Zoom, Fractal Rhythm, Evolve, Smart Setup, Orbit View, per-hit effects, presets, history, WAV and Producer Kit export.
+          First use: drop a loop (or Load Loop), Detect Chops, Generate, then Play.
 
-          Verification: all ten CI jobs passed on the source commit, including Windows standalone/VST3/CLAP compilation and shell tests, portable tests on Windows/Linux/macOS, sanitizers, portability checks, transfer smoke and Linux VST3 validation. Package checksums are verified again before upload.
+          QA: the shell suite checks four essentials (real dropped sample loading, standalone Play/Stop, section selection and Zoom, embedded project save/restore), then runs at least 35 seconds of randomized editor/audio QA. The release is published only after the source CI succeeds; archive integrity and checksums are verified again before upload. See docs/QA_ALPHA2.md for the minor follow-ups, and docs/BUILD_STATUS.md for existing alpha limitations. Physical Windows audio devices and real DAW behavior still need human validation.
 
-          Known unfinished work: live input capture; GUI polish and missing advanced editing controls; real DAW and CLAP host validation; installers/signing; performance and long-duration soak testing. Known issues include grammar edge cases, family-tree position after undo/redo, timing of loop-boundary swaps, effect-toggle voice cuts, and exports blocking the UI. See docs/BUILD_STATUS.md at the source commit for the full list. This is an alpha, not a production-ready release.
+          Known unfinished work: input capture, advanced GUI/editor work, real DAW and CLAP host validation, installers/signing, reference-machine performance and long-duration soak testing. This remains an alpha.
 
           LICENSE and THIRD_PARTY_NOTICES.md are included in each ZIP.
           NOTES
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "ChopFractal 0.1.0 Alpha 1 — Windows" --notes-file notes.md --prerelease --draft
+            gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "ChopFractal 0.1.0 Alpha 2 — Windows" --notes-file notes.md --prerelease --draft
           fi
           gh release view "$RELEASE_TAG" --json isDraft,targetCommitish | jq -e --arg sha "$BUILD_SHA" '.targetCommitish == $sha'
           gh release upload "$RELEASE_TAG" assets/chopfractal-alpha-windows/* assets/chopfractal-standalone-windows/* --clobber
