@@ -106,4 +106,13 @@ bool isSupportedBusLayout(int inputChannels, int outputChannels) {
   return (inputChannels == 1 || inputChannels == 2) && inputChannels == outputChannels;
 }
 
+bool isSupportedBusLayout(int inputChannels, int outputChannels, const int* aux, int numAux) {
+  if (!isSupportedBusLayout(inputChannels, outputChannels)) return false;
+  for (int i = 0; aux && i < numAux; ++i) {
+    if (aux[i] == 0) continue;
+    if (aux[i] != 2 || inputChannels != 2) return false;
+  }
+  return true;
+}
+
 }  // namespace chopfractal::host

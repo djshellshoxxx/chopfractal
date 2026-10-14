@@ -63,6 +63,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   CaptureController& captureController() { return capture_; }
   // ---- live pads ----
   StretchController& stretchController() { return stretch_; }
+  int activeAuxBuses() const { return auxBuses_.load(std::memory_order_relaxed); }  // aux stereo outputs the host enabled
   PadInput& pads() { return pads_; }
   void padTrigger(int note, int velocity, bool on) { pads_.trigger(note, velocity, on); }
   void setRecordArmed(bool armed);
@@ -91,6 +92,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
+  static BusesProperties makeBusLayout();
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -104,6 +106,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};
+  std::atomic<int> auxBuses_{0};
   std::atomic<double> patternQuarters_{0.0};
   bool sceneTransportPlaying_ = false;  // message thread: last host play state passed to the scene sequencer
   std::atomic<std::uint32_t> boundaryCount_{0};

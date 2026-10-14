@@ -143,6 +143,15 @@ CHOP_TEST(host_time_falls_back_and_says_so_when_data_is_missing_or_invalid) {
 CHOP_TEST(bus_layouts) {
   CHECK(isSupportedBusLayout(2, 2) && isSupportedBusLayout(1, 1));
   CHECK(!isSupportedBusLayout(1, 2) && !isSupportedBusLayout(0, 0) && !isSupportedBusLayout(6, 6));
+  const int none[8] = {};
+  const int some[8] = {2, 0, 2, 0, 0, 0, 0, 0};
+  const int mono[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+  const int wide[8] = {6, 0, 0, 0, 0, 0, 0, 0};
+  CHECK(isSupportedBusLayout(2, 2, none, 8) && isSupportedBusLayout(1, 1, none, 8) && isSupportedBusLayout(2, 2, nullptr, 0));
+  CHECK(isSupportedBusLayout(2, 2, some, 8));
+  CHECK(!isSupportedBusLayout(1, 1, some, 8));   // aux outputs need a stereo main
+  CHECK(!isSupportedBusLayout(2, 2, mono, 8) && !isSupportedBusLayout(2, 2, wide, 8));
+  CHECK(!isSupportedBusLayout(2, 1, none, 8));
 }
 
 // ---- loop position (extracted from ChopFractalProcessor::processBlock) ----

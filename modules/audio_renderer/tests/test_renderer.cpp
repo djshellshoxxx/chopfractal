@@ -1077,3 +1077,198 @@ CHOP_TEST(pad_path_performs_no_heap_allocation_and_the_spsc_queue_keeps_order) {
   CHECK(!q.pop(v) && q.empty());
   CHECK(q.push(9) && q.pop(v) && v == 9);
 }
+
+// ---------------------------------------------------------------------------------------------
+// multi-output stems
+// ---------------------------------------------------------------------------------------------
+namespace {
+
+float peak(const std::vector<float>& v) {
+  float m = 0.f;
+  for (float x : v) m = std::max(m, std::fabs(x));
+  return m;
+}
+
+struct StemRun {
+  std::vector<float> main;
+  std::vector<std::vector<float>> aux;  // [bus] left channel
+};
+
+std::shared_ptr<const Playback> twoChopPlayback(const SourcePtr& src, std::uint8_t busA, std::uint8_t busB, std::uint8_t busC = 0) {
+  FlatEvent a = ev(1, 24000, 0, 960);
+  FlatEvent b = ev(2, 24000, 960, 960);
+  b.chop = ChopId{2};
+  b.tx.level = 0.5f;
+  FlatEvent c = ev(3, 24000, 1920, 960);
+  c.chop = ChopId{3};
+  c.tx.level = 0.25f;
+  BusRouting routing;
+  routing.chopBus = {{ChopId{1}, busA}, {ChopId{2}, busB}, {ChopId{3}, busC}};
+  auto r = makePlayback(src, {a, b, c}, 3840, &routing);
+  CHECK(r.ok());
+  return r.ok() ? r.value() : nullptr;
+}
+
+StemRun runStems(const std::shared_ptr<const Playback>& pb, int auxBuses, int enabledBuses, int block, float dry = 0.f, float gainDb = 0.f, const float* inputLevel = nullptr) {
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = auxBuses;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  StemRun out;
+  out.aux.resize(8);
+  std::vector<float> in(static_cast<std::size_t>(block), inputLevel ? *inputLevel : 0.f);
+  std::vector<float> l(static_cast<std::size_t>(block)), rr(static_cast<std::size_t>(block));
+  std::vector<std::vector<float>> al(8, std::vector<float>(static_cast<std::size_t>(block))), ar(8, std::vector<float>(static_cast<std::size_t>(block)));
+  RenderParams params;
+  params.dryMix = dry;
+  params.outputGainDb = gainDb;
+  for (std::int64_t done = 0; done < 96000; done += block) {
+    const int n = static_cast<int>(std::min<std::int64_t>(block, 96000 - done));
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = static_cast<double>(done) * 120.0 / (60.0 * 48000.0);
+    float* auxPairs[kMaxAuxBuses][2] = {};
+    AuxOutputs aux;
+    aux.count = enabledBuses;
+    for (int b = 0; b < enabledBuses; ++b) {
+      std::fill(al[static_cast<std::size_t>(b)].begin(), al[static_cast<std::size_t>(b)].end(), 0.7f);  // hosts do not clear aux buffers
+      std::fill(ar[static_cast<std::size_t>(b)].begin(), ar[static_cast<std::size_t>(b)].end(), 0.7f);
+      auxPairs[b][0] = al[static_cast<std::size_t>(b)].data();
+      auxPairs[b][1] = ar[static_cast<std::size_t>(b)].data();
+      aux.bus[b] = auxPairs[b];
+    }
+    const float* inp[2] = {in.data(), in.data()};
+    float* outp[2] = {l.data(), rr.data()};
+    r.process(tb, params, LiveInput{}, inp, outp, 2, n, aux);
+    out.main.insert(out.main.end(), l.begin(), l.begin() + n);
+    for (int b = 0; b < enabledBuses; ++b) out.aux[static_cast<std::size_t>(b)].insert(out.aux[static_cast<std::size_t>(b)].end(), al[static_cast<std::size_t>(b)].begin(), al[static_cast<std::size_t>(b)].begin() + n);
+  }
+  return out;
+}
+
+}  // namespace
+
+CHOP_TEST(bus_routing_lookup_and_event_bus_follow_the_sorted_events) {
+  BusRouting r;
+  r.chopBus = {{ChopId{2}, 3}, {ChopId{9}, 8}};
+  r.defaultBus = 1;
+  CHECK_EQ(r.busFor(ChopId{2}), 3);
+  CHECK_EQ(r.busFor(ChopId{9}), 8);
+  CHECK_EQ(r.busFor(ChopId{5}), 1);  // absent -> default
+  auto src = makeSource(1, 48000, 24000, dc);
+  auto pb = twoChopPlayback(src, 0, 0, 0);
+  CHECK(pb->eventBus.empty());  // everything on main keeps the plain form
+  pb = twoChopPlayback(src, 2, 0, 5);
+  CHECK_EQ(pb->eventBus.size(), pb->events.size());
+  for (std::size_t i = 0; i < pb->events.size(); ++i) CHECK_EQ(pb->eventBus[i], pb->events[i].chop.value == 1 ? 2 : (pb->events[i].chop.value == 3 ? 5 : 0));
+}
+
+CHOP_TEST(a_routed_chop_appears_only_on_its_bus_and_the_sum_equals_the_unrouted_main) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const auto unrouted = runStems(twoChopPlayback(src, 0, 0, 0), 0, 0, 512);
+  for (int block : {1, 7, 64, 333, 2048}) {
+    const auto routed = runStems(twoChopPlayback(src, 1, 0, 2), 2, 2, block);
+    // chop 1 (level 1.0) is on aux 1, chop 3 (0.25) on aux 2, chop 2 (0.5) on main
+    CHECK_NEAR(routed.aux[0][5000], 1.0, 1e-5);
+    CHECK_NEAR(routed.aux[0][24000 + 5000], 0.0, 1e-6);  // chop 2 is not on aux 1
+    CHECK_NEAR(routed.aux[1][2 * 24000 + 5000], 0.25, 1e-5);
+    CHECK_NEAR(routed.main[5000], 0.0, 1e-6);
+    CHECK_NEAR(routed.main[24000 + 5000], 0.5, 1e-5);
+    float worst = 0.f;
+    for (std::size_t i = 0; i < unrouted.main.size(); ++i)
+      worst = std::max(worst, std::fabs(routed.main[i] + routed.aux[0][i] + routed.aux[1][i] - unrouted.main[i]));
+    CHECK(worst < 1e-6f);
+    if (block != 512) {
+      const auto ref = runStems(twoChopPlayback(src, 1, 0, 2), 2, 2, 512);
+      CHECK(routed.aux[0] == ref.aux[0] && routed.aux[1] == ref.aux[1] && routed.main == ref.main);  // block-size independent
+    }
+  }
+}
+
+CHOP_TEST(disabled_aux_folds_into_main_bit_exactly_and_default_is_unchanged) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const auto plain = runStems(twoChopPlayback(src, 0, 0, 0), 0, 0, 512);
+  const auto foldedNoAux = runStems(twoChopPlayback(src, 3, 0, 1), 0, 0, 512);   // host enabled nothing
+  const auto foldedOne = runStems(twoChopPlayback(src, 3, 0, 0), 1, 1, 512);    // bus 3 is beyond the one enabled aux
+  CHECK(foldedNoAux.main == plain.main);
+  CHECK(foldedOne.main == plain.main);
+  CHECK(peak(foldedOne.aux[0]) < 1e-6f);  // the enabled aux bus stays silent
+}
+
+CHOP_TEST(dry_mix_reaches_main_only_output_gain_reaches_every_bus_and_silent_aux_is_zeroed) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const float level = 0.3f;
+  const auto dryRun = runStems(twoChopPlayback(src, 1, 0, 0), 1, 1, 512, 1.0f, 0.f, &level);
+  CHECK_NEAR(dryRun.main[24000 + 5000], 0.5 + 0.3, 1e-4);   // chop 2 plus the dry input
+  CHECK_NEAR(dryRun.aux[0][5000], 1.0, 1e-4);                // the stem never contains the input
+  CHECK_NEAR(dryRun.aux[0][60000], 0.0, 1e-6);               // pre-filled with 0.7, rewritten with silence
+  const auto quiet = runStems(twoChopPlayback(src, 1, 0, 0), 1, 1, 512, 0.f, -6.0206f);
+  CHECK_NEAR(quiet.aux[0][5000], 0.5, 2e-3);
+  CHECK_NEAR(quiet.main[24000 + 5000], 0.25, 2e-3);
+  // disabled effect: everything silent but still written
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = 1;
+  r.prepare(cfg);
+  r.mailbox().publish(twoChopPlayback(src, 1, 0, 0));
+  std::vector<float> l(512), rr(512), in(512, 0.f), al(512, 0.7f), ar(512, 0.7f);
+  float* pair[2] = {al.data(), ar.data()};
+  AuxOutputs aux;
+  aux.count = 1;
+  aux.bus[0] = pair;
+  RenderParams off;
+  off.enabled = false;
+  TransportBlock tb;
+  tb.playing = tb.positionValid = true;
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  r.process(tb, off, LiveInput{}, inp, outp, 2, 512, aux);
+  CHECK(peak(al) == 0.f && peak(ar) == 0.f);
+}
+
+CHOP_TEST(stem_processing_never_allocates_and_offline_stems_sum_to_the_main_render) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  auto pb = twoChopPlayback(src, 1, 0, 2);
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = 8;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  std::vector<float> l(512), rr(512), in(512, 0.f);
+  std::vector<std::vector<float>> bufs(16, std::vector<float>(512));
+  float* pairs[8][2];
+  AuxOutputs aux;
+  aux.count = 8;
+  for (int b = 0; b < 8; ++b) {
+    pairs[b][0] = bufs[static_cast<std::size_t>(b) * 2].data();
+    pairs[b][1] = bufs[static_cast<std::size_t>(b) * 2 + 1].data();
+    aux.bus[b] = pairs[b];
+  }
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 400; ++i) {
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
+    r.process(tb, RenderParams{}, LiveInput{}, inp, outp, 2, 512, aux);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+  OfflineSettings os;
+  os.tailSeconds = 0.0;
+  auto stems = renderOfflineStems(pb, os, 2);
+  auto plain = renderOffline(twoChopPlayback(src, 0, 0, 0), os);
+  CHECK(stems.ok() && plain.ok());
+  if (stems.ok() && plain.ok()) {
+    CHECK_EQ(stems.value().aux.size(), 2u);
+    float worst = 0.f;
+    for (std::size_t i = 0; i < plain.value()[0].size(); ++i)
+      worst = std::max(worst, std::fabs(stems.value().main[0][i] + stems.value().aux[0][0][i] + stems.value().aux[1][0][i] - plain.value()[0][i]));
+    CHECK(worst < 1e-6f);
+  }
+  CHECK(renderOffline(pb, os).ok());  // the plain offline render folds everything into main
+  CHECK(!renderOfflineStems(pb, os, 9).ok());
+}

@@ -12,6 +12,7 @@
 #include "DragOut.h"
 #include "MorphPanel.h"
 #include "RulesPanel.h"
+#include "OutputsPanel.h"
 #include "PadPanel.h"
 #include "ScenePanel.h"
 #include "TempoPanel.h"
@@ -140,6 +141,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   std::unique_ptr<ScenePanel> scenePanel_;
   std::unique_ptr<PadPanel> padPanel_;
   std::unique_ptr<TempoPanel> tempoPanel_;
+  std::unique_ptr<OutputsPanel> outputsPanel_;
+  juce::ToggleButton outputsToggle_{"Outputs"};
   juce::ToggleButton tempoToggle_{"Tempo"};
   juce::ToggleButton padsToggle_{"Pads"};
   juce::ToggleButton scenesToggle_{"Scenes"};

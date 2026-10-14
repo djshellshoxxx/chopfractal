@@ -18,10 +18,17 @@ constexpr char kStateMagic[4] = {'C', 'F', 'P', 'L'};
 constexpr int kStateVersion = 1;
 }  // namespace
 
+// Main stereo in/out plus eight optional stereo outputs ("Out 2".."Out 9"), disabled until the host turns them on.
+ChopFractalProcessor::BusesProperties ChopFractalProcessor::makeBusLayout() {
+  auto p = BusesProperties()
+               .withInput("Input", juce::AudioChannelSet::stereo(), true)
+               .withOutput("Main", juce::AudioChannelSet::stereo(), true);
+  for (int i = 2; i <= 9; ++i) p = p.withOutput("Out " + juce::String(i), juce::AudioChannelSet::stereo(), false);
+  return p;
+}
+
 ChopFractalProcessor::ChopFractalProcessor()
-    : AudioProcessor(BusesProperties()
-                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor(makeBusLayout()),
       apvts(*this, nullptr, "ChopFractal", createLayout()) {
   const auto& manifest = cf::host::parameterManifest();
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) paramPtrs_[i] = apvts.getRawParameterValue(manifest[i].id);
@@ -72,13 +79,20 @@ void ChopFractalProcessor::prepareToPlay(double sampleRate, int maximumExpectedS
   cf::render::Config cfg;
   cfg.sampleRate = sampleRate;
   cfg.maxBlock = maximumExpectedSamplesPerBlock > 0 ? maximumExpectedSamplesPerBlock : 2048;
+  int aux = 0;
+  for (int i = 1; i <= cf::render::kMaxAuxBuses; ++i)
+    if (auto* bus = getBus(false, i); bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() == 2 && getMainBusNumInputChannels() == 2) ++aux;
+  cfg.auxBuses = aux;
+  auxBuses_.store(aux, std::memory_order_relaxed);
   renderer_.prepare(cfg);
   sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
   capture_.engine().onPrepare(sampleRate_.load(), juce::jmin(2, getTotalNumInputChannels()));
 }
 
 bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels());
+  int aux[cf::render::kMaxAuxBuses] = {};
+  for (int i = 1; i <= cf::render::kMaxAuxBuses; ++i) aux[i - 1] = i < layouts.outputBuses.size() ? layouts.getNumChannels(false, i) : 0;
+  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels(), aux, cf::render::kMaxAuxBuses);
 }
 
 void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
@@ -141,7 +155,22 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     live.padParams.mode = static_cast<cf::render::PadMode>(juce::jlimit(0, 2, juce::roundToInt(pv.v[cf::host::kPerfMode])));
     live.padParams.curve = static_cast<cf::render::VelocityCurve>(juce::jlimit(0, 3, juce::roundToInt(pv.v[cf::host::kPerfVelocityCurve])));
   }
-  renderer_.process(tt.block, cf::host::toRenderParams(pv), live, buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
+  // Aux outputs: each enabled stereo bus is a view onto the host buffer (no allocation); disabled ones fold into main.
+  cf::render::AuxOutputs aux;
+  float* auxPairs[cf::render::kMaxAuxBuses][2] = {};
+  if (channels == 2) {
+    for (int i = 1; i <= cf::render::kMaxAuxBuses && aux.count < auxBuses_.load(std::memory_order_relaxed); ++i) {
+      auto* bus = getBus(false, i);
+      if (!bus || !bus->isEnabled() || bus->getNumberOfChannels() != 2) continue;
+      const int first = getChannelIndexInProcessBlockBuffer(false, i, 0);
+      if (first < 0 || first + 1 >= buffer.getNumChannels()) continue;
+      auxPairs[aux.count][0] = buffer.getWritePointer(first);
+      auxPairs[aux.count][1] = buffer.getWritePointer(first + 1);
+      aux.bus[aux.count] = auxPairs[aux.count];
+      ++aux.count;
+    }
+  }
+  renderer_.process(tt.block, cf::host::toRenderParams(pv), live, buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames, aux);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.

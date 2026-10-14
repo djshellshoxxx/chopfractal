@@ -90,7 +90,8 @@ Status ProjectSession::applyStretched(const StretchPlan& sp, std::shared_ptr<con
     if (Status v = pattern::validate(mapped); !v.ok()) return v.error();
     auto flat = pattern::flatten(mapped, *newChops);
     if (!flat.ok()) return flat.error();
-    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(mapped));
+    const render::BusRouting routing = makeBusRouting();
+    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(mapped), &routing);
     if (!pb.ok()) return pb.error();
     newPlayback = pb.value();
     newPattern = std::move(mapped);

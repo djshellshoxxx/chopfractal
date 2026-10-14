@@ -163,6 +163,15 @@ struct StretchPlan {
   StretchRequest request;
 };
 
+// ---- output routing (docs/specs/roadmap/F11-multi-output-stems.md) ----
+enum class RoutingMode : std::uint8_t { MainOnly = 0, ByRole = 1, ByChop = 2, Custom = 3 };
+struct OutputRouting {
+  RoutingMode mode = RoutingMode::MainOnly;
+  std::map<std::string, std::uint8_t> roleBus;  // role name -> bus 0..8 (0 = main)
+  std::map<std::uint64_t, std::uint8_t> chopBus;  // explicit per-chop override -> bus 0..8
+  friend bool operator==(const OutputRouting& a, const OutputRouting& b) { return a.mode == b.mode && a.roleBus == b.roleBus && a.chopBus == b.chopBus; }
+};
+
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
@@ -240,6 +249,15 @@ class ProjectSession {
   bool redo();
   Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
+
+  // ---- output routing: per-chop / per-role stems on the aux outputs ----
+  Status setOutputRouting(const OutputRouting& routing);
+  const OutputRouting& outputRouting() const { return routing_; }
+  int autoRouteByRole();  // one output per role in snapshot order (max 8); returns roles routed
+  int autoRouteByChop();  // chop n -> output 1 + (n % 8); returns chops routed
+  void setAuxBusesAvailable(int n) { auxAvailable_ = n < 0 ? 0 : (n > render::kMaxAuxBuses ? render::kMaxAuxBuses : n); }
+  int auxBusesAvailable() const { return auxAvailable_; }
+  std::uint8_t effectiveBus(ChopId chop) const;  // chopBus, else the chop's role route, else main
 
   // ---- tempo matching ----
   // Validates the request and snapshots the audio; the heavy stretch::stretch runs elsewhere (a worker thread).
@@ -386,6 +404,9 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  OutputRouting routing_;
+  int auxAvailable_ = 0;
+  render::BusRouting makeBusRouting() const;
   PadSettings padSettings_;
   render::Mailbox<render::PadBank>* padMailbox_ = nullptr;
   scenes::SceneList sceneList_;

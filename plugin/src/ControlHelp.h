@@ -133,6 +133,12 @@ inline juce::String forName(const juce::String& name) {
     {"Match to host", "Stretch the source to the target tempo. Chop ids, roles and the pattern rhythm are kept. Use Undo Stretch to go back."},
     {"Undo Stretch", "Restore the source and project exactly as they were before the last stretch."},
     {"Close Tempo", "Hide tempo matching."},
+    {"Outputs", "Show output routing: send chops or roles to the extra stereo outputs so your DAW can process them separately."},
+    {"Show output routing", "Show output routing: send chops or roles to the extra stereo outputs so your DAW can process them separately."},
+    {"Auto: by role", "Send each role to its own output (Out 2, Out 3, ...) in the order the roles first appear. Up to eight roles."},
+    {"Auto: by chop", "Send chop 1 to Out 2, chop 2 to Out 3 and so on, sharing outputs after eight chops."},
+    {"Reset to Main", "Play everything on the main output again."},
+    {"Close Outputs", "Hide output routing."},
     {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},
     {"Load Loop > Detect Chops > Generate > Play", "Start by loading or dropping a loop, detecting chops, generating a pattern, and pressing Play."},
   };

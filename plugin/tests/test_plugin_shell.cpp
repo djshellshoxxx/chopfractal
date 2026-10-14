@@ -152,6 +152,19 @@ CHOP_TEST(only_matching_mono_and_stereo_bus_layouts_are_supported) {
   CHECK(p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::mono())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::create5point1(), juce::AudioChannelSet::create5point1())));
+  {  // optional aux outputs: stereo main plus stereo "Out 2" is fine, a mono main with an aux output is not
+    auto withAux = [&](juce::AudioChannelSet main, juce::AudioChannelSet aux, juce::AudioChannelSet in) {
+      auto l = layout(in, main);
+      l.outputBuses.add(aux);
+      return l;
+    };
+    CHECK(p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo())));
+    CHECK(!p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo(), juce::AudioChannelSet::mono())));
+    CHECK(!p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::stereo(), juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
+    CHECK_EQ(p.getBusCount(false), 9);  // Main + eight optional outputs, the extras disabled by default
+    CHECK(!p.getBus(false, 1)->isEnabled());
+    CHECK_EQ(p.activeAuxBuses(), 0);
+  }
   CHECK(p.acceptsMidi() && !p.producesMidi() && !p.isMidiEffect() && p.getTailLengthSeconds() == 0.0 && p.getLatencySamples() == 0);
   CHECK(p.getNumPrograms() >= 1 && p.getProgramName(0).isNotEmpty());  // the VST3 validator rejects unnamed programs
 }
@@ -1921,4 +1934,81 @@ CHOP_TEST(tempo_panel_disables_matching_outside_the_range_and_shows_the_exact_te
   tgt->setText("120", true);
   RulesRig::pump(150);
   if (match) CHECK(match->isEnabled());
+}
+
+CHOP_TEST(processor_writes_aux_buses_for_routed_chops_and_stays_silent_for_the_rest) {
+  ChopFractalProcessor p;
+  auto layout = p.getBusesLayout();
+  layout.outputBuses.set(1, juce::AudioChannelSet::stereo());
+  CHECK(p.setBusesLayout(layout));
+  CHECK(p.getBus(false, 1)->isEnabled());
+  p.prepareToPlay(48000.0, 512);
+  CHECK_EQ(p.activeAuxBuses(), 1);
+  makeSession(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    cf::composition::OutputRouting r;
+    r.mode = cf::composition::RoutingMode::Custom;
+    for (const auto& c : s.chops()->chops) r.chopBus[c.id.value] = 1;  // everything to Out 2
+    CHECK(s.setOutputRouting(r).ok());
+  });
+  FakePlayHead ph;
+  p.setPlayHead(&ph);
+  juce::MidiBuffer midi;
+  float mainPeak = 0.f, auxPeak = 0.f;
+  for (int b = 0; b < 100; ++b) {
+    juce::AudioBuffer<float> buf(4, 512);
+    buf.clear();
+    p.processBlock(buf, midi);
+    mainPeak = std::max(mainPeak, buf.getMagnitude(0, 0, 512));
+    auxPeak = std::max(auxPeak, std::max(buf.getMagnitude(2, 0, 512), buf.getMagnitude(3, 0, 512)));
+    ph.ppq += 512.0 * 120.0 / (60.0 * 48000.0);
+  }
+  p.setPlayHead(nullptr);
+  CHECK(auxPeak > 0.05f);
+  CHECK(mainPeak < 1e-6f);  // every chop is routed away from main
+  // the same session on a host that gave no aux outputs plays on main
+  ChopFractalProcessor q;
+  prepare(q);
+  makeSession(q);
+  q.withSession([&](cf::composition::ProjectSession& s) {
+    cf::composition::OutputRouting r;
+    r.mode = cf::composition::RoutingMode::Custom;
+    for (const auto& c : s.chops()->chops) r.chopBus[c.id.value] = 1;
+    CHECK(s.setOutputRouting(r).ok());
+  });
+  FakePlayHead ph2;
+  CHECK(peak(run(q, ph2, 100)) > 0.05f);
+}
+
+CHOP_TEST(outputs_panel_buttons_drive_the_routing) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.detectAndRoles();
+  r.click("Outputs");
+  r.click("Auto: by role", true);
+  cf::composition::OutputRouting routing;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing.mode == cf::composition::RoutingMode::ByRole);
+  CHECK_EQ(routing.roleBus.size(), 3u);  // kick, hat, snare
+  auto* list = findByTitle<juce::ListBox>(*r.ed, "Route table");
+  CHECK(list != nullptr);
+  auto* box = findByTitle<juce::ComboBox>(*r.ed, "Output for the selected chop");
+  CHECK(box != nullptr);
+  if (list && box) {
+    list->selectRow(1);
+    RulesRig::pump();
+    box->setSelectedId(5, juce::sendNotificationSync);  // Out 5
+    RulesRig::pump();
+    r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+    CHECK(routing.mode == cf::composition::RoutingMode::Custom);
+    CHECK_EQ(routing.chopBus.size(), 1u);
+  }
+  r.click("Reset to Main", true);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing == cf::composition::OutputRouting{});
+  r.click("Auto: by chop", true);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing.mode == cf::composition::RoutingMode::ByChop);
 }
