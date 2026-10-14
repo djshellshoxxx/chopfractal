@@ -72,6 +72,7 @@ class CaptureEngine {
   void discard();                           // Captured -> Idle (frees the buffer)
   Result<CapturedAudio> take();             // Captured -> Idle, moving the audio out
   CaptureStatus status() const;
+  float takeRecentPeak();  // largest |sample| since the previous call (for a decaying meter); resets to 0
   void reap();                              // frees the buffer once the audio thread has returned to Idle
 
   // ---- prepareToPlay (audio stopped) ----

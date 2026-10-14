@@ -41,6 +41,7 @@ struct CaptureEngine::Impl {
   std::atomic<std::int64_t> captured{0};
   std::atomic<std::int64_t> cap{0};
   std::atomic<float> peak{0.f};
+  std::atomic<float> recent{0.f};
   std::atomic<std::uint32_t> clipped{0};
 
   void finish(CaptureState to, EndReason why) {
@@ -56,8 +57,10 @@ struct CaptureEngine::Impl {
         const float a = std::fabs(in[c][i]);
         if (std::isfinite(a) && a > p) p = a;
       }
-    float cur = peak.load(std::memory_order_relaxed);
-    while (p > cur && !peak.compare_exchange_weak(cur, p, std::memory_order_relaxed)) {
+    for (std::atomic<float>* a : {&peak, &recent}) {
+      float cur = a->load(std::memory_order_relaxed);
+      while (p > cur && !a->compare_exchange_weak(cur, p, std::memory_order_relaxed)) {
+      }
     }
   }
 
@@ -143,6 +146,7 @@ Status CaptureEngine::arm(const ArmSettings& s) {
   d.endPpq = d.expectedPpq = 0.0;
   d.captured.store(0, std::memory_order_relaxed);
   d.peak.store(0.f, std::memory_order_relaxed);
+  d.recent.store(0.f, std::memory_order_relaxed);
   d.clipped.store(0, std::memory_order_relaxed);
   d.ended.store(EndReason::None, std::memory_order_relaxed);
   d.startReq.store(false, std::memory_order_relaxed);
@@ -183,6 +187,8 @@ CaptureStatus CaptureEngine::status() const {
   st.clippedSamples = d.clipped.load(std::memory_order_relaxed);
   return st;
 }
+
+float CaptureEngine::takeRecentPeak() { return d_->recent.exchange(0.f, std::memory_order_relaxed); }
 
 Result<CapturedAudio> CaptureEngine::take() {
   Impl& d = *d_;

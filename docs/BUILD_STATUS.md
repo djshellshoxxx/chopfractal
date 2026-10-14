@@ -111,7 +111,7 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 ## Known gaps
 
-- **Input capture** (F12) is implemented without the optional input meter and the Discard-on-Arm confirmation (Arm is disabled until the capture is kept or discarded). Not run in a real DAW.
+- **Input capture** (F12) is implemented with an input meter and latching clip indicator; there is no Discard-on-Arm confirmation (Arm is disabled until the capture is kept or discarded). Not run in a real DAW.
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Restoring a reference-only project decodes its audio file on the calling thread (the spec wants a worker thread). Embedded projects avoid file access.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.

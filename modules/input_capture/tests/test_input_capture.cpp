@@ -309,6 +309,8 @@ CHOP_TEST(non_finite_input_stored_as_zero_and_clip_counted) {
   e.process(in, 2, 4, t);
   CHECK_EQ(e.status().clippedSamples, 2u);  // the 1.0 in each channel
   CHECK_EQ(e.status().peak, 1.0f);
+  CHECK_EQ(e.takeRecentPeak(), 1.0f);
+  CHECK_EQ(e.takeRecentPeak(), 0.0f);  // consumed: a meter decays between polls
   auto r = e.take();
   CHECK(r.ok());
   CHECK_EQ(r.value().samples[0], 0.f);

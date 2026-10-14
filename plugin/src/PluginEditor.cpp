@@ -15,7 +15,7 @@ juce::Colour laneColour(int chopIndex) {
 }  // namespace
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), capturePanel_(processor) {
-  setSize(940, 944);
+  setSize(940, 962);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
@@ -394,7 +394,7 @@ void ChopFractalEditor::resized() {
   featD.removeFromLeft(16);
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
-  capturePanel_.setBounds(area.removeFromTop(28));
+  capturePanel_.setBounds(area.removeFromTop(46));
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);

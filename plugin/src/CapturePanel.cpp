@@ -6,6 +6,16 @@
 
 namespace cap = chopfractal::capture;
 
+void InputMeter::paint(juce::Graphics& g) {
+  const auto b = getLocalBounds().toFloat();
+  g.setColour(juce::Colours::black.withAlpha(0.6f));
+  g.fillRoundedRectangle(b, 2.f);
+  const float db = level_ > 1e-5f ? juce::Decibels::gainToDecibels(level_, -60.f) : -60.f;
+  const float frac = juce::jlimit(0.f, 1.f, (db + 60.f) / 60.f);
+  g.setColour(clipped_ ? juce::Colours::red : (db > -6.f ? juce::Colours::orange : juce::Colours::limegreen));
+  g.fillRoundedRectangle(b.withWidth(b.getWidth() * frac), 2.f);
+}
+
 namespace {
 constexpr int kBarChoices[] = {1, 2, 4, 8};
 }
@@ -23,7 +33,9 @@ CapturePanel::CapturePanel(ChopFractalProcessor& processor) : proc_(processor) {
   }
   addAndMakeVisible(mode_);
   addAndMakeVisible(bars_);
+  addAndMakeVisible(meter_);
   addAndMakeVisible(state_);
+  meter_.setTitle("Input level");
   chop_.setToggleState(true, juce::dontSendNotification);
   state_.setMinimumHorizontalScale(0.7f);
   state_.setText("Idle", juce::dontSendNotification);
@@ -48,12 +60,16 @@ CapturePanel::CapturePanel(ChopFractalProcessor& processor) : proc_(processor) {
 }
 
 void CapturePanel::resized() {
-  auto r = getLocalBounds();
+  auto all = getLocalBounds();
+  auto row2 = all.removeFromBottom(18);
+  auto r = all;
   for (juce::Button* b : std::initializer_list<juce::Button*>{&arm_, &start_, &stop_, &keep_, &discard_, &undo_}) b->setBounds(r.removeFromLeft(b == &keep_ || b == &stop_ ? 96 : 72).reduced(2));
   chop_.setBounds(r.removeFromLeft(130));
   mode_.setBounds(r.removeFromLeft(170).reduced(2));
   bars_.setBounds(r.removeFromLeft(80).reduced(2));
-  state_.setBounds(r);
+  meter_.setBounds(row2.removeFromLeft(120).withSizeKeepingCentre(120, 8));
+  row2.removeFromLeft(8);
+  state_.setBounds(row2);
 }
 
 void CapturePanel::arm() {
@@ -100,6 +116,14 @@ void CapturePanel::update() {
   mode_.setEnabled(idle);
   bars_.setEnabled(idle && mode_.getSelectedId() == 1);
 
+  // Decaying level (instant attack, 0.8x per 100 ms) with a clip flag that latches until the next Arm.
+  const float recent = cc.engine().takeRecentPeak();
+  shown_ = juce::jmax(recent, shown_ * 0.8f);
+  if (idle && st.framesCaptured == 0 && st.clippedSamples == 0) shown_ = 0.f;
+  const bool clipped = st.clippedSamples > 0 && !idle;
+  meter_.set(shown_, clipped);
+  meter_.setTooltip(clipped ? juce::String(static_cast<int>(st.clippedSamples)) + " samples clipped" : juce::String("Input level while armed or capturing"));
+
   const double sr = juce::jmax(1.0, proc_.currentSampleRate());
   const double secs = static_cast<double>(st.framesCaptured) / sr;
   juce::String text = "Idle";
@@ -114,6 +138,6 @@ void CapturePanel::update() {
       proc_.setStatusMessage(msg);
     }
   }
-  if (st.clippedSamples > 0 && !idle) text << "  (clipped " << static_cast<int>(st.clippedSamples) << " samples)";
+  if (clipped) text = "Clipped  " + text;
   if (state_.getText() != text) state_.setText(text, juce::dontSendNotification);
 }

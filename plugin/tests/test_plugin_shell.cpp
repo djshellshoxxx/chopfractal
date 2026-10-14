@@ -1270,3 +1270,21 @@ CHOP_TEST(capture_is_refused_offline_and_idle_capture_leaves_audio_untouched) {
   prepare(q);
   CHECK(q.captureController().engine().status().capacityFrames == 0);  // no memory held while idle
 }
+
+CHOP_TEST(capture_panel_meter_shows_level_and_latches_clipping) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  ChopFractalEditor editor(p);
+  FakePlayHead ph;
+  auto& cc = p.captureController();
+  CHECK(cc.arm(capt::CaptureMode::Free, 4, 30.0).isEmpty());
+  run(p, ph, 4, 512, 0.5f);  // armed: metering without recording
+  CHECK_NEAR(cc.engine().takeRecentPeak(), 0.5f, 0.01);
+  CHECK_EQ(cc.engine().status().clippedSamples, 0u);
+  CHECK(cc.start().isEmpty());
+  run(p, ph, 4, 512, 1.0f);  // full-scale sine reaches the clip threshold
+  CHECK(cc.engine().status().clippedSamples > 0);
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
+  CHECK(editor.getTooltip().isNotEmpty());
+}
