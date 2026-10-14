@@ -30,7 +30,22 @@ juce_add_plugin(ChopFractal
   EDITOR_WANTS_KEYBOARD_FOCUS FALSE
   COPY_PLUGIN_AFTER_BUILD FALSE)
 
-target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp)
+# Optional CLAP format via clap-juce-extensions (MIT; wraps the same JUCE processor, no source changes).
+# Enable with -DCHOPFRACTAL_BUILD_CLAP=ON; produces target ChopFractal_CLAP.
+option(CHOPFRACTAL_BUILD_CLAP "Also build a CLAP plugin" OFF)
+if(CHOPFRACTAL_BUILD_CLAP)
+  # Pinned to a commit: release 0.26.0 predates JUCE 8.0.11+ (it still includes juce_audio_processors/.../juce_LegacyAudioParameter.cpp).
+  set(CHOPFRACTAL_CLAP_EXT_TAG "7adee3a1bd4684d4caa5601100e364abccff4b4d" CACHE STRING "clap-juce-extensions commit to fetch")
+  if(CHOPFRACTAL_CLAP_EXT_DIR)
+    add_subdirectory("${CHOPFRACTAL_CLAP_EXT_DIR}" "${CMAKE_BINARY_DIR}/clap-juce-extensions" EXCLUDE_FROM_ALL)
+  else()
+    FetchContent_Declare(clap_juce_extensions GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
+                         GIT_TAG ${CHOPFRACTAL_CLAP_EXT_TAG} GIT_SHALLOW FALSE GIT_SUBMODULES_RECURSE TRUE)
+    FetchContent_MakeAvailable(clap_juce_extensions)
+  endif()
+endif()
+
+target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
 target_include_directories(ChopFractal PRIVATE src)
 target_compile_definitions(ChopFractal PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
@@ -38,21 +53,28 @@ target_link_libraries(ChopFractal
   PRIVATE
     chopfractal::composition
     chopfractal::plugin_ui_adapter
+    chopfractal::preset_store
     chopfractal::plugin_host_adapter
     juce::juce_audio_utils
     juce::juce_audio_formats
   PUBLIC
     juce::juce_recommended_config_flags)
 
+if(CHOPFRACTAL_BUILD_CLAP)
+  clap_juce_extensions_plugin(TARGET ChopFractal
+    CLAP_ID "com.chopfractal.chopfractal"
+    CLAP_FEATURES audio-effect utility)
+endif()
+
 # Headless shell tests: no host and no window, but the real processor, parameter tree, state round trip,
 # host-time translation and audio path.
 if(CHOPFRACTAL_BUILD_TESTS)
   juce_add_console_app(ChopFractalShellTests PRODUCT_NAME "ChopFractalShellTests")
-  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp)
+  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
   target_include_directories(ChopFractalShellTests PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
   target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
   target_link_libraries(ChopFractalShellTests PRIVATE
-    chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::plugin_host_adapter
+    chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter
     juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
   add_test(NAME plugin.shell COMMAND ChopFractalShellTests)
 endif()

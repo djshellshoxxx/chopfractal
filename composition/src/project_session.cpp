@@ -818,7 +818,7 @@ pattern::Settings settingsFromParams(const host::ParamValues& v, pattern::Settin
   base.allowGlide = v.get(host::kAllowGlide) >= 0.5;
   base.allowCrunch = v.get(host::kAllowCrunch) >= 0.5;
   base.fxIntensity = v.get(host::kFxIntensity);
-  return base;
+  return applyChaos(base, v.get(host::kChaos));
 }
 
 double mutateAmountFromParams(const host::ParamValues& v) { return v.get(host::kVariationAmount); }

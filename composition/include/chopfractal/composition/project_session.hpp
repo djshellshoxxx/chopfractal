@@ -171,6 +171,9 @@ class ProjectSession {
 
   // ---- export (message thread; never the audio thread) ----
   Result<ExportReport> exportWav(const std::string& path, const ExportWavOptions& options) const;
+  // The same bytes exportKit writes to <name>.mid / a rendered WAV, without touching the filesystem (used by drag-out).
+  Result<std::vector<std::uint8_t>> renderMidi(const KitOptions& options) const;
+  Result<std::vector<std::uint8_t>> renderWavBytes(const ExportWavOptions& options) const;
   // slice_NN_<role>.wav for every chop, pattern.mid replaying the pattern on those slices, and kit.txt.
   Result<ExportReport> exportKit(const std::string& directory, const KitOptions& options) const;
 
@@ -225,6 +228,10 @@ class ProjectSession {
 // Automatable parameters map onto generation settings; the pattern keeps its own copy, so changing a
 // parameter never rewrites an existing pattern until the user presses Generate or Mutate.
 pattern::Settings settingsFromParams(const host::ParamValues& values, pattern::Settings base);
+// Chaos macro (docs/specs/pass3/_BRIEF.md P1): returns `base` unchanged for chaos <= 0 (or non-finite);
+// otherwise raises variation, density, transform/effect allowances and magnitudes. Monotone in `chaos`,
+// output always satisfies pattern::validateSettings when `base` does. settingsFromParams applies it.
+pattern::Settings applyChaos(const pattern::Settings& base, double chaos);
 double mutateAmountFromParams(const host::ParamValues& values);
 
 }  // namespace chopfractal::composition

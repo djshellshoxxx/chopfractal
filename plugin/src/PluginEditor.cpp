@@ -14,7 +14,7 @@ juce::Colour laneColour(int chopIndex) {
 }  // namespace
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor) {
-  setSize(940, 860);
+  setSize(940, 912);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
@@ -110,6 +110,31 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   addToggle(glide_, "allow_glide", "Tape glide");
   addToggle(crunch_, "allow_crunch", "Crunch");
   addSlider(fxIntensity_, "fx_intensity", "FX intensity");
+  addSlider(chaos_, "chaos", "Chaos");
+  chaos_.slider.setTooltip("One control that pushes variation, density, transforms and effects up together");
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&reroll_, &savePreset_, &deletePreset_}) {
+    addAndMakeVisible(*b);
+    b->setTitle(b->getButtonText());
+  }
+  reroll_.onClick = [this] { doReroll(); };
+  savePreset_.onClick = [this] { askSavePreset(); };
+  deletePreset_.onClick = [this] { deleteSelectedPreset(); };
+  preset_.setTitle("Preset");
+  preset_.setTextWhenNothingSelected("Choose a preset...");
+  preset_.onChange = [this] {
+    const int i = preset_.getSelectedId() - 1;
+    if (i >= 0 && i < static_cast<int>(presets_.size())) applyPreset(presets_[static_cast<std::size_t>(i)].preset);
+    deletePreset_.setEnabled(i >= 0 && i < static_cast<int>(presets_.size()) && !presets_[static_cast<std::size_t>(i)].factory);
+  };
+  addAndMakeVisible(preset_);
+  deletePreset_.setEnabled(false);
+  reloadPresets();
+  dragMidi_.setTooltip("Drag the current pattern into your DAW as a MIDI file");
+  dragWav_.setTooltip("Drag the current pattern into your DAW as a WAV file");
+  addAndMakeVisible(dragMidi_);
+  addAndMakeVisible(dragWav_);
+  dragout::cleanupOlderThanDays(7);
+  setWantsKeyboardFocus(true);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_, &acceptRoles_, &useTempo_, &fractal_, &keep_, &exportWav_, &exportKit_}) {
     addAndMakeVisible(*b);
@@ -249,12 +274,13 @@ void ChopFractalEditor::resized() {
   embed_.setBounds(row2.removeFromLeft(210).reduced(2));
   bars_.setBounds(row2.removeFromRight(90).reduced(2));
   area.removeFromTop(6);
-  auto sliders = area.removeFromTop(104);
+  auto sliders = area.removeFromTop(128);
   auto left = sliders.removeFromLeft(sliders.getWidth() / 2);
   density_.slider.setBounds(left.removeFromTop(24).withTrimmedLeft(110));
   swing_.slider.setBounds(left.removeFromTop(24).withTrimmedLeft(110));
   variation_.slider.setBounds(left.removeFromTop(24).withTrimmedLeft(110));
   fxIntensity_.slider.setBounds(left.removeFromTop(24).withTrimmedLeft(110));
+  chaos_.slider.setBounds(left.removeFromTop(24).withTrimmedLeft(110));
   dry_.slider.setBounds(sliders.removeFromTop(24).withTrimmedLeft(130));
   gain_.slider.setBounds(sliders.removeFromTop(24).withTrimmedLeft(130));
   auto toggles = sliders.removeFromTop(24);
@@ -288,9 +314,17 @@ void ChopFractalEditor::resized() {
   detectMode_.setBounds(featC.removeFromLeft(190).reduced(2));
   featC.removeFromLeft(16);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&storeA_, &recallA_, &storeB_, &recallB_}) b->setBounds(featC.removeFromLeft(78).reduced(2));
-  featC.removeFromLeft(16);
-  role_.setBounds(featC.removeFromLeft(110).reduced(2));
-  setRole_.setBounds(featC.removeFromLeft(80).reduced(2));
+  auto featD = area.removeFromTop(26);
+  preset_.setBounds(featD.removeFromLeft(190).reduced(2));
+  savePreset_.setBounds(featD.removeFromLeft(90).reduced(2));
+  deletePreset_.setBounds(featD.removeFromLeft(70).reduced(2));
+  reroll_.setBounds(featD.removeFromLeft(80).reduced(2));
+  featD.removeFromLeft(16);
+  role_.setBounds(featD.removeFromLeft(110).reduced(2));
+  setRole_.setBounds(featD.removeFromLeft(80).reduced(2));
+  featD.removeFromLeft(16);
+  dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
+  dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
@@ -362,6 +396,7 @@ void ChopFractalEditor::doMutate() {
     cf::pattern::MutateOptions opt;
     opt.seed = seed;
     opt.amount = cf::composition::mutateAmountFromParams(params);
+    live = cf::composition::applyChaos(live, params.get(cf::host::kChaos));
     return session.mutate(opt, &live);
   });
 }
@@ -395,9 +430,9 @@ void ChopFractalEditor::doFractal() {
   fs.motif = motif_.getText().toStdString();
   fs.depth = depth_.getSelectedId();
   fs.seed = currentSeed();
-  fs.mutation = proc_.currentParams().get(cf::host::kVariationAmount) * 0.5;
+  fs.mutation = fractalMutation_ >= 0.0 ? fractalMutation_ : proc_.currentParams().get(cf::host::kVariationAmount) * 0.5;
   fs.mirror = false;
-  fs.accentDecay = 0.85;
+  fs.accentDecay = fractalAccent_;
   run([=](cf::composition::ProjectSession& s) { return s.applyFractal(fs); });
 }
 
@@ -580,6 +615,9 @@ void ChopFractalEditor::refresh(bool force) {
       if (s.pattern() && s.chops()) {
         pattern_ = cf::ui::buildPatternView(*s.pattern(), *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
         orbit_ = cf::ui::buildOrbitView(*s.pattern(), *s.chops());
+        barTicks_ = cf::pattern::barTicks(s.pattern()->settings);
+        gridTicks_ = cf::gridTicks(s.pattern()->settings.grid);
+        barCount_ = static_cast<int>(s.pattern()->bars.size());
       }
     }
     tree_ = cf::ui::layoutHistoryTree(s.history().listAll(), s.history().active());
@@ -737,6 +775,21 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     g.drawText("Orbit view", orbitArea_, juce::Justification::centred);
   }
 
+  // Ghost outline of the hit being dragged (the edit is applied on release).
+  if (dragMode_ != DragMode::None)
+    for (const auto& r : pattern_.rects)
+      if (r.id == dragId_) {
+        const float pw = static_cast<float>(patternArea_.getWidth());
+        const float lh = static_cast<float>(patternArea_.getHeight()) / static_cast<float>(std::max<std::size_t>(1, chops_.size()));
+        const float dx = static_cast<float>(dragNow_.x - dragStart_.x);
+        float x = static_cast<float>(patternArea_.getX()) + static_cast<float>(r.x0) * pw;
+        float width = static_cast<float>(r.x1 - r.x0) * pw;
+        if (dragMode_ == DragMode::Move) x += dx; else width = std::max(2.0f, width + dx);
+        g.setColour(juce::Colours::white.withAlpha(0.8f));
+        g.drawRect(x, static_cast<float>(patternArea_.getY()) + static_cast<float>(r.chopIndex) * lh + 2.0f, width, lh - 4.0f, 1.5f);
+        break;
+      }
+
   // Status line: user-visible messages and host-fallback hints.
   juce::String line = proc_.statusMessage();
   if (proc_.usedFallbackTempo.load()) line << (line.isEmpty() ? "" : "   |   ") << "No host tempo: using " << juce::String(proc_.manualBpm.load(), 1) << " BPM";
@@ -759,25 +812,51 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
           nearest = m.id;
         }
       if (nearest.valid()) run([=](cf::composition::ProjectSession& s) { return s.editMarkers([=](cf::source::ChopMap& m) { return m.deleteMarker(nearest); }); });
-    } else {
+    } else if (e.mods.isShiftDown()) {  // Shift-click adds a marker; a plain click only auditions the chop under the cursor
       run([=](cf::composition::ProjectSession& s) {
         return s.editMarkers([=](cf::source::ChopMap& m) {
           auto r = m.addMarker(frame);
           return r.ok() ? cf::Status{} : cf::Status{r.error()};
         });
       });
+    } else {
+      for (const auto& c : chops_)
+        if (frame >= c.range.start && frame < c.range.end) {
+          proc_.audition(c.id);
+          break;
+        }
     }
   } else if (patternArea_.contains(pt)) {
+    grabKeyboardFocus();
     selected_ = cf::EventId{};
-    const float w = static_cast<float>(patternArea_.getWidth());
-    const double fx = static_cast<double>(pt.x - patternArea_.getX()) / static_cast<double>(w);
-    const float laneH = static_cast<float>(patternArea_.getHeight()) / static_cast<float>(std::max<std::size_t>(1, chops_.size()));
-    const int lane = static_cast<int>(static_cast<float>(pt.y - patternArea_.getY()) / laneH);
+    dragMode_ = DragMode::None;
+    const double w = static_cast<double>(patternArea_.getWidth());
+    const double fx = static_cast<double>(pt.x - patternArea_.getX()) / w;
+    const int lane = cf::ui::laneAtY(static_cast<double>(pt.y - patternArea_.getY()), static_cast<double>(patternArea_.getHeight()), static_cast<int>(chops_.size()));
     for (auto it = pattern_.rects.rbegin(); it != pattern_.rects.rend(); ++it)
       if (it->chopIndex == lane && fx >= it->x0 && fx <= it->x1) {
         selected_ = it->id;
+        if (it->depth == 0 && !it->locked) {  // only top-level, unlocked hits can be dragged
+          const double edgePx = (it->x1 - fx) * w;
+          dragMode_ = edgePx <= 6.0 ? DragMode::Resize : DragMode::Move;
+          dragId_ = it->id;
+          dragStart_ = dragNow_ = pt;
+          dragLane_ = lane;
+          dragCopy_ = e.mods.isAltDown();
+        }
         break;
       }
+    if (!selected_.valid() && e.mods.isShiftDown() && lane >= 0 && gridTicks_ > 0 && barTicks_ > 0 && barCount_ > 0) {  // Shift-click on empty space adds a hit
+      const cf::Ticks total = barTicks_ * barCount_;
+      const auto pos = cf::ui::splitTick(cf::ui::snapDown(cf::ui::xToTick(static_cast<double>(pt.x - patternArea_.getX()), w, total), gridTicks_), barTicks_, barCount_);
+      const cf::Ticks dur = std::min<cf::Ticks>(gridTicks_, barTicks_ - pos.startInBar);
+      run([=](cf::composition::ProjectSession& s) {
+        return s.edit([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
+          if (lane >= static_cast<int>(chops.chops.size())) return cf::makeError(cf::ErrorCode::OutOfRange, "no chop in that lane");
+          return cf::pattern::addEvent(p, pos.bar, chops.chops[static_cast<std::size_t>(lane)].id, pos.startInBar, dur, chops);
+        });
+      });
+    }
     repaint();
   } else if (orbitArea_.contains(pt)) {
     const double R = std::min(orbitArea_.getWidth(), orbitArea_.getHeight()) / 2.0 - 4.0;
@@ -812,4 +891,233 @@ void ChopFractalEditor::mouseDoubleClick(const juce::MouseEvent& e) {
       proc_.audition(c.id);  // plays through the output without touching the pattern playhead
       return;
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// direct hit editing, presets, chaos reroll, drag-out
+// ---------------------------------------------------------------------------------------------
+
+void ChopFractalEditor::editSelected(const std::function<cf::Result<cf::pattern::Pattern>(const cf::pattern::Pattern&, const cf::ChopSnapshot&)>& fn) {
+  run([=](cf::composition::ProjectSession& s) { return s.edit(fn); });
+}
+
+void ChopFractalEditor::mouseDrag(const juce::MouseEvent& e) {
+  if (dragMode_ == DragMode::None) return;
+  dragNow_ = e.getPosition();
+  repaint(patternArea_);
+}
+
+void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
+  if (dragMode_ == DragMode::None) return;
+  const DragMode mode = dragMode_;
+  dragMode_ = DragMode::None;
+  dragNow_ = e.getPosition();
+  const int dx = dragNow_.x - dragStart_.x;
+  const int dy = dragNow_.y - dragStart_.y;
+  if (std::abs(dx) < 3 && std::abs(dy) < 3) {
+    repaint(patternArea_);
+    return;  // a click, not a drag
+  }
+  if (gridTicks_ <= 0 || barTicks_ <= 0 || barCount_ <= 0) return;
+  const cf::EventId id = dragId_;
+  const cf::Ticks total = barTicks_ * barCount_;
+  const double w = static_cast<double>(patternArea_.getWidth());
+  const cf::Ticks grid = gridTicks_, barT = barTicks_;
+  const int bars = barCount_;
+  const cf::Ticks dTicks = static_cast<cf::Ticks>(std::llround(static_cast<double>(dx) / w * static_cast<double>(total)));
+  const int newLane = cf::ui::laneAtY(static_cast<double>(dragNow_.y - patternArea_.getY()), static_cast<double>(patternArea_.getHeight()), static_cast<int>(chops_.size()));
+  const bool copy = dragCopy_;
+  const int oldLane = dragLane_;
+  editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
+    const cf::Event* ev = cf::pattern::findEvent(p, id);
+    const auto loc = cf::pattern::locate(p, id);
+    if (!ev || !loc) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
+    const cf::Ticks absStart = static_cast<cf::Ticks>(loc->bar) * barT + ev->start;
+    if (mode == DragMode::Resize) {
+      const cf::Ticks absEnd = cf::ui::snapNearest(absStart + ev->duration + dTicks, grid);
+      const cf::Ticks dur = std::max<cf::Ticks>(1, std::min(absEnd - absStart, barT - ev->start));
+      return cf::pattern::resizeEvent(p, id, dur);
+    }
+    const auto pos = cf::ui::splitTick(cf::ui::snapNearest(std::max<cf::Ticks>(0, absStart + dTicks), grid), barT, bars);
+    cf::Result<cf::pattern::Pattern> r = cf::makeError(cf::ErrorCode::InvalidArgument, "unreachable");
+    if (copy) {
+      if (pos.bar != loc->bar) return cf::makeError(cf::ErrorCode::InvalidArgument, "Alt-drag copies within the same bar.");
+      r = cf::pattern::duplicateEvent(p, id, pos.startInBar);
+    } else {
+      r = cf::pattern::moveEvent(p, id, pos.bar, pos.startInBar);
+    }
+    if (!r.ok() || copy || newLane < 0 || newLane == oldLane || newLane >= static_cast<int>(chops.chops.size())) return r;
+    // Vertical drag re-assigns the hit to the chop of the lane it was dropped on.
+    const cf::Event* moved = cf::pattern::findEvent(r.value(), id);
+    return moved ? cf::pattern::setEventChop(r.value(), id, chops.chops[static_cast<std::size_t>(newLane)].id, chops) : r;
+  });
+}
+
+bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
+  if (!selected_.valid()) return false;
+  const cf::EventId id = selected_;
+  if (k == juce::KeyPress::deleteKey || k == juce::KeyPress::backspaceKey) {
+    editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) { return cf::pattern::deleteEvent(p, id); });
+    return true;
+  }
+  if (k.getTextCharacter() == 'm' || k.getTextCharacter() == 'M') {
+    editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) -> cf::Result<cf::pattern::Pattern> {
+      const cf::Event* ev = cf::pattern::findEvent(p, id);
+      if (!ev) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
+      return cf::pattern::setEventEnabled(p, id, !ev->enabled);
+    });
+    return true;
+  }
+  if (k.getTextCharacter() == 'd' || k.getTextCharacter() == 'D') {
+    const cf::Ticks grid = gridTicks_;
+    editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) -> cf::Result<cf::pattern::Pattern> {
+      const cf::Event* ev = cf::pattern::findEvent(p, id);
+      if (!ev) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
+      return cf::pattern::duplicateEvent(p, id, ev->start + std::max<cf::Ticks>(grid, ev->duration));
+    });
+    return true;
+  }
+  return false;
+}
+
+void ChopFractalEditor::doReroll() {
+  setSeed(static_cast<std::uint64_t>(juce::Random::getSystemRandom().nextInt64()) & 0x7fffffffffffffffULL);
+  doGenerate();
+}
+
+cf::presets::Preset ChopFractalEditor::currentPreset(const juce::String& name) const {
+  const cf::host::ParamValues v = proc_.currentParams();
+  cf::presets::Preset p;
+  p.name = name.toStdString();
+  static const int kBars[] = {1, 2, 4, 8};
+  p.bars = kBars[std::max(0, std::min(3, static_cast<int>(std::lround(v.get(cf::host::kPatternBars)))))];
+  p.density = v.get(cf::host::kDensity);
+  p.swing = v.get(cf::host::kSwing);
+  p.variation = v.get(cf::host::kVariationAmount);
+  p.fxIntensity = v.get(cf::host::kFxIntensity);
+  p.chaos = v.get(cf::host::kChaos);
+  p.allowReverse = v.get(cf::host::kAllowReverse) >= 0.5;
+  p.allowPitch = v.get(cf::host::kAllowPitch) >= 0.5;
+  p.allowRetrigger = v.get(cf::host::kAllowRetrigger) >= 0.5;
+  p.allowFilter = v.get(cf::host::kAllowFilter) >= 0.5;
+  p.allowGlide = v.get(cf::host::kAllowGlide) >= 0.5;
+  p.allowCrunch = v.get(cf::host::kAllowCrunch) >= 0.5;
+  p.motif = motif_.getText().toStdString();
+  p.depth = std::max(1, std::min(3, depth_.getSelectedId()));
+  p.mutation = fractalMutation_ >= 0.0 ? fractalMutation_ : v.get(cf::host::kVariationAmount) * 0.5;
+  p.accentDecay = fractalAccent_;
+  static const int kEvery[] = {1, 2, 4, 8, 16};
+  p.evolveEvery = kEvery[std::max(0, std::min(4, every_.getSelectedId() - 1))];
+  p.evolveAmount = evolveAmount_.getValue();
+  return p;
+}
+
+void ChopFractalEditor::applyPreset(const cf::presets::Preset& p) {
+  auto setParam = [this](const char* id, double plain) {
+    if (auto* prm = proc_.apvts.getParameter(id)) prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
+  };
+  setParam("density", p.density);
+  setParam("swing", p.swing);
+  setParam("variation_amount", p.variation);
+  setParam("fx_intensity", p.fxIntensity);
+  setParam("chaos", p.chaos);
+  setParam("allow_reverse", p.allowReverse ? 1.0 : 0.0);
+  setParam("allow_pitch", p.allowPitch ? 1.0 : 0.0);
+  setParam("allow_retrigger", p.allowRetrigger ? 1.0 : 0.0);
+  setParam("allow_filter", p.allowFilter ? 1.0 : 0.0);
+  setParam("allow_glide", p.allowGlide ? 1.0 : 0.0);
+  setParam("allow_crunch", p.allowCrunch ? 1.0 : 0.0);
+  const int barsIdx = p.bars == 1 ? 0 : p.bars == 2 ? 1 : p.bars == 4 ? 2 : 3;
+  setParam("pattern_bars", barsIdx);
+  motif_.setText(juce::String(p.motif), juce::dontSendNotification);
+  depth_.setSelectedId(std::max(1, std::min(3, p.depth)), juce::dontSendNotification);
+  fractalMutation_ = p.mutation;
+  fractalAccent_ = p.accentDecay;
+  static const int kEvery[] = {1, 2, 4, 8, 16};
+  for (int i = 0; i < 5; ++i)
+    if (kEvery[i] == p.evolveEvery) every_.setSelectedId(i + 1, juce::dontSendNotification);
+  evolveAmount_.setValue(p.evolveAmount, juce::dontSendNotification);
+  status_ = "Preset \"" + juce::String(p.name) + "\" loaded; press Generate to use it.";
+  proc_.setStatusMessage(status_);
+  repaint();
+}
+
+void ChopFractalEditor::reloadPresets() {
+  int skipped = 0;
+  presets_ = PresetManager::list(&skipped);
+  preset_.clear(juce::dontSendNotification);
+  for (std::size_t i = 0; i < presets_.size(); ++i) preset_.addItem(presets_[i].label, static_cast<int>(i) + 1);
+  if (skipped > 0) {
+    status_ = juce::String(skipped) + " preset file(s) could not be read and were skipped.";
+    proc_.setStatusMessage(status_);
+  }
+}
+
+void ChopFractalEditor::savePresetNamed(const juce::String& name, bool overwrite) {
+  const cf::Status st = PresetManager::save(currentPreset(name.trim()), overwrite);
+  status_ = st.ok() ? "Saved preset \"" + name.trim() + "\"" : juce::String(st.error().message);
+  proc_.setStatusMessage(status_);
+  reloadPresets();
+  repaint();
+}
+
+void ChopFractalEditor::askSavePreset() {
+  auto* w = new juce::AlertWindow("Save preset", "Name for this preset:", juce::MessageBoxIconType::NoIcon, this);
+  w->addTextEditor("name", "My preset");
+  w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+  w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+  juce::Component::SafePointer<ChopFractalEditor> self(this);
+  w->enterModalState(true, juce::ModalCallbackFunction::create([self, w](int result) {
+    if (result != 1 || !self) return;
+    const juce::String name = w->getTextEditorContents("name").trim();
+    if (name.isEmpty()) return;
+    bool exists = false;
+    for (const auto& e : self->presets_) exists = exists || (!e.factory && e.label.equalsIgnoreCase(name));
+    if (!exists) {
+      self->savePresetNamed(name, false);
+      return;
+    }
+    juce::AlertWindow::showAsync(juce::MessageBoxOptions().withIconType(juce::MessageBoxIconType::QuestionIcon).withTitle("Replace preset?").withMessage("A preset named \"" + name + "\" exists. Replace it?").withButton("Replace").withButton("Cancel").withAssociatedComponent(self.getComponent()),
+                                 [self, name](int r) {
+                                   if (r == 1 && self) self->savePresetNamed(name, true);
+                                 });
+  }), true);
+}
+
+void ChopFractalEditor::deleteSelectedPreset() {
+  const int i = preset_.getSelectedId() - 1;
+  if (i < 0 || i >= static_cast<int>(presets_.size()) || presets_[static_cast<std::size_t>(i)].factory) return;
+  const cf::Status st = PresetManager::remove(presets_[static_cast<std::size_t>(i)].file);
+  status_ = st.ok() ? "Deleted preset" : juce::String(st.error().message);
+  proc_.setStatusMessage(status_);
+  reloadPresets();
+  deletePreset_.setEnabled(false);
+  repaint();
+}
+
+juce::File ChopFractalEditor::makeDragFile(bool wav) {
+  cf::Status status;
+  std::vector<std::uint8_t> bytes;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    if (wav) {
+      cf::composition::ExportWavOptions o;
+      o.bpm = proc_.activeBpm.load();
+      auto r = s.renderWavBytes(o);
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    } else {
+      cf::composition::KitOptions k;
+      k.bpm = proc_.activeBpm.load();
+      auto r = s.renderMidi(k);
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    }
+  });
+  juce::File f;
+  if (status.ok()) {
+    f = dragout::writeTemp("chopfractal", wav ? "wav" : "mid", bytes);
+    if (f == juce::File()) status = cf::makeError(cf::ErrorCode::InvalidArgument, "could not write the temporary file");
+  }
+  status_ = status.ok() ? juce::String() : juce::String(status.error().message);
+  proc_.setStatusMessage(status_);
+  repaint();
+  return f;
 }

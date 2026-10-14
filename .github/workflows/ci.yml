@@ -89,11 +89,45 @@ jobs:
           key: plugin-deps-${{ hashFiles('plugin/CMakeLists.txt', 'tools/validate_vst3.sh') }}
       - name: Build plugin and shell tests
         run: |
-          cmake -S . -B build-plugin -G Ninja -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-plugin --target ChopFractal_VST3 ChopFractalShellTests
+          cmake -S . -B build-plugin -G Ninja -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-plugin --target ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
       - name: Shell tests (headless, then with a virtual display for the editor)
         run: |
           env -u DISPLAY ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
           xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
       - name: VST3 validator
         run: tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3
+      - name: Package pre-beta (Linux VST3 + CLAP)
+        run: |
+          mkdir -p dist
+          cp -r build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
+          cp build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
+          tar -czf chopfractal-prebeta-linux-x86_64.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopfractal-prebeta-linux
+          path: chopfractal-prebeta-linux-x86_64.tar.gz
+
+  # Windows (MSVC) VST3 + CLAP. The headless shell tests run here; the editor tests need a display and are
+  # covered on Linux. The Steinberg validator script is Linux-only.
+  plugin-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build plugin, CLAP and shell tests
+        run: |
+          cmake -S . -B build-plugin -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCHOPFRACTAL_WARNINGS_AS_ERRORS=OFF
+          cmake --build build-plugin --config Release --parallel --target ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
+      - name: Shell tests (headless)
+        run: build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests.exe
+      - name: Package pre-beta (Windows VST3 + CLAP)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
+          Copy-Item build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
+          Compress-Archive -Path dist/* -DestinationPath chopfractal-prebeta-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopfractal-prebeta-windows
+          path: chopfractal-prebeta-windows-x64.zip

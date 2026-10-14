@@ -186,6 +186,50 @@ Result<ExportReport> ProjectSession::exportWav(const std::string& path, const Ex
   return out;
 }
 
+Result<std::vector<std::uint8_t>> ProjectSession::renderMidi(const KitOptions& o) const {
+  if (!sourceData_ || !chops_ || chops_->chops.empty()) return makeError(ErrorCode::InvalidArgument, "load a source with chops first");
+  if (!patterns_.hasPattern() || !playback_ || playback_->passThrough) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
+  if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
+  const std::size_t n = chops_->chops.size();
+  if (n > 256) return makeError(ErrorCode::LimitExceeded, "too many chops for a kit", 256);
+  if (o.baseNote < 0 || o.baseNote + static_cast<int>(n) - 1 > 127)
+    return makeError(ErrorCode::OutOfRange, "the chops do not fit into MIDI notes 0 to 127 from this base note", 127 - static_cast<int>(n) + 1);
+  midi::FileSpec spec;
+  spec.bpm = o.bpm;
+  spec.numerator = patterns_.current().settings.timeSignature.numerator;
+  spec.denominator = patterns_.current().settings.timeSignature.denominator;
+  spec.trackName = o.name.substr(0, 60);
+  for (int loop = 0; loop < o.loops; ++loop)
+    for (const FlatEvent& e : playback_->events) {
+      std::size_t idx = n;
+      for (std::size_t i = 0; i < n; ++i)
+        if (chops_->chops[i].id == e.chop) idx = i;
+      if (idx == n) continue;
+      midi::Note note;
+      note.note = o.baseNote + static_cast<int>(idx);
+      note.velocity = std::min(127, std::max(1, static_cast<int>(std::lround(static_cast<double>(e.tx.level) * 127.0))));
+      note.start = static_cast<Ticks>(loop) * playback_->lengthTicks + e.start;
+      note.duration = e.duration;
+      spec.notes.push_back(note);
+    }
+  return midi::encode(spec);
+
+}
+
+Result<std::vector<std::uint8_t>> ProjectSession::renderWavBytes(const ExportWavOptions& o) const {
+  if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
+  if (!(o.tailSeconds >= 0.0 && o.tailSeconds <= 30.0)) return makeError(ErrorCode::OutOfRange, "tail must be 0 to 30 seconds");
+  if (!playback_ || playback_->passThrough || !playback_->source) return makeError(ErrorCode::InvalidArgument, "there is no pattern to render");
+  render::OfflineSettings rs;
+  rs.sampleRate = o.wav.sampleRate;
+  rs.bpm = o.bpm;
+  rs.cycles = o.loops;
+  rs.tailSeconds = o.tailSeconds;
+  auto audio = render::renderOffline(playback_, rs);
+  if (!audio.ok()) return audio.error();
+  return wav::encode(audio.value(), o.wav);
+}
+
 Result<ExportReport> ProjectSession::exportKit(const std::string& directory, const KitOptions& o) const {
   namespace fs = std::filesystem;
   if (!sourceData_ || !chops_ || chops_->chops.empty()) return makeError(ErrorCode::InvalidArgument, "load a source with chops first");
@@ -214,25 +258,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
       if (fs::exists(t, ec)) return makeError(ErrorCode::Conflict, "a file already exists at " + t.string());
 
   // MIDI first (it can fail on limits) so that nothing is written for a request that cannot complete.
-  midi::FileSpec spec;
-  spec.bpm = o.bpm;
-  spec.numerator = patterns_.current().settings.timeSignature.numerator;
-  spec.denominator = patterns_.current().settings.timeSignature.denominator;
-  spec.trackName = o.name.substr(0, 60);
-  for (int loop = 0; loop < o.loops; ++loop)
-    for (const FlatEvent& e : playback_->events) {
-      std::size_t idx = n;
-      for (std::size_t i = 0; i < n; ++i)
-        if (chops_->chops[i].id == e.chop) idx = i;
-      if (idx == n) continue;
-      midi::Note note;
-      note.note = o.baseNote + static_cast<int>(idx);
-      note.velocity = std::min(127, std::max(1, static_cast<int>(std::lround(static_cast<double>(e.tx.level) * 127.0))));
-      note.start = static_cast<Ticks>(loop) * playback_->lengthTicks + e.start;
-      note.duration = e.duration;
-      spec.notes.push_back(note);
-    }
-  auto mid = midi::encode(spec);
+  auto mid = renderMidi(o);
   if (!mid.ok()) return mid.error();
 
   std::vector<std::vector<std::uint8_t>> sliceBytes;
@@ -286,7 +312,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
   Status wk = wav::writeFileAtomic(targets[n + 1].string(), std::vector<std::uint8_t>(map.begin(), map.end()), o.overwrite);
   if (!wk.ok()) return fail(wk.error());
   rep.files.push_back(targets[n + 1].string());
-  rep.notes = spec.notes.size();
+  if (auto dec = midi::decode(mid.value().data(), mid.value().size()); dec.ok()) rep.notes = dec.value().notes.size();
   return rep;
 }
 

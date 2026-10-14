@@ -242,6 +242,60 @@ Result<Pattern> setEventTransform(const Pattern& p, EventId id, const EventTrans
   return q;
 }
 
+Result<Pattern> resizeEvent(const Pattern& p, EventId id, Ticks newDuration) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (locationLocked(p, *loc)) return blocked("this event");
+  const Event* e0 = findEvent(p, id);
+  const Ticks barT = barTicks(p.settings);
+  if (newDuration <= 0 || newDuration > barT - e0->start) return makeError(ErrorCode::OutOfRange, "the hit must stay inside its bar");
+  Pattern q = p;
+  Event& e = at(q, *loc);
+  if (e.duration != newDuration) {
+    e.duration = newDuration;
+    e.child.reset();  // the child window would no longer match
+    e.childActive = true;
+  }
+  e.userOwned = true;
+  q.bars[static_cast<std::size_t>(loc->bar)].beats[static_cast<std::size_t>(loc->beat)].userOwned = true;
+  return q;
+}
+
+Result<Pattern> duplicateEvent(const Pattern& p, EventId id, Ticks newStartInBar) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  const Ticks barT = barTicks(p.settings);
+  if (newStartInBar < 0 || newStartInBar >= barT) return makeError(ErrorCode::OutOfRange, "start lies outside the bar");
+  const int destBeat = beatOf(p, newStartInBar);
+  if (scopeLocked(p, loc->bar, destBeat)) return blocked("the destination beat");
+  if (static_cast<int>(eventCount(p)) >= p.settings.maxEvents) return makeError(ErrorCode::LimitExceeded, "event cap reached", p.settings.maxEvents);
+  Pattern q = p;
+  Event e = at(q, *loc);
+  e.id = EventId{q.nextId++};
+  e.start = newStartInBar;
+  e.duration = std::min<Ticks>(e.duration, barT - newStartInBar);
+  e.child.reset();
+  e.childActive = true;
+  e.locked = false;
+  e.userOwned = true;
+  auto& dst = q.bars[static_cast<std::size_t>(loc->bar)].beats[static_cast<std::size_t>(destBeat)];
+  dst.events.push_back(std::move(e));
+  dst.userOwned = true;
+  return q;
+}
+
+Result<Pattern> setEventEnabled(const Pattern& p, EventId id, bool enabled) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (locationLocked(p, *loc)) return blocked("this event");
+  Pattern q = p;
+  Event& e = at(q, *loc);
+  e.enabled = enabled;
+  e.userOwned = true;
+  q.bars[static_cast<std::size_t>(loc->bar)].beats[static_cast<std::size_t>(loc->beat)].userOwned = true;
+  return q;
+}
+
 Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx) {
   auto loc = locate(p, id);
   if (!loc) return makeError(ErrorCode::NotFound, "event not found");

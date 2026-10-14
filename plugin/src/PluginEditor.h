@@ -8,7 +8,10 @@
 #include <functional>
 #include <memory>
 
+#include "DragOut.h"
 #include "PluginProcessor.h"
+#include "PresetManager.h"
+#include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
 class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer {
  public:
@@ -19,6 +22,23 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   void resized() override;
   void mouseDown(const juce::MouseEvent&) override;
   void mouseDoubleClick(const juce::MouseEvent&) override;
+  void mouseDrag(const juce::MouseEvent&) override;
+  void mouseUp(const juce::MouseEvent&) override;
+  bool keyPressed(const juce::KeyPress&) override;
+
+  // Public so tests can drive them without modal dialogs.
+  void doReroll();
+  void applyPreset(const chopfractal::presets::Preset& p);
+  chopfractal::presets::Preset currentPreset(const juce::String& name) const;
+  void savePresetNamed(const juce::String& name, bool overwrite);
+  void deleteSelectedPreset();
+  void reloadPresets();
+  juce::File makeDragFile(bool wav);
+  // Read-only views for tests and accessibility tooling.
+  juce::Rectangle<int> patternBounds() const { return patternArea_; }
+  const std::vector<chopfractal::ui::EventRect>& hitRects() const { return pattern_.rects; }
+  int laneCount() const { return static_cast<int>(chops_.size()); }
+  chopfractal::EventId selectedHit() const { return selected_; }
 
  private:
   using Attachment = juce::AudioProcessorValueTreeState;
@@ -49,6 +69,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   void doExportWav();
   void doExportKit();
   int selectedBar() const;
+  void askSavePreset();
+  void editSelected(const std::function<chopfractal::Result<chopfractal::pattern::Pattern>(const chopfractal::pattern::Pattern&, const chopfractal::ChopSnapshot&)>& fn);
 
   ChopFractalProcessor& proc_;
 
@@ -62,7 +84,23 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   juce::Label barsLabel_{{}, "Length (bars)"};
   std::unique_ptr<Attachment::ComboBoxAttachment> barsAttachment_;
   ParamToggle enable_, reverse_, pitch_, retrigger_, filter_, glide_, crunch_;
-  ParamSlider fxIntensity_;
+  ParamSlider fxIntensity_, chaos_;
+  juce::TextButton reroll_{"Reroll"}, savePreset_{"Save Preset"}, deletePreset_{"Delete"};
+  juce::ComboBox preset_;
+  std::vector<PresetManager::Entry> presets_;
+  DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
+  DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
+  double fractalMutation_ = -1.0;  // < 0: derive from the Variation control; set by a preset
+  double fractalAccent_ = 0.85;
+  // Direct hit editing (pattern grid): one gesture = one undo step, applied on mouse-up.
+  enum class DragMode { None, Move, Resize };
+  DragMode dragMode_ = DragMode::None;
+  chopfractal::EventId dragId_;
+  juce::Point<int> dragStart_, dragNow_;
+  int dragLane_ = 0;
+  bool dragCopy_ = false;
+  std::int64_t barTicks_ = 0, gridTicks_ = 0;
+  int barCount_ = 0;
 
   // Feature controls (not host parameters: they act on the project).
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},

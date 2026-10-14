@@ -12,11 +12,13 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`
 - `layoutHistoryTree()`
 - `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
+- `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
 
 Public headers:
 
 - `include/chopfractal/plugin_ui_adapter/views.hpp`
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
+- `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
 
 ## Contract
 
