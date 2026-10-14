@@ -19,6 +19,7 @@ constexpr char kModPattern[] = "pattern_engine";
 constexpr char kModRoles[] = "chop_roles_grammar";
 constexpr char kModHistory[] = "variation_history";
 constexpr char kModAudio[] = "source_audio";
+constexpr char kModScenes[] = "scenes";
 constexpr char kModSession[] = "composition";
 
 std::vector<const float*> channelPointers(const render::SourceData& d) {
@@ -144,6 +145,7 @@ void ProjectSession::attachMailbox(render::Mailbox<render::Playback>* mailbox) {
 }
 
 void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
+  if (pb != armedHold_) cancelArm();  // an edit or a loaded project must never be overwritten by a stale armed scene
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
 }
@@ -159,14 +161,18 @@ std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
 // playback publication
 // ---------------------------------------------------------------------------------------------
 
-Status ProjectSession::installPlayback(const pattern::Pattern& p) {
+Result<std::shared_ptr<const render::Playback>> ProjectSession::buildPlayback(const pattern::Pattern& p) const {
   if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
   auto flat = pattern::flatten(p, *chops_);
   if (!flat.ok()) return flat.error();
-  if (!sourceData_) return {};  // source missing: pattern authoring continues without audio
-  auto pb = render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p));
+  if (!sourceData_) return std::shared_ptr<const render::Playback>();  // source missing: pattern authoring continues without audio
+  return render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p));
+}
+
+Status ProjectSession::installPlayback(const pattern::Pattern& p) {
+  auto pb = buildPlayback(p);
   if (!pb.ok()) return pb.error();
-  publish(pb.value());
+  if (pb.value()) publish(pb.value());
   return {};
 }
 
@@ -189,6 +195,7 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
   endMorph(!committingMorph_);
+  stopScenesForEdit(true, false);
   patterns_.adopt(std::move(result.value()));
   pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
@@ -233,6 +240,9 @@ Result<render::PreviewRequest> ProjectSession::auditionRequest(ChopId chop) cons
 // ---------------------------------------------------------------------------------------------
 
 Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data, std::string name, std::string path) {
+  stopScenesForEdit(false, false);
+  sceneList_ = scenes::SceneList{};
+  recordingScenes_ = false;
   endMorph(true);
   if (!validSource(data)) return makeError(ErrorCode::InvalidArgument, "the audio buffer is empty or malformed");
   source::SourceInfo info;
@@ -260,6 +270,9 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 }
 
 void ProjectSession::clearSource() {
+  stopScenesForEdit(false, false);
+  sceneList_ = scenes::SceneList{};
+  recordingScenes_ = false;
   endMorph(true);
   ruleNotes_.clear();
   sourceData_.reset();
@@ -426,6 +439,7 @@ bool ProjectSession::settleRestoredPattern() {
 bool ProjectSession::undo() {
   if (!patterns_.undo()) return false;
   endMorph(true);
+  stopScenesForEdit(true, false);
   if (!settleRestoredPattern()) {
     patterns_.redo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
@@ -438,6 +452,7 @@ bool ProjectSession::undo() {
 bool ProjectSession::redo() {
   if (!patterns_.redo()) return false;
   endMorph(true);
+  stopScenesForEdit(true, false);
   if (!settleRestoredPattern()) {
     patterns_.undo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
@@ -448,6 +463,7 @@ bool ProjectSession::redo() {
 }
 
 Status ProjectSession::recallSnapshot(std::size_t slot) {
+  stopScenesForEdit(true, false);
   endMorph(true);
   Status s = patterns_.recallSnapshot(slot);
   if (!s.ok()) return s;
@@ -569,6 +585,7 @@ Status ProjectSession::activate(history::NodeId node, Quantize when) {
 }
 
 Status ProjectSession::applyActivation(history::NodeId node) {
+  stopScenesForEdit(true, false);
   endMorph(true);
   auto snap = history_.getSnapshot(node);
   if (!snap.ok()) return convert(snap.error());
@@ -657,6 +674,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     for (float f : sourceData_->samples) w.f32(f);
     st.modules[kModAudio] = {1, std::move(payload)};
   }
+  if (!sceneList_.scenes.empty()) st.modules[kModScenes] = {scenes::kSchemaVersion, scenes::serialize(sceneList_)};  // absent when empty
   std::vector<std::uint8_t> meta;
   bytes::Writer mw(meta);
   mw.boolean(embedded);
@@ -677,6 +695,8 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
 }
 
 Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) {
+  stopScenesForEdit(false, false);
+  recordingScenes_ = false;
   endMorph(true);
   ruleNotes_.clear();
   auto dec = codec::decode(data, size);
@@ -696,13 +716,13 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 
   std::map<std::string, codec::ModulePayload> foreign;  // anything this build does not know stays attached to the project
   for (const auto& kv : st.modules)
-    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession)
+    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession && kv.first != kModScenes)
       foreign.insert(kv);
-  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes;
-  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false;
+  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes, sceneBytes;
+  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false, hasScenes = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
                    take(kModRoles, roles::kSchemaVersion, roleBytes, hasRoles), take(kModHistory, history::kSchemaVersion, histBytes, hasHist),
-                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession)})
+                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession), take(kModScenes, scenes::kSchemaVersion, sceneBytes, hasScenes)})
     if (!s.ok()) return s;
 
   // ---- build everything in temporaries; the live session is untouched until all of it validates ----
@@ -803,7 +823,17 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     }
   }
 
+  scenes::SceneList newScenes;
+  if (hasScenes) {
+    auto sl = scenes::deserialize(sceneBytes.data(), sceneBytes.size());
+    if (!sl.ok()) return sl.error();
+    for (const scenes::Scene& sc : sl.value().scenes)
+      if (!pattern::deserialize(sc.pattern.data(), sc.pattern.size()).ok()) return makeError(ErrorCode::Corrupt, "scene \"" + sc.name + "\" holds a damaged pattern");
+    newScenes = std::move(sl.value());
+  }
+
   // ---- commit ----
+  sceneList_ = std::move(newScenes);
   loadedEmbedded_ = loadedFlag;
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings

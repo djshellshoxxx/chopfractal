@@ -117,6 +117,13 @@ struct Renderer::Impl {
   bool prepared = false;
   Mailbox<Playback> mailbox;
   const Playback* current = nullptr;
+  const Playback* mainSeen = nullptr;  // last playback taken from the main mailbox (an armed switch changes `current` only)
+  Ticks currentLength = 0;             // cached so `current` is never dereferenced after a newer playback was acknowledged
+  Mailbox<ArmedSwitch> armMailbox;
+  const ArmedSwitch* armSeen = nullptr;
+  const Playback* armed = nullptr;
+  std::uint64_t armedToken = 0;
+  std::atomic<std::uint64_t> appliedToken{0};
 
   std::vector<Voice> voices;
   std::array<Voice, 2> previews;
@@ -403,16 +410,67 @@ struct Renderer::Impl {
     });
   }
 
+  // Splits a block at the loop boundary when an armed playback is waiting, so the new pattern's first event
+  // starts on the exact frame of the boundary. Voices keep sounding across the switch (same source buffer).
   void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
-    const Playback* pb = mailbox.acquire();
-    if (pb != current) {
-      // Compare the cached source pointer: once acquire() acknowledged the new Playback, the publisher may free
-      // the old one, so `current` must not be dereferenced here.
+    if (const ArmedSwitch* a = armMailbox.acquire(); a != armSeen) {
+      armSeen = a;
+      armed = a ? a->playback.get() : nullptr;
+      armedToken = a ? a->token : 0;
+    }
+    // Adopt a newly published main playback first, so `current` and its cached fields are up to date.
+    if (const Playback* pb = mailbox.acquire(); pb != mainSeen) {
       const SourceData* newSrc = pb ? pb->source.get() : nullptr;
-      if (currentSource != newSrc) hardKillAll();  // voices point into the old source buffer, which may now be freed
+      if (currentSource != newSrc) hardKillAll();
+      mainSeen = pb;
       current = pb;
       currentSource = newSrc;
+      currentLength = pb ? pb->lengthTicks : 0;
     }
+    if (armed == current) armed = nullptr;  // the same playback arrived through the main mailbox
+    int off = -1;
+    if (armed && tb.playing && current && !current->passThrough && currentLength > 0 && params.enabled) {
+      if (armed->source.get() != currentSource || armed->lengthTicks <= 0 || armed->passThrough) {
+        armed = nullptr;  // cannot switch without restarting voices: the publisher falls back to the main mailbox
+      } else {
+        double bpm = tb.bpm;
+        if (!std::isfinite(bpm) || bpm <= 0.0) bpm = 120.0;
+        bpm = std::min(kMaxBpm, std::max(kMinBpm, bpm));
+        const double tpf = bpm * static_cast<double>(kTicksPerQuarter) / (60.0 * cfg.sampleRate);
+        const double pos0 = (tb.positionValid && std::isfinite(tb.ppq)) ? tb.ppq * static_cast<double>(kTicksPerQuarter) : freeRunTicks;
+        const double len = static_cast<double>(currentLength);
+        const double boundary = std::ceil(pos0 / len - 1e-9) * len;
+        const double o = std::ceil((boundary - pos0) / tpf - 1e-6);
+        if (o >= 0.0 && o < static_cast<double>(frames)) off = static_cast<int>(o);
+      }
+    }
+    if (off < 0) {
+      renderSpan(tb, params, in, out, nch, frames);
+      return;
+    }
+    if (off > 0) {
+      renderSpan(tb, params, in, out, nch, off);
+    }
+    current = armed;
+    currentLength = armed->lengthTicks;
+    armed = nullptr;
+    appliedToken.store(armedToken, std::memory_order_release);
+    const float* inp[2] = {nullptr, nullptr};
+    float* outp[2] = {nullptr, nullptr};
+    for (int c = 0; c < nch; ++c) {
+      inp[c] = (in && in[c]) ? in[c] + off : nullptr;
+      outp[c] = out[c] + off;
+    }
+    TransportBlock second = tb;
+    if (tb.positionValid && std::isfinite(tb.ppq)) {
+      double bpm = std::isfinite(tb.bpm) && tb.bpm > 0.0 ? std::min(kMaxBpm, std::max(kMinBpm, tb.bpm)) : 120.0;
+      second.ppq = tb.ppq + static_cast<double>(off) * bpm / (60.0 * cfg.sampleRate);
+    }
+    renderSpan(second, params, inp, outp, nch, frames - off);
+  }
+
+  void renderSpan(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+    const Playback* pb = current;
     const bool sourceReady = pb && pb->source && pb->lengthTicks > 0;
     drainPreview(pb, params.enabled && sourceReady);
     if (!params.enabled || !sourceReady) {
@@ -545,6 +603,8 @@ Renderer::~Renderer() = default;
 
 void Renderer::prepare(const Config& config) { impl_->prepare(config); }
 Mailbox<Playback>& Renderer::mailbox() { return impl_->mailbox; }
+Mailbox<ArmedSwitch>& Renderer::armMailbox() { return impl_->armMailbox; }
+std::uint64_t Renderer::appliedSwitchToken() const { return impl_->appliedToken.load(std::memory_order_acquire); }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames) {

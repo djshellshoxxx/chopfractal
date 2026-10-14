@@ -101,8 +101,26 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   rulesPanel_ = std::make_unique<RulesPanel>(proc_, hooks);
   addChildComponent(*rulesPanel_);
   rulesToggle_.onClick = [this] {
-    if (rulesToggle_.getToggleState()) rulesPanel_->open();
-    else rulesPanel_->close();
+    if (rulesToggle_.getToggleState()) {
+      scenePanel_->close();
+      scenesToggle_.setToggleState(false, juce::dontSendNotification);
+      rulesPanel_->open();
+    } else {
+      rulesPanel_->close();
+    }
+  };
+  scenesToggle_.setTitle("Show the scene list");
+  addAndMakeVisible(scenesToggle_);
+  scenePanel_ = std::make_unique<ScenePanel>(proc_);
+  addChildComponent(*scenePanel_);
+  scenesToggle_.onClick = [this] {
+    if (scenesToggle_.getToggleState()) {
+      rulesPanel_->close();
+      rulesToggle_.setToggleState(false, juce::dontSendNotification);
+      scenePanel_->open();
+    } else {
+      scenePanel_->close();
+    }
   };
   addAndMakeVisible(locate_);
   locate_.setEnabled(false);
@@ -420,8 +438,9 @@ void ChopFractalEditor::resized() {
   capturePanel_.setBounds(area.removeFromTop(46));
   {
     auto row = area.removeFromTop(28);
-    morphPanel_.setBounds(row.removeFromLeft(row.getWidth() - 90));
-    rulesToggle_.setBounds(row);
+    morphPanel_.setBounds(row.removeFromLeft(row.getWidth() - 180));
+    rulesToggle_.setBounds(row.removeFromLeft(90));
+    scenesToggle_.setBounds(row);
   }
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
@@ -430,6 +449,7 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   if (rulesPanel_) rulesPanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
+  if (scenePanel_) scenePanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
   historyArea_ = bottom.withTrimmedRight(6);

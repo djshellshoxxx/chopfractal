@@ -27,6 +27,7 @@ ChopFractalProcessor::ChopFractalProcessor()
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) paramPtrs_[i] = apvts.getRawParameterValue(manifest[i].id);
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
+  session_.attachArmMailbox(&renderer_.armMailbox());
   startTimerHz(30);
 }
 
@@ -161,7 +162,18 @@ void ChopFractalProcessor::pollAudioFlags() {
     withSession([](cf::composition::ProjectSession& s) {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
-  if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
+  const bool playingNow = hostPlaying.load(std::memory_order_relaxed);
+  if (playingNow != sceneTransportPlaying_) {
+    sceneTransportPlaying_ = playingNow;
+    withSession([playingNow](cf::composition::ProjectSession& s) { s.onTransportChanged(playingNow); });
+  }
+  if (const std::uint32_t crossings = boundaryCount_.exchange(0); crossings > 0) {
+    // Every boundary counts for scene sequencing; the renderer reports the latest armed switch it applied.
+    withSession([this, crossings](cf::composition::ProjectSession& s) {
+      s.onLoopBoundary();
+      for (std::uint32_t i = 0; i < std::min<std::uint32_t>(crossings, 8); ++i) s.onSceneBoundary(renderer_.appliedSwitchToken());
+    });
+  }
   if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
     // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).

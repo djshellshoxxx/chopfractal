@@ -12,6 +12,7 @@
 #include "DragOut.h"
 #include "MorphPanel.h"
 #include "RulesPanel.h"
+#include "ScenePanel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -134,6 +135,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   CapturePanel capturePanel_;
   MorphPanel morphPanel_;
   std::unique_ptr<RulesPanel> rulesPanel_;
+  std::unique_ptr<ScenePanel> scenePanel_;
+  juce::ToggleButton scenesToggle_{"Scenes"};
   juce::ToggleButton rulesToggle_{"Rules"};
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};

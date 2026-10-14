@@ -1,0 +1,43 @@
+{
+  "id": "scenes",
+  "name": "Evolve scenes",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::scenes",
+  "public_headers": [
+    "include/chopfractal/scenes/scenes.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Result/Status and the byte codec"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Not thread-safe by itself: use from one thread (the plugin uses the message thread). The sequencer allocates nothing.",
+  "platforms": "Any C++17 compiler. No JUCE, no host types, no audio.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/scenes -B build/scenes && cmake --build build/scenes && ctest --test-dir build/scenes",
+  "summary": "A bounded list of pattern snapshots (scenes) with per-scene loop counts and next/repeat/stop/jump actions, a versioned codec, and a pure sequencer that, given observed loop boundaries, says which scene plays and which scene the audio side should arm next.",
+  "public_api": [
+    "`SceneList`, `Scene`, `add/remove/move/find/indexOf/validate`",
+    "`serialize()` / `deserialize()` (schema 1, hostile-input safe)",
+    "`Sequencer::start/stop/onBoundary/onTransportStopped/onTransportStarted` returning `Advance{arm, switched, playing, finished}`"
+  ],
+  "limits": [
+    "32 scenes, 1 to 64 loops each, names of 1 to 32 characters, 1 MiB of serialized pattern per scene"
+  ],
+  "adapters": [
+    "Call `onBoundary()` once per observed pattern loop boundary and arm the returned scene in your audio engine so the switch lands on the boundary frame."
+  ],
+  "adapter_notes": "Scene patterns are opaque byte blobs here; the caller decides how to serialize and restore them.",
+  "removal": "Delete the folder; callers lose scene sequencing only.",
+  "example": "examples/minimal.cpp"
+}

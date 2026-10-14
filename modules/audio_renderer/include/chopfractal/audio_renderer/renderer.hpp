@@ -45,6 +45,13 @@ struct Playback {
 Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks);
 Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source);
 
+// A playback to adopt exactly on the next loop boundary (sample accurate). A null playback cancels the pending switch.
+// The playback must read the same source buffer as the current one, otherwise the switch is dropped.
+struct ArmedSwitch {
+  std::shared_ptr<const Playback> playback;
+  std::uint64_t token = 0;
+};
+
 struct Config {
   double sampleRate = 48000.0;
   int maxBlock = 2048;
@@ -79,6 +86,8 @@ class Renderer {
 
   void prepare(const Config& config);  // non-RT; allocates all voice and scratch memory
   Mailbox<Playback>& mailbox();
+  Mailbox<ArmedSwitch>& armMailbox();
+  std::uint64_t appliedSwitchToken() const;  // token of the last armed switch the audio thread applied
 
   // `in` may alias `out`. numChannels is 1 or 2. frames may be 0.
   void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,

@@ -1,5 +1,7 @@
 // Fractal Rhythm, Evolve, Smart Setup and export: the composition-level glue for the feature modules.
 #include <chopfractal/composition/project_session.hpp>
+
+#include "midi_build.hpp"
 #include <chopfractal/midi_export/midi.hpp>
 
 #include <algorithm>
@@ -81,6 +83,10 @@ Status ProjectSession::setEvolve(const evolve::Settings& settings) {
   if (!evolve::valid(settings)) return makeError(ErrorCode::OutOfRange, "invalid Evolve settings");
   if (settings.enabled) {
     if (morphActive_) return makeError(ErrorCode::Conflict, "Cancel the morph before switching Evolve on.");
+    if (sequencer_.running() || startPending_ != 0) {
+      stopScenesForEdit(false, true);
+      notice(Notice::Level::Info, "Scene playback stopped: Evolve was switched on.");
+    }
     if (!patterns_.hasPattern()) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
     evolve_.start(settings);
   } else {
@@ -128,6 +134,16 @@ Result<bool> ProjectSession::evolveStep(double chaos) {
     return st.error();
   }
   evolve_.reportSuccess();
+  if (recordingScenes_) {
+    const std::uint64_t step = evolve_.stepsTaken();
+    auto id = captureScene("Evolve step " + std::to_string(step));
+    if (id.ok()) {
+      sceneList_.scenes[static_cast<std::size_t>(scenes::indexOf(sceneList_, id.value()))].evolveStep = step > 0 ? step - 1 : 0;
+    } else {
+      recordingScenes_ = false;
+      notice(Notice::Level::Info, "Scene recording stopped: the list is full (32).");
+    }
+  }
   return true;
 }
 
@@ -212,25 +228,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderMidi(const KitOptions& o
   if (n > 256) return makeError(ErrorCode::LimitExceeded, "too many chops for a kit", 256);
   if (o.baseNote < 0 || o.baseNote > 128 - static_cast<int>(n))
     return makeError(ErrorCode::OutOfRange, "the chops do not fit into MIDI notes 0 to 127 from this base note", 127 - static_cast<int>(n) + 1);
-  midi::FileSpec spec;
-  spec.bpm = o.bpm;
-  spec.numerator = patterns_.current().settings.timeSignature.numerator;
-  spec.denominator = patterns_.current().settings.timeSignature.denominator;
-  spec.trackName = o.name.substr(0, 60);
-  for (int loop = 0; loop < o.loops; ++loop)
-    for (const FlatEvent& e : playback_->events) {
-      std::size_t idx = n;
-      for (std::size_t i = 0; i < n; ++i)
-        if (chops_->chops[i].id == e.chop) idx = i;
-      if (idx == n) continue;
-      midi::Note note;
-      note.note = o.baseNote + static_cast<int>(idx);
-      note.velocity = std::min(127, std::max(1, static_cast<int>(std::lround(static_cast<double>(e.tx.level) * 127.0))));
-      note.start = static_cast<Ticks>(loop) * playback_->lengthTicks + e.start;
-      note.duration = e.duration;
-      spec.notes.push_back(note);
-    }
-  return midi::encode(spec);
+  return detail::buildPatternMidi(*playback_, *chops_, patterns_.current().settings.timeSignature, o.bpm, o.baseNote, o.loops, o.name);
 
 }
 

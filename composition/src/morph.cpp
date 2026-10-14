@@ -17,6 +17,7 @@ Status ProjectSession::storeSnapshot(std::size_t slot) {
 
 const pattern::Pattern* ProjectSession::displayPattern() const {
   if (morphActive_ && morphPreview_) return morphPreview_.get();
+  if (sceneOverride_) return sceneOverride_.get();
   return pattern();
 }
 
@@ -41,6 +42,7 @@ Status ProjectSession::refreshMorph() {
 
 Status ProjectSession::beginMorph(double t) {
   if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
+  if (sequencer_.running() || startPending_ != 0) return makeError(ErrorCode::Conflict, "Stop the scenes before morphing.");
   if (!patterns_.hasSnapshot(0) || !patterns_.hasSnapshot(1)) return makeError(ErrorCode::InvalidArgument, "Store A and B first.");
   if (evolve_.running()) return makeError(ErrorCode::Conflict, "Switch Evolve off before morphing.");
   if (!(t >= 0.0 && t <= 1.0)) return makeError(ErrorCode::InvalidArgument, "the morph amount must be between 0 and 1");

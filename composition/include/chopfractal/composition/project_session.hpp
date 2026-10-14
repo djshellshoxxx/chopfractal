@@ -16,6 +16,7 @@
 #include <chopfractal/pattern_engine/session.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <chopfractal/recursive_hit_zoom/zoom.hpp>
+#include <chopfractal/scenes/scenes.hpp>
 #include <chopfractal/source_chop/analysis.hpp>
 #include <chopfractal/source_chop/chop_map.hpp>
 #include <chopfractal/state_codec/codec.hpp>
@@ -98,6 +99,25 @@ struct ExportReport {
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
 };
+struct SceneExportOptions {
+  bool list = true;       // scenes.tsv
+  bool midi = true;       // scene_NN_<name>.mid per scene
+  bool wav = false;       // scenes.wav: all scenes rendered back to back
+  double bpm = 120.0;
+  int baseNote = 36;
+  wav::Options wavOptions;
+  bool overwrite = false;
+};
+struct SceneStatus {
+  bool running = false;
+  scenes::SceneId playing = 0;
+  scenes::SceneId armed = 0;
+  int loopIndex = 0;
+  int loops = 0;
+  bool recording = false;
+  bool waitingForTransport = false;  // scene playback is armed but the host is not playing
+};
+
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
@@ -173,6 +193,28 @@ class ProjectSession {
   Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
 
+  // ---- Evolve scenes (docs/specs/roadmap/F09-evolve-scenes.md) ----
+  // Scene playback is an override: pattern(), history and undo are never touched while scenes play, and any command
+  // that changes the pattern stops it. Switches are armed in the renderer so they land on the loop-boundary frame.
+  void attachArmMailbox(render::Mailbox<render::ArmedSwitch>* mailbox) { armMailbox_ = mailbox; }
+  const scenes::SceneList& sceneList() const { return sceneList_; }
+  Result<scenes::SceneId> captureScene(const std::string& name = {});
+  Status updateScene(scenes::SceneId id);
+  Status editScene(scenes::SceneId id, const std::function<void(scenes::Scene&)>& edit);
+  Status removeScene(scenes::SceneId id);
+  Status moveScene(scenes::SceneId id, int newIndex);
+  Status clearScenes();
+  Status setSceneWrap(bool wrap);
+  Status setRecordScenes(bool on);
+  bool recordingScenes() const { return recordingScenes_; }
+  Status playScenes(scenes::SceneId first = 0, Quantize when = Quantize::LoopBoundary);
+  Status stopScenes();
+  void onSceneBoundary(std::uint64_t appliedToken);  // call after onLoopBoundary(), same lock
+  void onTransportChanged(bool playing);             // host play/stop edges
+  SceneStatus sceneStatus() const;
+  Status keepScene(scenes::SceneId id, const std::string& label = {});
+  Result<ExportReport> exportScenes(const std::string& directory, const SceneExportOptions& options) const;
+
   // ---- A/B morph (docs/specs/roadmap/F10-ab-morph.md) ----
   // A live preview blended from the A and B slots. It changes only the playback: pattern(), history and undo are
   // untouched until commitMorph(). Any command that changes the pattern or source ends the preview with a notice.
@@ -183,7 +225,7 @@ class ProjectSession {
   double morphAmount() const { return morphT_; }
   Status commitMorph(const std::string& label = {});  // freezes the draws; one history node and one undo step
   void cancelMorph();                                 // republishes the real pattern; no notice
-  const pattern::Pattern* displayPattern() const;     // the preview while morphing, else pattern()
+  const pattern::Pattern* displayPattern() const;     // the morph preview or the playing scene, else pattern()
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -246,6 +288,13 @@ class ProjectSession {
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
   void endMorph(bool announce);
+  Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p) const;
+  Result<std::shared_ptr<const render::Playback>> buildScenePlayback(const scenes::Scene& scene, pattern::Pattern* out = nullptr) const;
+  void stopScenesForEdit(bool announce, bool republishNow);
+  void cancelArm();
+  bool armScene(scenes::SceneId id);
+  void installScene(scenes::SceneId id, const std::shared_ptr<const render::Playback>& pb);
+  void mirrorArmedScene(scenes::SceneId id);
   void recordRuleNotes(const pattern::GenerationReport& report);
   Status refreshMorph();
   bool settleRestoredPattern();
@@ -272,6 +321,16 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  scenes::SceneList sceneList_;
+  scenes::Sequencer sequencer_;
+  render::Mailbox<render::ArmedSwitch>* armMailbox_ = nullptr;
+  std::uint64_t armToken_ = 0;
+  scenes::SceneId armedScene_ = 0;
+  scenes::SceneId startPending_ = 0;  // first scene armed for the next boundary; the sequencer starts when it lands
+  std::shared_ptr<const render::Playback> armedHold_;
+  std::shared_ptr<const pattern::Pattern> sceneOverride_;
+  bool recordingScenes_ = false;
+  bool transportPlaying_ = false;
   std::vector<RuleNote> ruleNotes_;
   bool morphActive_ = false;
   bool committingMorph_ = false;

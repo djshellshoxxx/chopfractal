@@ -94,6 +94,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};
   std::atomic<double> patternQuarters_{0.0};
+  bool sceneTransportPlaying_ = false;  // message thread: last host play state passed to the scene sequencer
   std::atomic<std::uint32_t> boundaryCount_{0};
   std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};

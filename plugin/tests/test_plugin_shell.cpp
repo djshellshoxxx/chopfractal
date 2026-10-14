@@ -1537,3 +1537,77 @@ CHOP_TEST(rules_panel_roles_tab_assigns_and_clears_and_controls_are_titled) {
   };
   check(*r.panel);
 }
+
+CHOP_TEST(scene_panel_captures_plays_wraps_and_stops_without_touching_the_pattern) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.click("Detect Chops");
+  r.click("Generate");
+  r.click("Scenes");
+  r.click("Capture Scene", true);
+  r.click("Mutate");
+  r.click("Capture Scene", true);
+  auto* list = findByTitle<juce::ListBox>(*r.ed, "Scene list");
+  CHECK(list != nullptr);
+  if (!list) return;
+  CHECK_EQ(list->getListBoxModel()->getNumRows(), 2);
+  auto* loops = findByTitle<juce::Slider>(*r.ed, "Scene loops");
+  CHECK(loops != nullptr);
+  for (int row = 0; row < 2; ++row) {
+    list->selectRow(row);
+    RulesRig::pump();
+    loops->setValue(1, juce::sendNotificationSync);
+    RulesRig::pump();
+  }
+  std::vector<cf::scenes::SceneId> ids;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& sc : s.sceneList().scenes) {
+      ids.push_back(sc.id);
+      CHECK_EQ(sc.loops, 1);
+    }
+  });
+  list->selectRow(0);  // play from the first scene
+  RulesRig::pump();
+  const auto before = patternBytes(r.p);
+  r.click("Play Scenes", true);
+  FakePlayHead host;
+  host.playing = true;
+  r.p.setPlayHead(&host);
+  juce::MidiBuffer midi;
+  int bars = 4;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { bars = s.pattern()->settings.bars; });
+  const double loopFrames = bars * 4.0 * 0.5 * 48000.0;
+  std::vector<cf::scenes::SceneId> seen;
+  host.ppq = 0.0;
+  for (double done = 0; done < 3.5 * loopFrames; done += 512) {
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    r.p.processBlock(buf, midi);
+    host.ppq += 512.0 * 120.0 / (60.0 * 48000.0);
+    if (static_cast<int>(done / 512) % 8 == 0) {
+      r.p.pollAudioFlags();
+      r.p.withSession([&](cf::composition::ProjectSession& s) {
+        const auto id = s.sceneStatus().playing;
+        if (seen.empty() || seen.back() != id) seen.push_back(id);
+      });
+    }
+  }
+  r.p.setPlayHead(nullptr);
+  CHECK(seen.size() >= 3);
+  if (seen.size() >= 3) {
+    CHECK_EQ(seen[0], ids[0]);
+    CHECK_EQ(seen[1], ids[1]);
+    CHECK_EQ(seen[2], ids[0]);  // wrap
+  }
+  CHECK(patternBytes(r.p) == before);
+  r.click("Stop Scenes", true);
+  bool running = true;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { running = s.sceneStatus().running; });
+  CHECK(!running);
+  CHECK(patternBytes(r.p) == before);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.clearScenes().ok()); });
+  RulesRig::pump(300);
+  CHECK_EQ(list->getListBoxModel()->getNumRows(), 0);
+}

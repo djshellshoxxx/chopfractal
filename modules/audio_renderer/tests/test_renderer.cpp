@@ -709,3 +709,117 @@ CHOP_TEST(an_exhausted_voice_pool_never_hard_cuts_a_sounding_voice) {
   for (std::size_t k = 1; k < out.size(); ++k) biggest = std::max(biggest, std::fabs(out[k] - out[k - 1]));
   CHECK(biggest < 0.2f);  // every steal fades; no full-level step
 }
+
+namespace {
+struct ArmRun {
+  Renderer r;
+  std::vector<float> left;
+  double ppq = 0.0;
+  ArmRun() { r.prepare(Config{}); }
+  void run(std::int64_t frames, int block) {
+    std::vector<float> l(static_cast<std::size_t>(block)), rr(static_cast<std::size_t>(block)), in(static_cast<std::size_t>(block), 0.f);
+    for (std::int64_t done = 0; done < frames; done += block) {
+      const int n = static_cast<int>(std::min<std::int64_t>(block, frames - done));
+      TransportBlock tb;
+      tb.playing = true;
+      tb.positionValid = true;
+      tb.ppq = ppq;
+      tb.bpm = 120.0;
+      const float* inp[2] = {in.data(), in.data()};
+      float* outp[2] = {l.data(), rr.data()};
+      r.process(tb, RenderParams{}, inp, outp, 2, n);
+      left.insert(left.end(), l.begin(), l.begin() + n);
+      ppq += n * 120.0 / (60.0 * 48000.0);
+    }
+  }
+};
+std::shared_ptr<const Playback> loopOf(const SourcePtr& src, float level) {
+  FlatEvent e = ev(1, 24000, 0, 480);
+  e.tx.level = level;
+  return playback(src, {e}, 3840);
+}
+}  // namespace
+
+CHOP_TEST(armed_switch_lands_on_the_loop_boundary_frame_for_any_block_size) {
+  for (int block : {64, 333, 512, 1000}) {
+    auto src = makeSource(1, 48000, 24000, dc);
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(48000, block);  // a quarter of the way into the loop, A is playing
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 7}));
+    t.run(2 * 96000 - 48000, block);
+    CHECK_EQ(t.r.appliedSwitchToken(), 7u);
+    // Cycle 0 (A, level 1): plateau; cycle 1 (B, level 0.5) starts exactly at frame 96000 with the 32-frame attack.
+    CHECK_NEAR(t.left[5000], 1.0, 1e-6);
+    CHECK_NEAR(t.left[96000 + 16], 0.25, 1e-6);
+    CHECK_NEAR(t.left[96000 + 5000], 0.5, 1e-6);
+    CHECK_NEAR(t.left[96000 - 1], 0.0, 1e-6);  // nothing sounded at the end of cycle 0
+    CHECK_NEAR(t.left[96000 + 12000 + 100], 0.0, 1e-6);
+  }
+}
+
+CHOP_TEST(armed_switch_can_be_cancelled_and_foreign_sources_are_not_switched) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  {
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(1000, 512);
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 1}));
+    t.run(512, 512);  // armed and waiting for the boundary
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{nullptr, 2}));  // cancel
+    t.run(2 * 96000, 512);
+    CHECK_EQ(t.r.appliedSwitchToken(), 0u);
+    CHECK_NEAR(t.left[96000 + 5000], 1.0, 1e-6);  // still A
+  }
+  {
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(100, 100);
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(makeSource(1, 48000, 24000, dc), 0.5f), 3}));
+    t.run(2 * 96000, 512);
+    CHECK_EQ(t.r.appliedSwitchToken(), 0u);
+    CHECK_NEAR(t.left[96000 + 5000], 1.0, 1e-6);
+  }
+}
+
+CHOP_TEST(main_mailbox_publish_of_the_armed_playback_after_a_switch_does_not_revert_or_kill_voices) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  ArmRun t;
+  t.r.mailbox().publish(loopOf(src, 1.0f));
+  auto b = loopOf(src, 0.5f);
+  t.run(1000, 512);
+  t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{b, 9}));
+  t.run(96000 + 2000, 512);
+  CHECK_EQ(t.r.appliedSwitchToken(), 9u);
+  t.r.mailbox().publish(b);  // the message thread now mirrors the switch into the main mailbox
+  const std::size_t before = t.left.size();
+  t.run(2 * 96000, 512);
+  CHECK_NEAR(t.left[96000 + 5000], 0.5, 1e-6);
+  CHECK_NEAR(t.left[2 * 96000 + 5000], 0.5, 1e-6);  // B keeps playing in the following cycle
+  CHECK(before + 2 * 96000 == t.left.size());
+  for (float x : t.left) CHECK(std::isfinite(x));
+}
+
+CHOP_TEST(armed_switch_processing_never_allocates) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  Renderer r;
+  r.prepare(Config{});
+  r.mailbox().publish(loopOf(src, 1.0f));
+  r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 5}));
+  std::vector<float> l(333), rr(333), in(333, 0.f);
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  double ppq = 0.0;
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 700; ++i) {  // crosses the loop boundary at frame 96000 inside a block
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = ppq;
+    r.process(tb, RenderParams{}, inp, outp, 2, 333);
+    ppq += 333 * 120.0 / (60.0 * 48000.0);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+  CHECK_EQ(r.appliedSwitchToken(), 5u);
+}
