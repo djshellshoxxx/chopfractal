@@ -101,19 +101,19 @@ jobs:
           xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
       - name: VST3 validator
         run: tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3
-      - name: Package pre-beta (Linux VST3 + CLAP)
+      - name: Package alpha (Linux VST3 + CLAP)
         run: |
           mkdir -p dist
           cp -r build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
           cp build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
           cp LICENSE THIRD_PARTY_NOTICES.md dist/
-          name="chopfractal-0.1.0-prebeta-linux-x86_64-${GITHUB_SHA::8}"
+          name="chopfractal-0.1.0-alpha-linux-x86_64-${GITHUB_SHA::8}"
           tar -czf "$name.tar.gz" -C dist .
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: chopfractal-prebeta-linux
-          path: chopfractal-0.1.0-prebeta-linux-x86_64-*
+          name: chopfractal-alpha-linux
+          path: chopfractal-0.1.0-alpha-linux-x86_64-*
 
   # Windows (MSVC) VST3 + CLAP. The headless shell tests run here; the editor tests need a display and are
   # covered on Linux. The Steinberg validator script is Linux-only.
@@ -123,24 +123,37 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build plugin, CLAP and shell tests
         run: |
-          cmake -S . -B build-plugin -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCHOPFRACTAL_WARNINGS_AS_ERRORS=OFF
-          cmake --build build-plugin --config Release --parallel --target ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
+          cmake -S . -B build-plugin -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCHOPFRACTAL_BUILD_STANDALONE=ON -DCHOPFRACTAL_WARNINGS_AS_ERRORS=OFF
+          cmake --build build-plugin --config Release --parallel --target ChopFractal_VST3 ChopFractal_CLAP ChopFractal_Standalone ChopFractalShellTests
       - name: Shell tests (headless)
         run: build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests.exe
-      - name: Package pre-beta (Windows VST3 + CLAP)
+      - name: Package alpha (Windows VST3 + CLAP)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item -Recurse build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
           Copy-Item build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
           Copy-Item LICENSE, THIRD_PARTY_NOTICES.md dist/
-          $name = "chopfractal-0.1.0-prebeta-windows-x64-$($env:GITHUB_SHA.Substring(0,8))"
+          $name = "chopfractal-0.1.0-alpha-windows-x64-$($env:GITHUB_SHA.Substring(0,8))"
           Compress-Archive -Path dist/* -DestinationPath "$name.zip"
           (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: chopfractal-prebeta-windows
-          path: chopfractal-0.1.0-prebeta-windows-x64-*
+          name: chopfractal-alpha-windows
+          path: chopfractal-0.1.0-alpha-windows-x64-*
+      - name: Package stand-alone (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force standalone | Out-Null
+          Copy-Item build-plugin/plugin/ChopFractal_artefacts/Release/Standalone/ChopFractal.exe standalone/
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md standalone/
+          $name = "chopfractal-0.1.0-standalone-windows-x64-$($env:GITHUB_SHA.Substring(0,8))"
+          Compress-Archive -Path standalone/* -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopfractal-standalone-windows
+          path: chopfractal-0.1.0-standalone-windows-x64-*
 
   # macOS (universal) VST3 + CLAP. Unsigned and not notarized, so non-blocking until it has run green once;
   # Gatekeeper will quarantine downloaded builds until they are signed.
@@ -156,16 +169,16 @@ jobs:
           cmake --build build-plugin --config Release --parallel --target ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
       - name: Shell tests (headless)
         run: ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
-      - name: Package pre-beta (macOS VST3 + CLAP)
+      - name: Package alpha (macOS VST3 + CLAP)
         run: |
           mkdir -p dist
           cp -r build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3 dist/
           cp -r build-plugin/plugin/ChopFractal_artefacts/Release/CLAP/ChopFractal.clap dist/
           cp LICENSE THIRD_PARTY_NOTICES.md dist/
-          name="chopfractal-0.1.0-prebeta-macos-universal-${GITHUB_SHA::8}"
+          name="chopfractal-0.1.0-alpha-macos-universal-${GITHUB_SHA::8}"
           (cd dist && zip -qr "../$name.zip" .)
           shasum -a 256 "$name.zip" > "$name.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: chopfractal-prebeta-macos
-          path: chopfractal-0.1.0-prebeta-macos-universal-*
+          name: chopfractal-alpha-macos
+          path: chopfractal-0.1.0-alpha-macos-universal-*
