@@ -16,14 +16,14 @@ concurrency:
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == '3b0b48f974c50ac0753082957d626bd3f2f28455' && github.event.workflow_run.conclusion == 'success')
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == '80444369b31ff8d3b55a9860064a00925cc23c12' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: "38511799240"
-      BUILD_SHA: "3b0b48f974c50ac0753082957d626bd3f2f28455"
+      BUILD_RUN: "38512732676"
+      BUILD_SHA: "80444369b31ff8d3b55a9860064a00925cc23c12"
       RELEASE_TAG: v0.1.0-alpha.2
     steps:
       - name: Verify the tested build
@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Windows x64 alpha 2, built from commit 3b0b48f974c50ac0753082957d626bd3f2f28455.
+          Windows x64 alpha 2, built from commit 80444369b31ff8d3b55a9860064a00925cc23c12.
 
           Fixes and usability changes:
           - Green Play and red Stop: local pattern playback works in the standalone app without a DAW and restarts from the beginning.
@@ -57,6 +57,7 @@ jobs:
           - Zoom In subdivides selected pattern hits and gives a visible result or actionable error.
           - Drop an audio sample into the window to load it through the existing asynchronous decoder.
           - The standalone input-muted notice has an X button that dismisses it while preserving the feedback-loop input mute.
+          - Follow DAW restores normal host transport after local preview.
           - Hover help covers controls and waveform, pattern, history and Orbit views.
 
           Downloads:
