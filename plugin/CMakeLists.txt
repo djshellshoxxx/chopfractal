@@ -32,6 +32,20 @@ option(CHOPFRACTAL_BUILD_STANDALONE "Also build a stand-alone application" OFF)
 set(CHOPFRACTAL_FORMATS VST3)
 if(CHOPFRACTAL_BUILD_STANDALONE)
   list(APPEND CHOPFRACTAL_FORMATS Standalone)
+  # Dismiss the notice without changing JUCE's feedback-loop input mute protection.
+  # The patch is version-checked and idempotent for cached fetched checkouts.
+  if(NOT CHOPFRACTAL_JUCE_DIR)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/patch_standalone_banner.py"
+              "${juce_SOURCE_DIR}/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h"
+      RESULT_VARIABLE _cf_banner_result)
+    if(NOT _cf_banner_result EQUAL 0)
+      message(FATAL_ERROR "Could not add the standalone notification dismiss button")
+    endif()
+  else()
+    message(STATUS "Local JUCE checkout: standalone notification patch not applied")
+  endif()
 endif()
 
 juce_add_plugin(ChopFractal

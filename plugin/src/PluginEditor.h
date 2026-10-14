@@ -13,11 +13,13 @@
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
-class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer {
+class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer {
  public:
   explicit ChopFractalEditor(ChopFractalProcessor& processor);
   ~ChopFractalEditor() override;
 
+  bool isInterestedInFileDrag(const juce::StringArray& files) override;
+  void filesDropped(const juce::StringArray& files, int x, int y) override;
   void paint(juce::Graphics&) override;
   void resized() override;
   void mouseDown(const juce::MouseEvent&) override;
@@ -39,6 +41,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return pattern_.rects; }
   int laneCount() const { return static_cast<int>(chops_.size()); }
   chopfractal::EventId selectedHit() const { return selected_; }
+  const std::vector<chopfractal::EventId>& selectedHits() const { return selectedHits_; }
+  const std::vector<chopfractal::ChopId>& selectedChops() const { return selectedChops_; }
+  juce::Rectangle<int> waveformBounds() const { return waveArea_; }
 
  private:
   using Attachment = juce::AudioProcessorValueTreeState;
@@ -74,8 +79,17 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   void nudgeSelected(int cells, bool resize);
   void editSelected(const std::function<chopfractal::Result<chopfractal::pattern::Pattern>(const chopfractal::pattern::Pattern&, const chopfractal::ChopSnapshot&)>& fn);
 
+  void updateSectionSelection(juce::Point<int> point);
   ChopFractalProcessor& proc_;
+  juce::ToggleButton editMode_{"Move / resize hits"};
+  std::vector<chopfractal::EventId> selectedHits_;
+  std::vector<chopfractal::ChopId> selectedChops_;
+  bool selectingSections_ = false, selectingWave_ = false;
+  juce::Point<int> selectionStart_, selectionEnd_;
 
+  juce::TextButton play_{"Play"}, stop_{"Stop"};
+  juce::TextEditor statusMessages_;
+  juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"},
       zoom_{"Zoom In"}, collapse_{"Collapse"}, lock_{"Lock Bar"}, dice_{"New Seed"};
   juce::ToggleButton embed_{"Embed source in project"};

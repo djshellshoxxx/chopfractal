@@ -92,6 +92,19 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
       if (auto ts = pos->getTimeSignature()) ht.timeSignature = cf::TimeSignature{ts->numerator, ts->denominator};
     }
   }
+  const auto command = transportCommand_.load(std::memory_order_acquire);
+  if (command != appliedTransportCommand_) {
+    renderer_.reset();
+    freeRunQuarters_ = 0.0;
+    boundaryCount_.store(0, std::memory_order_relaxed);
+    midpointCount_.store(0, std::memory_order_relaxed);
+    appliedTransportCommand_ = command;
+  }
+  if (command != 0) {
+    ht = {};  // preview uses the local tempo/clock, independent of a DAW's stopped transport
+    ht.isPlaying = (command & 1u) != 0;
+    ht.ppqPosition = freeRunQuarters_;
+  }
   const cf::host::TimeTranslation tt = cf::host::translateHostTime(ht, manualBpm.load(std::memory_order_relaxed));
   hostPlaying.store(tt.block.playing, std::memory_order_relaxed);
   usedFallbackTempo.store(tt.usedFallbackTempo, std::memory_order_relaxed);
@@ -157,6 +170,29 @@ void ChopFractalProcessor::pollAudioFlags() {
 void ChopFractalProcessor::syncAudioInfo() {
   const auto pb = session_.playback();
   patternQuarters_.store((pb && !pb->passThrough && pb->source && pb->lengthTicks > 0) ? static_cast<double>(pb->lengthTicks) / static_cast<double>(cf::kTicksPerQuarter) : 0.0);
+}
+
+bool ChopFractalProcessor::startPlayback() {
+  bool ready = false;
+  withSession([&](cf::composition::ProjectSession& s) {
+    const auto pb = s.playback();
+    ready = pb && pb->source && !pb->passThrough && !pb->events.empty();
+    if (!ready)
+      setStatusMessage(!pb || !pb->source
+          ? "Load a loop first, then Detect Chops and Generate before pressing Play."
+          : "Press Detect Chops and Generate to create a pattern, then press Play.");
+  });
+  if (!ready) return false;
+  const auto command = transportCommand_.load(std::memory_order_relaxed);
+  transportCommand_.store((command + 2u) | 1u, std::memory_order_release);
+  setStatusMessage("Playing pattern. Stop halts playback; Play restarts from the beginning.");
+  return true;
+}
+
+void ChopFractalProcessor::stopPlayback() {
+  const auto command = transportCommand_.load(std::memory_order_relaxed);
+  transportCommand_.store((command + 2u) & ~std::uint64_t{1}, std::memory_order_release);
+  setStatusMessage("Stopped. Press Play to restart the pattern.");
 }
 
 void ChopFractalProcessor::audition(cf::ChopId chop) {

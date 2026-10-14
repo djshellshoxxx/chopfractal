@@ -14,13 +14,38 @@ juce::Colour laneColour(int chopIndex) {
 }  // namespace
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor) {
-  setSize(940, 912);
+  setSize(940, 996);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
     addAndMakeVisible(*b);
     b->setTitle(b->getButtonText());
   }
+  addAndMakeVisible(play_);
+  addAndMakeVisible(stop_);
+  addAndMakeVisible(transportHint_);
+  addAndMakeVisible(editMode_);
+  editMode_.setTooltip("Off: drag to select sections. On: drag a hit to move or resize it.");
+  play_.setTitle("Play");
+  stop_.setTitle("Stop");
+  play_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff228b44));
+  play_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+  stop_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffc0392b));
+  stop_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+  play_.setTooltip("Play the generated pattern from the beginning, including in the standalone app.");
+  stop_.setTooltip("Stop local pattern playback. Press Play to restart from the beginning.");
+  play_.onClick = [this] { proc_.startPlayback(); refresh(true); };
+  stop_.onClick = [this] { proc_.stopPlayback(); refresh(true); };
+  statusMessages_.setTitle("Status messages");
+  statusMessages_.setMultiLine(true, true);
+  statusMessages_.setReadOnly(true);
+  statusMessages_.setScrollbarsShown(true);
+  statusMessages_.setCaretVisible(false);
+  statusMessages_.setPopupMenuEnabled(true);
+  statusMessages_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff20252d));
+  statusMessages_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+  statusMessages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");
+  addAndMakeVisible(statusMessages_);
   load_.onClick = [this] { chooseFile(); };
   detect_.onClick = [this] {
     const int mode = detectMode_.getSelectedId();
@@ -62,16 +87,25 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   redo_.onClick = [this] {
     run([](cf::composition::ProjectSession& s) { return s.redo() ? cf::Status{} : cf::Status{cf::makeError(cf::ErrorCode::NotFound, "Nothing to redo.")}; });
   };
+  zoom_.setTooltip("Subdivide the selected pattern hits into nested rhythms. Select hits or waveform sections first.");
   zoom_.onClick = [this] {
-    const cf::EventId id = selected_;
+    auto ids = selectedHits_;
+    if (ids.empty() && selected_.valid()) ids.push_back(selected_);
     const std::uint64_t seed = currentSeed() + 1;
-    if (id.valid()) setSeed(seed);
+    if (!ids.empty()) setSeed(seed);
     run([=](cf::composition::ProjectSession& s) {
-      if (!id.valid()) return cf::Status{cf::makeError(cf::ErrorCode::InvalidArgument, "Select a hit in the pattern first.")};
+      if (ids.empty()) return cf::Status{cf::makeError(cf::ErrorCode::InvalidArgument, "Select a pattern hit or waveform section first, then press Zoom In.")};
       cf::zoom::Settings zs;
       zs.subdivisions = 4;
       zs.density = cf::zoom::Density::Balanced;
-      return s.zoomIn(id, zs, seed);
+      // ProjectSession validates locks, depth and budget for each requested subdivision.
+      int zoomed = 0;
+      for (const auto id : ids) {
+        const auto st = s.zoomIn(id, zs, seed + static_cast<std::uint64_t>(zoomed));
+        if (!st.ok()) return st;
+        ++zoomed;
+      }
+      return cf::Status{};
     });
   };
   collapse_.onClick = [this] {
@@ -269,6 +303,11 @@ void ChopFractalEditor::addToggle(ParamToggle& t, const char* paramId, const juc
 
 void ChopFractalEditor::resized() {
   auto area = getLocalBounds().reduced(10);
+  auto transport = area.removeFromTop(36);
+  play_.setBounds(transport.removeFromLeft(104).reduced(2));
+  stop_.setBounds(transport.removeFromLeft(104).reduced(2));
+  editMode_.setBounds(transport.removeFromRight(180).reduced(2));
+  transportHint_.setBounds(transport.reduced(8, 2));
   auto row1 = area.removeFromTop(30);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_})
     b->setBounds(row1.removeFromLeft(96).reduced(2));
@@ -336,7 +375,8 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   patternArea_ = area.removeFromTop(230);
   area.removeFromTop(6);
-  auto bottom = area.removeFromTop(area.getHeight() - 26);
+  statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
+  auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
   historyArea_ = bottom.withTrimmedRight(6);
 }
@@ -357,6 +397,33 @@ void ChopFractalEditor::run(const std::function<cf::Status(cf::composition::Proj
   });
   status_ = status.ok() ? notice : juce::String(status.error().message);
   proc_.setStatusMessage(status_);
+  refresh(true);
+}
+
+bool ChopFractalEditor::isInterestedInFileDrag(const juce::StringArray& files) {
+  for (const auto& path : files)
+    if (juce::File(path).hasFileExtension("wav;aif;aiff;flac;ogg;mp3")) return true;
+  return false;
+}
+
+void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) {
+  for (const auto& path : files) {
+    const juce::File file(path);
+    if (!file.hasFileExtension("wav;aif;aiff;flac;ogg;mp3")) continue;
+    if (!file.existsAsFile()) {
+      proc_.setStatusMessage("The dropped sample could not be found.");
+      refresh(true);
+      return;
+    }
+    proc_.stopPlayback();
+    selectedHits_.clear();
+    selectedChops_.clear();
+    selected_ = {};
+    proc_.loadFileAsync(file);
+    refresh(true);
+    return;  // a ChopFractal project has one source loop
+  }
+  proc_.setStatusMessage("Drop an audio sample (WAV, AIFF, FLAC, OGG or MP3). One source loop is loaded at a time.");
   refresh(true);
 }
 
@@ -646,6 +713,12 @@ void ChopFractalEditor::refresh(bool force) {
     bool stillThere = false;
     for (const auto& r : pattern_.rects) stillThere = stillThere || r.id == selected_;
     if (!stillThere) selected_ = cf::EventId{};
+    selectedHits_.erase(std::remove_if(selectedHits_.begin(), selectedHits_.end(), [&](cf::EventId id) {
+      return std::none_of(pattern_.rects.begin(), pattern_.rects.end(), [&](const cf::ui::EventRect& r) { return r.id == id; });
+    }), selectedHits_.end());
+    selectedChops_.erase(std::remove_if(selectedChops_.begin(), selectedChops_.end(), [&](cf::ChopId id) {
+      return std::none_of(chops_.begin(), chops_.end(), [&](const cf::ChopInfo& chop) { return chop.id == id; });
+    }), selectedChops_.end());
   });
   locate_.setEnabled(sourceMissing_);
   if (rebuilt) {
@@ -670,7 +743,12 @@ void ChopFractalEditor::refresh(bool force) {
   const juce::String statusKey = proc_.statusMessage() + (proc_.usedFallbackTempo.load() ? "|t" : "") + (proc_.usedFallbackMeter.load() ? "|m" : "") + juce::String(proc_.manualBpm.load());
   if (statusKey != lastStatusKey_) {
     lastStatusKey_ = statusKey;
-    repaint(getLocalBounds().removeFromBottom(24));
+    juce::String line = proc_.statusMessage();
+    if (proc_.usedFallbackTempo.load())
+      line << (line.isEmpty() ? "" : "\n") << "Using local tempo: " << juce::String(proc_.manualBpm.load(), 1) << " BPM";
+    if (proc_.usedFallbackMeter.load()) line << "   |   Assuming 4/4";
+    statusMessages_.setText(line, false);
+    statusMessages_.moveCaretToTop(false);
   }
 }
 
@@ -696,9 +774,17 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   } else {
     g.setColour(juce::Colours::grey);
     g.drawText(sourceMissing_ ? "The project's audio file was not found. Press Locate Source (your markers, pattern and history are kept)."
-                              : "Load a loop (WAV or AIFF). Until a pattern is generated, the input passes through unchanged.",
+                              : "Drop an audio sample here, or press Load Loop. Then Detect Chops, Generate and Play.",
                waveArea_, juce::Justification::centred);
   }
+  // Waveform selections correspond to complete chop sections, not destructive source trims.
+  for (const auto& chop : chops_)
+    if (std::find(selectedChops_.begin(), selectedChops_.end(), chop.id) != selectedChops_.end() && sourceFrames_ > 0) {
+      const float x = static_cast<float>(waveArea_.getX()) + static_cast<float>(chop.range.start) / static_cast<float>(sourceFrames_) * waveArea_.getWidth();
+      const float width = static_cast<float>(chop.range.length()) / static_cast<float>(sourceFrames_) * waveArea_.getWidth();
+      g.setColour(juce::Colour(0xff6fb1ff).withAlpha(0.3f));
+      g.fillRect(x, static_cast<float>(waveArea_.getY()), width, static_cast<float>(waveArea_.getHeight()));
+    }
   int markerNumber = 0;
   for (const auto& m : markers_) {
     ++markerNumber;
@@ -732,7 +818,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
                                 std::max(4.0f, laneH - 2.0f - 2.0f * inset));
     g.setColour(laneColour(r.chopIndex).withAlpha(r.depth > 0 ? 0.95f : 0.75f));
     g.fillRect(rect);
-    if (r.id == selected_) {
+    if (r.id == selected_ || std::find(selectedHits_.begin(), selectedHits_.end(), r.id) != selectedHits_.end()) {
       g.setColour(juce::Colours::white);
       g.drawRect(rect, 2.0f);
     } else if (r.locked || r.hasChild) {
@@ -833,16 +919,30 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
         break;
       }
 
-  // Status line: user-visible messages and host-fallback hints.
-  juce::String line = proc_.statusMessage();
-  if (proc_.usedFallbackTempo.load()) line << (line.isEmpty() ? "" : "   |   ") << "No host tempo: using " << juce::String(proc_.manualBpm.load(), 1) << " BPM";
-  if (proc_.usedFallbackMeter.load()) line << "   |   Assuming 4/4";
-  g.setColour(juce::Colours::white.withAlpha(0.8f));
-  g.drawText(line, getLocalBounds().removeFromBottom(24).reduced(10, 0), juce::Justification::centredLeft, true);
+  if (selectingSections_) {
+    const auto rectangle = juce::Rectangle<int>(selectionStart_, selectionEnd_);
+    g.setColour(juce::Colour(0xff6fb1ff).withAlpha(0.2f));
+    g.fillRect(rectangle);
+    g.setColour(juce::Colour(0xff6fb1ff));
+    g.drawRect(rectangle, 1);
+  }
 }
 
 void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
   const auto pt = e.getPosition();
+  selectingSections_ = false;
+  if (!e.mods.isShiftDown() && !e.mods.isAltDown() && !e.mods.isPopupMenu() &&
+      ((waveArea_.contains(pt) && sourceFrames_ > 0) || (patternArea_.contains(pt) && !editMode_.getToggleState()))) {
+    grabKeyboardFocus();
+    dragMode_ = DragMode::None;
+    selectingSections_ = true;
+    selectingWave_ = waveArea_.contains(pt);
+    selectionStart_ = selectionEnd_ = pt;
+    updateSectionSelection(pt);
+    if (selectingWave_)
+      for (const auto id : selectedChops_) { proc_.audition(id); break; }
+    return;
+  }
   if (waveArea_.contains(pt) && sourceFrames_ > 0) {
     const cf::ui::ViewWindow w{0, sourceFrames_, static_cast<double>(waveArea_.getWidth())};
     const std::int64_t frame = cf::ui::xToFrame(w, static_cast<double>(pt.x - waveArea_.getX()));
@@ -948,13 +1048,56 @@ void ChopFractalEditor::editSelected(const std::function<cf::Result<cf::pattern:
   });
 }
 
+void ChopFractalEditor::updateSectionSelection(juce::Point<int> point) {
+  const auto area = selectingWave_ ? waveArea_ : patternArea_;
+  selectionEnd_ = {juce::jlimit(area.getX(), area.getRight() - 1, point.x),
+                   juce::jlimit(area.getY(), area.getBottom() - 1, point.y)};
+  const auto rect = juce::Rectangle<int>(selectionStart_, selectionEnd_);
+  selectedHits_.clear();
+  selectedChops_.clear();
+  selected_ = {};
+  const bool click = rect.getWidth() < 3 && rect.getHeight() < 3;
+  if (selectingWave_) {
+    const double lo = static_cast<double>(std::min(selectionStart_.x, selectionEnd_.x) - area.getX()) / area.getWidth() * sourceFrames_;
+    const double hi = static_cast<double>(std::max(selectionStart_.x, selectionEnd_.x) - area.getX()) / area.getWidth() * sourceFrames_;
+    for (const auto& chop : chops_)
+      if (click ? (lo >= chop.range.start && lo < chop.range.end) : (hi >= chop.range.start && lo < chop.range.end))
+        selectedChops_.push_back(chop.id);
+    for (const auto& hit : pattern_.rects)
+      if (hit.depth == 0 && hit.chopIndex >= 0 && hit.chopIndex < static_cast<int>(chops_.size()) &&
+          std::find(selectedChops_.begin(), selectedChops_.end(), chops_[static_cast<std::size_t>(hit.chopIndex)].id) != selectedChops_.end())
+        selectedHits_.push_back(hit.id);
+  } else {
+    const float laneHeight = static_cast<float>(area.getHeight()) / static_cast<float>(std::max<std::size_t>(1, chops_.size()));
+    for (const auto& hit : pattern_.rects) {
+      const juce::Rectangle<float> bounds(
+          area.getX() + static_cast<float>(hit.x0) * area.getWidth(),
+          area.getY() + hit.chopIndex * laneHeight,
+          static_cast<float>(hit.x1 - hit.x0) * area.getWidth(), laneHeight);
+      if (hit.depth == 0 && (click ? bounds.contains(selectionEnd_.toFloat()) : bounds.intersects(rect.toFloat())))
+        selectedHits_.push_back(hit.id);
+    }
+  }
+  if (!selectedHits_.empty()) selected_ = selectedHits_.front();
+  proc_.setStatusMessage(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " +
+      juce::String(static_cast<int>(selectedHits_.size())) + " pattern hits selected. Zoom In subdivides selected hits.");
+  repaint();
+}
+
 void ChopFractalEditor::mouseDrag(const juce::MouseEvent& e) {
+  if (selectingSections_) { updateSectionSelection(e.getPosition()); return; }
   if (dragMode_ == DragMode::None) return;
   dragNow_ = e.getPosition();
   repaint(patternArea_);
 }
 
 void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
+  if (selectingSections_) {
+    updateSectionSelection(e.getPosition());
+    selectingSections_ = false;
+    refresh(true);
+    return;
+  }
   if (dragMode_ == DragMode::None) return;
   const DragMode mode = dragMode_;
   dragMode_ = DragMode::None;

@@ -51,6 +51,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   chopfractal::host::ParamValues currentParams() const;
   void pollAudioFlags();  // acts on loop-boundary / loop-midpoint events from the audio thread (also called by tests)
   void loadFileAsync(const juce::File& file, bool relink = false);  // relink: re-attach the audio of a project whose file went missing                 // decodes on a worker thread, then loads on the message thread
+  bool startPlayback();  // local preview; validates that a generated pattern and its source exist
+  void stopPlayback();
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);
@@ -84,6 +86,10 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<std::uint32_t> boundaryCount_{0};
   std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};
+  // Zero follows the DAW. Later commands carry a sequence and a playing bit. Only the audio
+  // thread resets the renderer/clock; even Stop then Play between callbacks restarts at zero.
+  std::atomic<std::uint64_t> transportCommand_{0};
+  std::uint64_t appliedTransportCommand_ = 0;
   double freeRunQuarters_ = 0.0;  // audio thread only: local clock for hosts without a position
   juce::ThreadPool loadPool_{juce::ThreadPool::Options{}.withNumberOfThreads(1)};  // file decoding; drained in the destructor
   std::atomic<std::uint64_t> loadTicket_{0};

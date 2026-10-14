@@ -563,6 +563,10 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   wav.loadFileAsData(mb);
   CHECK(mb.getSize() > 44 && std::memcmp(mb.getData(), "RIFF", 4) == 0);
 
+  // Direct hit editing uses the explicit move/resize mode; plain drags select sections.
+  for (int i = 0; i < ed->getNumChildComponents(); ++i)
+    if (auto* button = dynamic_cast<juce::ToggleButton*>(ed->getChildComponent(i)))
+      if (button->getButtonText() == "Move / resize hits") button->setToggleState(true, juce::dontSendNotification);
   // Direct hit editing with real mouse events.
   ed->doReroll();
   pump();
@@ -841,4 +845,161 @@ int main() {
   juce::DeletedAtShutdown::deleteAll();
   juce::MessageManager::deleteInstance();
   return rc;
+}
+
+CHOP_TEST(local_transport_plays_without_a_host_and_restarts_at_zero) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  auto render = [&](int blocks) {
+    std::vector<float> audio;
+    juce::MidiBuffer midi;
+    for (int n = 0; n < blocks; ++n) {
+      juce::AudioBuffer<float> b(2, 512);
+      b.clear();
+      p.processBlock(b, midi);
+      audio.insert(audio.end(), b.getReadPointer(0), b.getReadPointer(0) + 512);
+    }
+    return audio;
+  };
+  CHECK(peak(render(8)) < 1e-6f);
+  CHECK(p.startPlayback());
+  const auto first = render(100);
+  CHECK(peak(first) > 0.05f);
+  CHECK(p.hostPlaying.load());
+  p.stopPlayback();
+  CHECK(peak(render(8)) < 1e-6f);
+  CHECK(!p.hostPlaying.load());
+  CHECK(p.playheadQuarters() < 0.0);
+  CHECK(p.startPlayback());
+  CHECK(render(100) == first);
+}
+
+CHOP_TEST(local_transport_reports_missing_source_and_overrides_a_stopped_host) {
+  ChopFractalProcessor p;
+  prepare(p);
+  CHECK(!p.startPlayback());
+  CHECK(p.statusMessage().containsIgnoreCase("load"));
+  makeSession(p);
+  FakePlayHead ph;
+  ph.playing = false;
+  p.setPlayHead(&ph);
+  CHECK(p.startPlayback());
+  const auto audio = run(p, ph, 100);
+  CHECK(peak(audio) > 0.05f);
+  p.stopPlayback();
+  ph.playing = true;
+  CHECK(peak(run(p, ph, 8)) < 1e-6f);
+}
+
+CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  ChopFractalEditor editor(p);
+  juce::TextButton* play = nullptr;
+  juce::TextButton* stop = nullptr;
+  for (int i = 0; i < editor.getNumChildComponents(); ++i) {
+    if (auto* b = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i))) {
+      if (b->getButtonText() == "Play") play = b;
+      if (b->getButtonText() == "Stop") stop = b;
+    }
+  }
+  CHECK(play != nullptr && stop != nullptr);
+  if (!play || !stop) return;
+  CHECK(play->isVisible() && stop->isVisible());
+  CHECK(play->getWidth() >= 90 && stop->getWidth() >= 90);
+  CHECK(!play->getBounds().intersects(stop->getBounds()));
+  CHECK(play->findColour(juce::TextButton::buttonColourId).getGreen() >
+        play->findColour(juce::TextButton::buttonColourId).getRed());
+  CHECK(stop->findColour(juce::TextButton::buttonColourId).getRed() >
+        stop->findColour(juce::TextButton::buttonColourId).getGreen());
+  play->onClick();
+  juce::AudioBuffer<float> b(2, 512);
+  juce::MidiBuffer midi;
+  b.clear();
+  p.processBlock(b, midi);
+  CHECK(p.hostPlaying.load());
+  stop->onClick();
+  b.clear();
+  p.processBlock(b, midi);
+  CHECK(!p.hostPlaying.load());
+}
+
+CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  const juce::String message = juce::String("A long status message. ").repeatedString(200);
+  p.setStatusMessage(message);
+  ChopFractalEditor editor(p);
+  juce::TextEditor* status = nullptr;
+  for (int i = 0; i < editor.getNumChildComponents(); ++i)
+    if (auto* text = dynamic_cast<juce::TextEditor*>(editor.getChildComponent(i)))
+      if (text->getTitle() == "Status messages") status = text;
+  CHECK(status != nullptr);
+  if (!status) return;
+  CHECK(status->isReadOnly());
+  CHECK(status->isMultiLine());
+  CHECK(status->getText().startsWith(message));
+  CHECK(status->getHeight() >= 60);
+  CHECK(editor.getLocalBounds().contains(status->getBounds()));
+}
+
+CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_zoom_works) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  ChopFractalEditor editor(p);
+  const auto before = patternBytes(p);
+  const auto bounds = editor.patternBounds();
+  const auto start = bounds.getTopLeft() + juce::Point<int>(1, 1);
+  const auto end = bounds.getBottomRight() - juce::Point<int>(1, 1);
+  editor.mouseDown(mouseAt(editor, start));
+  editor.mouseDrag(mouseAt(editor, end));
+  editor.mouseUp(mouseAt(editor, end));
+  CHECK(editor.selectedHits().size() > 1);
+  CHECK(patternBytes(p) == before);
+  // A single hit can be selected by a simple click, and Zoom creates nested events.
+  const auto hits = editor.hitRects();
+  if (hits.empty()) return;
+  const auto point = hitPoint(editor, hits.front(), 0.5);
+  editor.mouseDown(mouseAt(editor, point));
+  editor.mouseUp(mouseAt(editor, point));
+  CHECK(editor.selectedHit().valid());
+  for (int i = 0; i < editor.getNumChildComponents(); ++i)
+    if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
+      if (button->getButtonText() == "Zoom In") button->onClick();
+  CHECK(patternBytes(p) != before);
+  CHECK(std::any_of(editor.hitRects().begin(), editor.hitRects().end(), [](const auto& hit) { return hit.depth > 0; }));
+}
+
+CHOP_TEST(waveform_drag_selects_multiple_source_sections) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  ChopFractalEditor editor(p);
+  const auto before = patternBytes(p);
+  const auto bounds = editor.waveformBounds();
+  const auto start = bounds.getTopLeft() + juce::Point<int>(1, bounds.getHeight() / 2);
+  const auto end = bounds.getTopRight() + juce::Point<int>(-1, bounds.getHeight() / 2);
+  editor.mouseDown(mouseAt(editor, start));
+  editor.mouseDrag(mouseAt(editor, end));
+  editor.mouseUp(mouseAt(editor, end));
+  CHECK(editor.selectedChops().size() > 1);
+  CHECK(editor.selectedHits().size() > 1);
+  CHECK(patternBytes(p) == before);
+}
+
+CHOP_TEST(editor_accepts_dropped_audio_and_rejects_unrelated_files) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  ChopFractalEditor editor(p);
+  CHECK(editor.isInterestedInFileDrag(juce::StringArray{"/tmp/loop.wav"}));
+  CHECK(editor.isInterestedInFileDrag(juce::StringArray{"/tmp/loop.AIFF"}));
+  CHECK(!editor.isInterestedInFileDrag(juce::StringArray{"/tmp/readme.txt"}));
+  editor.filesDropped(juce::StringArray{"/tmp/readme.txt"}, 0, 0);
+  CHECK(p.statusMessage().containsIgnoreCase("drop an audio"));
 }
