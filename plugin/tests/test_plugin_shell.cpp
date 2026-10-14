@@ -668,7 +668,7 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
   const int w = ed->getWidth(), h = ed->getHeight();
   // "Reroll" and "New Seed" draw system randomness, so they stay out of the reproducible run.
   static const char* const kButtons[] = {"Generate", "Mutate", "Undo", "Redo", "Zoom In", "Collapse", "Lock Bar", "Fractal", "Store A", "Recall A", "Store B",
-                                         "Recall B", "Keep", "Smart Setup", "Accept Roles", "Use Tempo", "Detect Chops", "Set Role"};
+                                         "Recall B", "Keep", "Smart Setup", "Accept Roles", "Use Tempo", "Detect Chops", "Set Role", "Play", "Stop"};
   static const char* const kParams[] = {"density", "swing", "variation_amount", "fx_intensity", "chaos", "dry_mix", "pattern_bars", "allow_reverse",
                                         "allow_pitch", "allow_retrigger", "allow_filter", "allow_glide", "allow_crunch", "effect_enable"};
   FakePlayHead ph;
@@ -1034,4 +1034,115 @@ CHOP_TEST(dropped_wav_is_loaded_by_the_async_source_loader) {
     CHECK(loaded);
   }
   file.deleteFile();
+}
+
+CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
+  if (!haveDisplay()) return;
+  const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+      .getNonexistentChildFile("cf_essential_qa", ".wav");
+  const auto source = drumLoop();
+  {
+    juce::WavAudioFormat format;
+    auto stream = file.createOutputStream();
+    CHECK(stream != nullptr);
+    if (!stream) return;
+    std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), 48000, 1, 16, {}, 0));
+    CHECK(writer != nullptr);
+    if (!writer) return;
+    stream.release();
+    juce::AudioBuffer<float> audio(1, static_cast<int>(source->frames));
+    audio.copyFrom(0, 0, source->channel(0), audio.getNumSamples());
+    CHECK(writer->writeFromAudioSampleBuffer(audio, 0, audio.getNumSamples()));
+  }
+  {
+    ChopFractalProcessor p;
+    prepare(p);
+    ChopFractalEditor editor(p);
+    // 1. A real file dropped into the editor loads through the asynchronous decoder.
+    editor.filesDropped(juce::StringArray{file.getFullPathName()}, 0, 0);
+    bool loaded = false;
+    for (int i = 0; i < 150 && !loaded; ++i) {
+      juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+      p.withSession([&](cf::composition::ProjectSession& s) {
+        loaded = s.playback() && s.playback()->source && s.playback()->source->frames == source->frames;
+      });
+    }
+    CHECK(loaded);
+    if (!loaded) return;
+    for (int i = 0; i < editor.getNumChildComponents(); ++i)
+      if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
+        if (button->getButtonText() == "Detect Chops") button->onClick();
+    editor.doReroll();
+
+    // 2. Standalone Play produces audio and Stop produces silence without a DAW.
+    auto render = [&](int blocks) {
+      std::vector<float> out;
+      juce::MidiBuffer midi;
+      for (int i = 0; i < blocks; ++i) {
+        juce::AudioBuffer<float> audio(2, 512);
+        audio.clear();
+        p.processBlock(audio, midi);
+        out.insert(out.end(), audio.getReadPointer(0), audio.getReadPointer(0) + 512);
+      }
+      return out;
+    };
+    CHECK(p.startPlayback());
+    CHECK(peak(render(400)) > 0.01f);
+    p.stopPlayback();
+    CHECK(peak(render(10)) < 1e-6f);
+
+    // 3. Drag selects multiple sections without editing; Zoom subdivides a selected hit.
+    auto area = editor.patternBounds();
+    auto a = area.getTopLeft() + juce::Point<int>(1, 1);
+    auto b = area.getBottomRight() - juce::Point<int>(1, 1);
+    const auto unchanged = patternBytes(p);
+    editor.mouseDown(mouseAt(editor, a));
+    editor.mouseDrag(mouseAt(editor, b));
+    editor.mouseUp(mouseAt(editor, b));
+    CHECK(editor.selectedHits().size() > 1);
+    CHECK(patternBytes(p) == unchanged);
+    const auto rects = editor.hitRects();
+    CHECK(!rects.empty());
+    if (rects.empty()) return;
+    a = hitPoint(editor, rects.front(), 0.5);
+    editor.mouseDown(mouseAt(editor, a));
+    editor.mouseUp(mouseAt(editor, a));
+    for (int i = 0; i < editor.getNumChildComponents(); ++i)
+      if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
+        if (button->getButtonText() == "Zoom In") button->onClick();
+    CHECK(patternBytes(p) != unchanged);
+
+    // 4. Saving and restoring preserves the pattern and embedded audio.
+    p.embedSource = true;
+    juce::MemoryBlock state;
+    p.getStateInformation(state);
+    ChopFractalProcessor restored;
+    prepare(restored);
+    restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    CHECK(patternBytes(restored) == patternBytes(p));
+    CHECK(restored.startPlayback());
+    FakePlayHead stoppedHost;
+    stoppedHost.playing = false;
+    CHECK(peak(run(restored, stoppedHost, 400)) > 0.01f);
+  }
+  file.deleteFile();
+
+  // Real time, not 35 seconds of simulated audio: random edits/controls run concurrently
+  // with audio processing. Existing fuzz checks cover finite audio, valid patterns,
+  // bounded history, state round trips and undo/redo. Seeds are printed for reproduction.
+  const double start = juce::Time::getMillisecondCounterHiRes();
+  std::uint64_t seed = 35000;
+  std::size_t sessions = 0, audioChecks = 0;
+  do {
+    bool ok = true;
+    const auto result = fuzzEditor(seed, 200, &ok);
+    CHECK(ok);
+    audioChecks += result.audioChecks;
+    ++sessions;
+    ++seed;
+  } while (juce::Time::getMillisecondCounterHiRes() - start < 35000.0);
+  CHECK(sessions > 0 && audioChecks > 0);
+  std::fprintf(stdout, "35-second QA: %.2f s, %zu sessions, %zu audio checks, seeds 35000..%llu\n",
+      (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0, sessions, audioChecks,
+      static_cast<unsigned long long>(seed - 1));
 }

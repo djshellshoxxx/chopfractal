@@ -1,0 +1,7 @@
+# Alpha 2 focused QA
+
+The shell test `four_essential_workflows_then_35_seconds_of_randomized_qa` checks a real dropped WAV import, standalone Play/Stop, multi-section selection with nested-hit Zoom, and embedded project save/restore. It then runs randomized editor and audio QA for at least 35 seconds of wall time and prints seeds and audio-check counts. GUI runs execute on Windows/macOS and under xvfb on Linux; the headless Linux pass skips GUI-only tests.
+
+Minor follow-ups retained: source selection highlights complete chops and their corresponding pattern hits, rather than creating a destructive audio trim; grouped Move/Resize and grouped Duplicate are not implemented (those controls operate on the primary hit); nested Zoom can partially succeed before a later selected hit fails its depth/lock/budget validation; a locally supplied JUCE checkout does not receive the fetched-checkout-only banner patch. Existing pre-alpha issues remain listed in BUILD_STATUS.md. Real Windows device selection, physical speakers and DAW integration still need human testing.
+
+The standalone banner X hides the notice without changing the audio input mute Value. Status text wraps and scrolls, and can be selected/copied. Plain drag selects; Move / resize hits restores editing gestures. Delete and M apply to all selected pattern hits as one session edit. Drop loading uses the existing worker pool and file size/decoder guards.
