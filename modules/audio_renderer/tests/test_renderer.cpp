@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <new>
+#include <chrono>
 #include <thread>
 
 #include "chop_test.hpp"
@@ -500,7 +501,13 @@ CHOP_TEST(mailbox_hands_off_immutable_data_across_threads_without_freeing_live_o
     }
     box.acquire();
   });
-  for (int k = 1; k <= 3000; ++k) box.publish(std::make_shared<const std::vector<int>>(static_cast<std::size_t>(64 + k % 64), k));
+  for (int k = 1; k <= 3000; ++k) {
+    box.publish(std::make_shared<const std::vector<int>>(static_cast<std::size_t>(64 + k % 64), k));
+    // On a loaded machine the reader thread may not be scheduled until the loop is over; let it get its first
+    // reads while objects are still being replaced, so the test always exercises concurrent hand-off.
+    if (k == 1)
+      for (int spin = 0; spin < 5000 && reads.load() == 0; ++spin) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   done = true;
   reader.join();
   CHECK_EQ(torn.load(), 0);
