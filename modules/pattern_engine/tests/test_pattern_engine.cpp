@@ -550,6 +550,21 @@ CHOP_TEST(nested_child_patterns_attach_collapse_and_obey_limits) {
   CHECK(with.ok());
   if (with.ok()) {
     CHECK_EQ(flatten(with.value(), c).value().size(), before + 1);  // parent replaced by two children
+    CHECK_EQ(eventCount(with.value()), eventCount(p) + 2);          // the cap budget counts zoomed children too
+    // A locked child tree protects its parent: delete, move, resize, collapse and re-zoom are refused.
+    auto lockedChild = std::make_shared<NestedPattern>(*child);
+    lockedChild->locked = true;
+    auto lockedWith = setChild(p, parentCopy.id, lockedChild, c);
+    CHECK(lockedWith.ok());
+    if (lockedWith.ok()) {
+      const Pattern& lp = lockedWith.value();
+      CHECK(!deleteEvent(lp, parentCopy.id).ok());
+      CHECK(!collapse(lp, parentCopy.id).ok());
+      CHECK(!moveEvent(lp, parentCopy.id, 0, 0).ok());
+      CHECK(!resizeEvent(lp, parentCopy.id, parentCopy.duration / 2).ok());
+      CHECK(!setChild(lp, parentCopy.id, child, c).ok());
+      CHECK(isLocked(lp, parentCopy.id));
+    }
     auto off = setChildActive(with.value(), parentCopy.id, false);
     CHECK(off.ok() && flatten(off.value(), c).value().size() == before);
     auto gone = collapse(with.value(), parentCopy.id);

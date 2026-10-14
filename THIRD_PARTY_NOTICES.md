@@ -10,5 +10,5 @@ reserved (see `LICENSE`); the components below keep their own licenses.
 | [clap-juce-extensions](https://github.com/free-audio/clap-juce-extensions) | CLAP plugin format wrapper | MIT |
 | [CLAP](https://github.com/free-audio/clap) headers | CLAP plugin format | MIT |
 
-Pre-beta builds are for internal testing only. Resolve the licensing route in `docs/LICENSING.md` before sharing
+Alpha builds are for internal testing only. Resolve the licensing route in `docs/LICENSING.md` before sharing
 any binary outside the project.

@@ -27,12 +27,19 @@ else()
   endif()
 endif()
 
+# Optional stand-alone application (own window and audio device selector, no DAW needed). Produces ChopFractal_Standalone.
+option(CHOPFRACTAL_BUILD_STANDALONE "Also build a stand-alone application" OFF)
+set(CHOPFRACTAL_FORMATS VST3)
+if(CHOPFRACTAL_BUILD_STANDALONE)
+  list(APPEND CHOPFRACTAL_FORMATS Standalone)
+endif()
+
 juce_add_plugin(ChopFractal
   COMPANY_NAME "ChopFractal"
   PRODUCT_NAME "ChopFractal"
   PLUGIN_MANUFACTURER_CODE Cfrc
   PLUGIN_CODE Cfx1
-  FORMATS VST3
+  FORMATS ${CHOPFRACTAL_FORMATS}
   VST3_CATEGORIES Fx
   IS_SYNTH FALSE
   NEEDS_MIDI_INPUT FALSE

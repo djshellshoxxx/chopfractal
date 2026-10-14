@@ -14,10 +14,21 @@ namespace chopfractal::pattern {
 Ticks barTicks(const Settings& s) { return ticksPerBar(s.timeSignature); }
 Ticks lengthTicks(const Pattern& p) { return barTicks(p.settings) * p.settings.bars; }
 
+namespace {
+std::size_t countTree(const std::vector<Event>& events) {
+  std::size_t n = events.size();
+  for (const Event& e : events)
+    if (e.child) n += countTree(e.child->events);
+  return n;
+}
+}  // namespace
+
+// Counts every event including zoomed children (a parent with an active child is counted too, which errs on the
+// safe side): the cap is a budget for what flatten() will play, so edits and Mutate must not spend it twice.
 std::size_t eventCount(const Pattern& p) {
   std::size_t n = 0;
   for (const Bar& b : p.bars)
-    for (const Beat& bt : b.beats) n += bt.events.size();
+    for (const Beat& bt : b.beats) n += countTree(bt.events);
   return n;
 }
 
@@ -445,7 +456,7 @@ class Gen {
 
   // ---- mutation ----
   bool retained(const Pattern& orig, int bar, const Event& e, bool includeEdited) const {
-    if (e.locked) return true;
+    if (e.locked || (e.child && e.child->locked)) return true;
     if (e.userOwned && !includeEdited) return true;
     if (policy_ && policy_->isPreserved(query(orig, bar, e.start, e.chop))) return true;
     return false;

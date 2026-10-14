@@ -95,7 +95,7 @@ struct MutateOptions {
 Status validateSettings(const Settings& s);
 Ticks barTicks(const Settings& s);
 Ticks lengthTicks(const Pattern& p);
-std::size_t eventCount(const Pattern& p);  // top-level events (children excluded)
+std::size_t eventCount(const Pattern& p);  // all events including zoomed children
 
 Result<Pattern> generate(const ChopSnapshot& chops, const Settings& settings, const ICandidatePolicy* policy = nullptr,
                          GenerationReport* report = nullptr);

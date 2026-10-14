@@ -17,7 +17,8 @@ Event& at(Pattern& p, const Location& l) { return p.bars[static_cast<std::size_t
 bool locationLocked(const Pattern& p, const Location& l) {
   const Bar& b = p.bars[static_cast<std::size_t>(l.bar)];
   const Beat& bt = b.beats[static_cast<std::size_t>(l.beat)];
-  return p.phraseLocked || b.locked || bt.locked || bt.events[l.index].locked;
+  const Event& e = bt.events[l.index];
+  return p.phraseLocked || b.locked || bt.locked || e.locked || (e.child && e.child->locked);  // a locked child tree protects its parent too
 }
 
 bool scopeLocked(const Pattern& p, int bar, int beat) {
