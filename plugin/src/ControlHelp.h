@@ -6,6 +6,7 @@ namespace control_help {
 inline juce::String forName(const juce::String& name) {
   struct Entry { const char* name; const char* help; };
   static const Entry entries[] = {
+    {"Follow DAW", "Return to the DAW's play/stop, tempo and position after using local Play or Stop. In standalone there is no DAW transport; use Play to start."},
     {"Options", "Open audio/MIDI device settings, save or load a complete project state, or reset ChopFractal to its defaults."},
     {"Settings...", "Choose audio input/output devices and sample rate. The input mute option protects against a feedback loop; generated pattern playback still reaches the output."},
     {"Play", "Start the generated pattern from the beginning using the local tempo. Works without a DAW. Load a loop, Detect Chops and Generate first."},

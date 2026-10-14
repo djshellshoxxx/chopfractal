@@ -53,6 +53,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void loadFileAsync(const juce::File& file, bool relink = false);  // relink: re-attach the audio of a project whose file went missing                 // decodes on a worker thread, then loads on the message thread
   bool startPlayback();  // local preview; validates that a generated pattern and its source exist
   void stopPlayback();
+  void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);

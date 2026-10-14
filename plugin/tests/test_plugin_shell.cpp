@@ -1164,3 +1164,22 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
   CHECK(controls > 35);
   CHECK(editor.getTooltip().length() > 20);
 }
+
+CHOP_TEST(local_preview_can_return_to_the_daw_transport) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  FakePlayHead host;
+  host.playing = false;
+  CHECK(p.startPlayback());
+  CHECK(peak(run(p, host, 100)) > 0.05f);
+  p.stopPlayback();
+  host.playing = true;
+  CHECK(peak(run(p, host, 10)) < 1e-6f);
+  p.followHostTransport();
+  CHECK(peak(run(p, host, 100)) > 0.05f);
+  CHECK(!p.usedFallbackTempo.load());
+  host.playing = false;
+  const auto stopped = run(p, host, 40);
+  CHECK(peak(std::vector<float>(stopped.end() - 4096, stopped.end())) < 1e-6f);
+}

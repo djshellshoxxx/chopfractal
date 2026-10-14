@@ -88,7 +88,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
 
-  juce::TextButton play_{"Play"}, stop_{"Stop"};
+  juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
   juce::TextEditor statusMessages_;
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"},

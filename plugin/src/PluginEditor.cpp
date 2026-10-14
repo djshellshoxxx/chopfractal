@@ -24,6 +24,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   }
   addAndMakeVisible(play_);
   addAndMakeVisible(stop_);
+  addAndMakeVisible(followHost_);
   addAndMakeVisible(transportHint_);
   addAndMakeVisible(editMode_);
   editMode_.setTooltip("Off: drag to select sections. On: drag a hit to move or resize it.");
@@ -37,6 +38,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   stop_.setTooltip("Stop local pattern playback. Press Play to restart from the beginning.");
   play_.onClick = [this] { proc_.startPlayback(); refresh(true); };
   stop_.onClick = [this] { proc_.stopPlayback(); refresh(true); };
+  followHost_.onClick = [this] { proc_.followHostTransport(); refresh(true); };
   statusMessages_.setTitle("Status messages");
   statusMessages_.setMultiLine(true, true);
   statusMessages_.setReadOnly(true);
@@ -326,6 +328,7 @@ void ChopFractalEditor::resized() {
   auto transport = area.removeFromTop(36);
   play_.setBounds(transport.removeFromLeft(104).reduced(2));
   stop_.setBounds(transport.removeFromLeft(104).reduced(2));
+  followHost_.setBounds(transport.removeFromLeft(100).reduced(2));
   editMode_.setBounds(transport.removeFromRight(180).reduced(2));
   transportHint_.setBounds(transport.reduced(8, 2));
   auto row1 = area.removeFromTop(30);

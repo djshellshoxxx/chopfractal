@@ -195,6 +195,11 @@ void ChopFractalProcessor::stopPlayback() {
   setStatusMessage("Stopped. Press Play to restart the pattern.");
 }
 
+void ChopFractalProcessor::followHostTransport() {
+  transportCommand_.store(0, std::memory_order_release);
+  setStatusMessage("Following DAW transport. In the standalone app, use Play to start the pattern.");
+}
+
 void ChopFractalProcessor::audition(cf::ChopId chop) {
   withSession([&](cf::composition::ProjectSession& s) {
     auto req = s.auditionRequest(chop);
