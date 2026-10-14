@@ -107,6 +107,11 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
       }
       return cf::Status{};
     });
+    if (proc_.statusMessage().isEmpty()) {
+      proc_.setStatusMessage("Zoomed " + juce::String(static_cast<int>(ids.size())) +
+          " selected hits into nested rhythms. Collapse returns to the parent hit.");
+      refresh(true);
+    }
   };
   collapse_.onClick = [this] {
     const cf::EventId id = selected_;

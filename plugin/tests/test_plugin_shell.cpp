@@ -930,7 +930,7 @@ CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
 CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
   if (!haveDisplay()) return;
   ChopFractalProcessor p;
-  const juce::String message = juce::String("A long status message. ").repeatedString(200);
+  const juce::String message = juce::String::repeatedString("A long status message. ", 200);
   p.setStatusMessage(message);
   ChopFractalEditor editor(p);
   juce::TextEditor* status = nullptr;
