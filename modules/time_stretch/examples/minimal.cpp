@@ -1,6 +1,7 @@
 // Minimal consumer: stretch one second of a 440 Hz sine to 1.25 seconds and report the exact length.
 #include <chopfractal/time_stretch/stretch.hpp>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 
