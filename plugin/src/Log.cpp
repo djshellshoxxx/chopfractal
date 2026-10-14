@@ -25,12 +25,23 @@ juce::File currentFile() {
   return logFolder().getChildFile(base + "-overflow.log");
 }
 
-void prune() {
+// Chronological key from the name (date, then rotation index); file times can tie within a clock tick.
+juce::String sortKey(const juce::File& f) {
+  const auto stem = f.getFileNameWithoutExtension().fromFirstOccurrenceOf("chopfractal-", false, false);
+  const auto date = stem.upToFirstOccurrenceOf("-", false, false);
+  const auto index = stem.contains("-") ? stem.fromFirstOccurrenceOf("-", false, false).getIntValue() : 0;
+  return date + "-" + juce::String(index).paddedLeft('0', 6);
+}
+
+juce::Array<juce::File> logFilesOldestFirst() {
   auto files = logFolder().findChildFiles(juce::File::findFiles, false, "chopfractal-*.log");
-  std::sort(files.begin(), files.end(), [](const juce::File& a, const juce::File& b) {
-    return a.getLastModificationTime() > b.getLastModificationTime();
-  });
-  for (int i = kMaxFiles; i < files.size(); ++i) files.getReference(i).deleteFile();
+  std::sort(files.begin(), files.end(), [](const juce::File& a, const juce::File& b) { return sortKey(a) < sortKey(b); });
+  return files;
+}
+
+void prune() {
+  const auto files = logFilesOldestFirst();
+  for (int i = 0; i < files.size() - kMaxFiles; ++i) files.getReference(i).deleteFile();
 }
 
 void write(const char* level, const juce::String& message) {
@@ -95,10 +106,7 @@ void error(const juce::String& m) { write("ERROR", m); }
 juce::String tail(int lines) {
   try {
     const juce::ScopedLock guard(lock);
-    auto files = logFolder().findChildFiles(juce::File::findFiles, false, "chopfractal-*.log");
-    std::sort(files.begin(), files.end(), [](const juce::File& a, const juce::File& b) {
-      return a.getLastModificationTime() < b.getLastModificationTime();
-    });
+    const auto files = logFilesOldestFirst();
     juce::StringArray all;
     for (const auto& f : files) all.addLines(f.loadFileAsString());
     all.removeEmptyStrings();
