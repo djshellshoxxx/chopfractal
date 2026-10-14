@@ -4,6 +4,7 @@
 #include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
