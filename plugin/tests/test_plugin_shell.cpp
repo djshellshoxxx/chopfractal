@@ -2012,3 +2012,55 @@ CHOP_TEST(outputs_panel_buttons_drive_the_routing) {
   r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
   CHECK(routing.mode == cf::composition::RoutingMode::ByChop);
 }
+
+CHOP_TEST(keyboard_shortcuts_navigate_generate_and_undo_and_leave_other_chords_alone) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.detectAndRoles();
+  auto bytes = [&] { return patternBytes(r.p); };
+  const auto before = bytes();
+  const juce::ModifierKeys none, shift(juce::ModifierKeys::shiftModifier), cmd(juce::ModifierKeys::commandModifier);
+  CHECK(r.ed->keyPressed(juce::KeyPress('g', none, 'g')));
+  RulesRig::pump();
+  CHECK(bytes() != before);
+  CHECK(r.ed->keyPressed(juce::KeyPress('z', cmd, 'z')));  // undo
+  RulesRig::pump();
+  CHECK(bytes() == before);
+  CHECK(r.ed->keyPressed(juce::KeyPress('y', cmd, 'y')));  // redo
+  RulesRig::pump();
+  CHECK(bytes() != before);
+  CHECK(!r.ed->keyPressed(juce::KeyPress('c', cmd, 'c')));  // host chords are not consumed
+  // ] selects the first hit, Esc clears it.
+  auto* ed = dynamic_cast<ChopFractalEditor*>(r.ed.get());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  CHECK(ed->keyPressed(juce::KeyPress(']', none, ']')));
+  CHECK(ed->selectedHit().valid());
+  CHECK(ed->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)));
+  CHECK(!ed->selectedHit().valid());
+  (void)shift;
+}
+
+CHOP_TEST(window_resizes_within_limits_and_simple_view_hides_advanced_controls) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  CHECK(r.ed->isResizable());
+  r.ed->setSize(1400, 1200);
+  CHECK_EQ(r.ed->getWidth(), 1400);
+  CHECK(r.ed->getConstrainer() != nullptr);
+  if (auto* c = r.ed->getConstrainer()) CHECK(c->getMinimumWidth() == 940 && c->getMinimumHeight() == 992 && c->getMaximumWidth() == 1920);
+  auto* fx = findByTitle<juce::Slider>(*r.ed, "FX intensity");
+  auto* view = findByTitle<juce::ToggleButton>(*r.ed, "View mode");
+  CHECK(view != nullptr);
+  if (!view) return;
+  if (fx) CHECK(fx->isVisible());
+  view->setToggleState(true, juce::sendNotificationSync);
+  if (fx) CHECK(!fx->isVisible());
+  CHECK(static_cast<bool>(r.p.apvts.state.getProperty("uiSimple", false)));
+  view->setToggleState(false, juce::sendNotificationSync);
+  if (fx) CHECK(fx->isVisible());
+}

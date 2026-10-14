@@ -230,3 +230,13 @@ CHOP_TEST(loop_position_reports_expected_crossings_and_playhead) {
   tb.positionValid = false;
   CHECK(!computeLoopPosition(tb, 512, 48000.0, 8.0).boundary);
 }
+
+CHOP_TEST(describe_param_gives_value_range_and_default_for_every_kind) {
+  CHECK(describeParam(*findParam("density"), 0.5) == "Density: 50% (range 0% to 100%, default 50%)");
+  CHECK(describeParam(*findParam("output_gain_db"), -6.0) == "Output Gain: -6.00 dB (range -60 to 12 dB, default 0 dB)");
+  CHECK(describeParam(*findParam("pattern_bars"), 2.0) == "Pattern Length: 4 bars (choices: 1, 2, 4, 8; default 4)");
+  CHECK(describeParam(*findParam("effect_enable"), 1.0) == "Effect Enable: on (default on)");
+  CHECK(describeParam(*findParam("allow_reverse"), 0.0) == "Allow Reverse: off (default off)");
+  CHECK(describeParam(*findParam("perf_mode"), 2.0) == "Pad Mode: Gate (choices: Poly, Mono, Gate; default Poly)");
+  for (const ParamDef& d : parameterManifest()) CHECK(!describeParam(d, d.defaultValue).empty() && !describeParam(d, 1e9).empty());
+}

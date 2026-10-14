@@ -15,8 +15,13 @@ juce::Colour laneColour(int chopIndex) {
 }  // namespace
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), capturePanel_(processor), morphPanel_(processor) {
-  setSize(940, 992);
-  setResizable(false, false);
+  {  // resizable window: the default size is also the minimum; the last size, scale and view come back with the project
+    const int w = juce::jlimit(940, 1920, static_cast<int>(proc_.apvts.state.getProperty("uiWidth", 940)));
+    const int h = juce::jlimit(992, 1400, static_cast<int>(proc_.apvts.state.getProperty("uiHeight", 992)));
+    setResizeLimits(940, 992, 1920, 1400);
+    setResizable(true, true);
+    setSize(w, h);
+  }
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
     addAndMakeVisible(*b);
@@ -374,6 +379,38 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   exportLoops_.setTitle("Export loops");
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
+  // ---- keyboard, scale and view mode (docs/specs/roadmap/F04-keyboard-and-layout.md) ----
+  addAndMakeVisible(simpleView_);
+  simpleView_.setTitle("View mode");
+  simpleView_.setToggleState(static_cast<bool>(proc_.apvts.state.getProperty("uiSimple", false)), juce::dontSendNotification);
+  simpleView_.onClick = [this] {
+    applyViewMode();
+    persistUi();
+    resized();
+  };
+  addAndMakeVisible(scale_);
+  scale_.setTitle("Interface scale");
+  scale_.addItemList({"75%", "100%", "125%", "150%", "200%"}, 1);
+  {
+    const int pct = juce::jlimit(75, 200, static_cast<int>(proc_.apvts.state.getProperty("uiScale", 100)));
+    scale_.setSelectedId(pct == 75 ? 1 : pct == 125 ? 3 : pct == 150 ? 4 : pct == 200 ? 5 : 2, juce::dontSendNotification);
+    if (pct != 100) setScaleFactor(static_cast<float>(pct) / 100.0f);
+  }
+  scale_.onChange = [this] {
+    static const int pcts[] = {75, 100, 125, 150, 200};
+    setScaleFactor(static_cast<float>(pcts[juce::jlimit(0, 4, scale_.getSelectedId() - 1)]) / 100.0f);
+    persistUi();
+  };
+  for (int i = 0; i < 4; ++i) {
+    static const char* const names[] = {"Waveform and chop markers", "Pattern grid", "Variation family tree", "Orbit view"};
+    regions_[static_cast<std::size_t>(i)] = std::make_unique<juce::Component>();
+    auto& r = *regions_[static_cast<std::size_t>(i)];
+    r.setTitle(names[i]);
+    r.setInterceptsMouseClicks(false, false);
+    r.setAccessible(true);
+    addAndMakeVisible(r);
+  }
+  applyViewMode();
   control_help::applyToTree(*this);
   refresh(true);
   startTimerHz(10);
@@ -419,6 +456,8 @@ void ChopFractalEditor::resized() {
   stop_.setBounds(transport.removeFromLeft(104).reduced(2));
   followHost_.setBounds(transport.removeFromLeft(100).reduced(2));
   editMode_.setBounds(transport.removeFromRight(180).reduced(2));
+  scale_.setBounds(transport.removeFromRight(76).reduced(2));
+  simpleView_.setBounds(transport.removeFromRight(106).reduced(2));
   transportHint_.setBounds(transport.reduced(8, 2));
   auto row1 = area.removeFromTop(30);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_})
@@ -493,9 +532,10 @@ void ChopFractalEditor::resized() {
     outputsToggle_.setBounds(row);
   }
   area.removeFromTop(6);
-  waveArea_ = area.removeFromTop(120);
+  const int extra = std::max(0, getHeight() - 992);  // a taller window gives the canvases the extra room
+  waveArea_ = area.removeFromTop(120 + extra * 3 / 10);
   area.removeFromTop(6);
-  patternArea_ = area.removeFromTop(230);
+  patternArea_ = area.removeFromTop(230 + extra * 4 / 10);
   area.removeFromTop(6);
   statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   if (rulesPanel_) rulesPanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
@@ -506,6 +546,33 @@ void ChopFractalEditor::resized() {
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
   historyArea_ = bottom.withTrimmedRight(6);
+  if (regions_[0]) {
+    regions_[0]->setBounds(waveArea_);
+    regions_[1]->setBounds(patternArea_);
+    regions_[2]->setBounds(historyArea_);
+    regions_[3]->setBounds(orbitArea_);
+  }
+  persistUi();
+}
+
+void ChopFractalEditor::persistUi() {
+  if (!scale_.isShowing() && getWidth() <= 0) return;
+  proc_.apvts.state.setProperty("uiWidth", getWidth(), nullptr);
+  proc_.apvts.state.setProperty("uiHeight", getHeight(), nullptr);
+  proc_.apvts.state.setProperty("uiSimple", simpleView_.getToggleState(), nullptr);
+  static const int pcts[] = {75, 100, 125, 150, 200};
+  proc_.apvts.state.setProperty("uiScale", pcts[juce::jlimit(0, 4, scale_.getSelectedId() - 1)], nullptr);
+}
+
+void ChopFractalEditor::applyViewMode() {
+  const bool advanced = !simpleView_.getToggleState();
+  juce::Component* groups[] = {&fxIntensity_.slider, &reverse_.button, &pitch_.button, &retrigger_.button, &filter_.button, &glide_.button, &crunch_.button,
+                               &motifLabel_, &motif_, &depthLabel_, &depth_, &fractal_, &evolve_, &everyLabel_, &every_, &evolveAmount_, &keep_, &fmtLabel_, &exportFormat_,
+                               &exportRate_, &loopsLabel_, &exportLoops_, &storeA_, &recallA_, &storeB_, &recallB_, &role_, &setRole_};
+  for (juce::Component* c : groups) c->setVisible(advanced);  // hidden controls keep their values and their shortcuts
+  fxIntensity_.label.setVisible(advanced);
+  simpleView_.setButtonText(advanced ? "Simple view" : "Advanced view");
+  simpleView_.setTooltip(control_help::forName(simpleView_.getButtonText()));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1286,7 +1353,88 @@ void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
   });
 }
 
+bool ChopFractalEditor::handleShortcut(const juce::KeyPress& k) {
+  if (dynamic_cast<juce::TextEditor*>(juce::Component::getCurrentlyFocusedComponent()) != nullptr) return false;  // typing, not commanding
+  const auto mods = k.getModifiers();
+  const bool cmd = mods.isCommandDown() || mods.isCtrlDown();
+  const juce::juce_wchar ch = juce::CharacterFunctions::toLowerCase(k.getTextCharacter());
+  if (cmd && !mods.isAltDown()) {
+    if (ch == 'z' && !mods.isShiftDown()) { undo_.triggerClick(); return true; }
+    if (ch == 'y' || (ch == 'z' && mods.isShiftDown())) { redo_.triggerClick(); return true; }
+    return false;  // everything else belongs to the host
+  }
+  if (mods.isAltDown()) return false;
+  if (k == juce::KeyPress::escapeKey) {
+    selected_ = cf::EventId{};
+    selectedHits_.clear();
+    selectedChops_.clear();
+    repaint();
+    return true;
+  }
+  if (k == juce::KeyPress::returnKey && selected_.valid()) {
+    for (const auto& r : pattern_.rects)
+      if (r.id == selected_ && r.chopIndex >= 0 && r.chopIndex < static_cast<int>(chops_.size())) {
+        proc_.audition(chops_[static_cast<std::size_t>(r.chopIndex)].id);
+        break;
+      }
+    return true;
+  }
+  if (k == juce::KeyPress::upKey) { navigateHit(0, -1); return true; }
+  if (k == juce::KeyPress::downKey) { navigateHit(0, 1); return true; }
+  if (ch == '[') { navigateHit(-1, 0); return true; }
+  if (ch == ']') { navigateHit(1, 0); return true; }
+  if (ch == 'g' && !mods.isShiftDown()) { generate_.triggerClick(); return true; }
+  if (ch == 'm' && mods.isShiftDown()) { mutate_.triggerClick(); return true; }  // plain M mutes the selected hit (below)
+  if (ch == 'z') { (mods.isShiftDown() ? collapse_ : zoom_).triggerClick(); return true; }
+  if (ch == 'l' && !mods.isShiftDown()) { lock_.triggerClick(); return true; }
+  if (ch == 'm' && !selected_.valid()) { mutate_.triggerClick(); return true; }
+  if (k.getTextCharacter() == ' ' ) {  // the host owns the transport: say so once
+    static bool told = false;
+    if (!told) {
+      told = true;
+      proc_.setStatusMessage("Playback follows your DAW's transport. Press play in the host to hear the pattern; Enter auditions the selected hit.");
+    }
+    return false;
+  }
+  return false;
+}
+
+void ChopFractalEditor::navigateHit(int dx, int dy) {
+  struct Hit { cf::EventId id; int lane; double t; };
+  std::vector<Hit> hits;
+  for (const auto& r : pattern_.rects)
+    if (r.depth == 0) hits.push_back({r.id, r.chopIndex, r.x0});
+  if (hits.empty()) return;
+  std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.t != b.t ? a.t < b.t : a.id.value < b.id.value; });
+  const auto cur = std::find_if(hits.begin(), hits.end(), [&](const Hit& h) { return h.id == selected_; });
+  Hit pick = hits.front();
+  if (cur != hits.end()) {
+    if (dx != 0) {
+      const auto idx = static_cast<long>(cur - hits.begin());
+      pick = hits[static_cast<std::size_t>(std::clamp<long>(idx + dx, 0, static_cast<long>(hits.size()) - 1))];
+    } else {
+      const Hit from = *cur;
+      bool found = false;
+      double best = 1e30;
+      for (const Hit& h : hits) {  // the nearest hit in time on the adjacent lane
+        if (h.lane != from.lane + dy) continue;
+        const double d = std::fabs(h.t - from.t);
+        if (d < best) { best = d; pick = h; found = true; }
+      }
+      if (!found) return;
+    }
+  }
+  selected_ = pick.id;
+  selectedHits_ = {pick.id};
+  juce::String text;
+  for (const auto& r : pattern_.rects)
+    if (r.id == pick.id) text = juce::String(r.description);
+  if (text.isNotEmpty()) juce::AccessibilityHandler::postAnnouncement(text, juce::AccessibilityHandler::AnnouncementPriority::medium);
+  repaint();
+}
+
 bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
+  if (handleShortcut(k)) return true;
   if (!selected_.valid()) return false;
   const auto mods = k.getModifiers();
   if (mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown()) return false;  // leave the host's own shortcuts alone

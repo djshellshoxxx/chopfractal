@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace chopfractal::host {
 
@@ -100,6 +101,48 @@ TimeTranslation translateHostTime(const HostTimeInfo& host, double manualBpm, Ti
     t.timeSignature = fallbackMeter.valid() ? fallbackMeter : TimeSignature{4, 4};
   }
   return t;
+}
+
+namespace {
+std::string numberText(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%g", v);
+  return buf;
+}
+std::string choiceLabel(const ParamDef& def, int index) {
+  std::string all = def.choices ? def.choices : "";
+  int i = 0;
+  std::size_t start = 0;
+  while (true) {
+    const std::size_t bar = all.find('|', start);
+    const std::string item = all.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+    if (i == index) return item;
+    if (bar == std::string::npos) return {};
+    start = bar + 1;
+    ++i;
+  }
+}
+}  // namespace
+
+std::string describeParam(const ParamDef& def, double plain) {
+  const double v = snapValue(def, plain);
+  const std::string unit = def.unit ? def.unit : "";
+  const std::string name = def.name;
+  if (def.kind == ParamKind::Bool) return name + ": " + (v >= 0.5 ? "on" : "off") + " (default " + (def.defaultValue >= 0.5 ? "on" : "off") + ")";
+  if (def.kind == ParamKind::Choice) {
+    std::string all = def.choices ? def.choices : "";
+    std::string list;
+    for (char c : all) list += c == '|' ? std::string(", ") : std::string(1, c);
+    return name + ": " + choiceLabel(def, static_cast<int>(std::lround(v))) + (unit.empty() ? "" : " " + unit) + " (choices: " + list + "; default " + choiceLabel(def, static_cast<int>(std::lround(def.defaultValue))) + ")";
+  }
+  if (unit == "%") {
+    return name + ": " + numberText(std::round(v * 100.0)) + "% (range " + numberText(def.minValue * 100.0) + "% to " + numberText(def.maxValue * 100.0) + "%, default " +
+           numberText(def.defaultValue * 100.0) + "%)";
+  }
+  char value[48];
+  std::snprintf(value, sizeof value, "%.2f", v);
+  const std::string suffix = unit.empty() ? "" : " " + unit;
+  return name + ": " + value + suffix + " (range " + numberText(def.minValue) + " to " + numberText(def.maxValue) + suffix + ", default " + numberText(def.defaultValue) + suffix + ")";
 }
 
 bool isSupportedBusLayout(int inputChannels, int outputChannels) {

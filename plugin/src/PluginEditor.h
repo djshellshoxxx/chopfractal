@@ -5,6 +5,7 @@
 
 #include <chopfractal/plugin_ui_adapter/orbit.hpp>
 #include <chopfractal/plugin_ui_adapter/views.hpp>
+#include <array>
 #include <functional>
 #include <memory>
 
@@ -142,6 +143,13 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   std::unique_ptr<PadPanel> padPanel_;
   std::unique_ptr<TempoPanel> tempoPanel_;
   std::unique_ptr<OutputsPanel> outputsPanel_;
+  juce::ToggleButton simpleView_{"Simple view"};
+  juce::ComboBox scale_;
+  std::array<std::unique_ptr<juce::Component>, 4> regions_;  // accessible names for the painted panels
+  void applyViewMode();
+  void persistUi();
+  bool handleShortcut(const juce::KeyPress& key);
+  void navigateHit(int dx, int dy);
   juce::ToggleButton outputsToggle_{"Outputs"};
   juce::ToggleButton tempoToggle_{"Tempo"};
   juce::ToggleButton padsToggle_{"Pads"};
