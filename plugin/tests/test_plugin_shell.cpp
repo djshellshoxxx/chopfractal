@@ -786,7 +786,7 @@ CHOP_TEST(audio_stays_finite_under_hostile_host_timing_and_block_sizes) {
   p.setPlayHead(&ph);
   const double bpms[] = {120.0, 0.0, -5.0, 1e-9, 20.0, 999.0, 5000.0, 1e12, std::nan("")};
   const double ppqs[] = {0.0, -100.0, 1e9, 3.5, std::nan(""), 7.0, 0.0001};
-  const int blocks[] = {1, 2, 7, 64, 511, 512, 1000, 4096, 9000};
+  const int blocks[] = {1, 2, 7, 64, 511, 512, 1000, 4096, 9001};
   bool finite = true;
   for (int i = 0; i < 400; ++i) {
     ph.playing = rng.uniform01() < 0.85;
