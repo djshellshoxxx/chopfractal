@@ -20,6 +20,37 @@ Result<ChopMap> ChopMap::create(SourceInfo info, std::int64_t minRegionFrames) {
   return ChopMap(std::move(info), minRegionFrames);
 }
 
+namespace {
+std::int64_t scaleFrames(std::int64_t x, std::int64_t in, std::int64_t out) { return (2 * x * out + in) / (2 * in); }
+}  // namespace
+
+Result<ChopMap> ChopMap::rescaled(const ChopMap& from, SourceInfo newInfo, std::int64_t inFrames, std::int64_t outFrames) {
+  if (inFrames <= 0 || outFrames <= 0) return makeError(ErrorCode::InvalidArgument, "the source length is zero");
+  auto created = create(std::move(newInfo), from.minRegion_);
+  if (!created.ok()) return created.error();
+  ChopMap map = std::move(created.value());
+  State s;
+  s.nextId = from.history_.current().nextId;
+  for (const Marker& m : from.markers()) {
+    Marker n = m;
+    n.position = scaleFrames(m.position, inFrames, outFrames);
+    n.trimStart = static_cast<std::uint32_t>(scaleFrames(m.trimStart, inFrames, outFrames));
+    n.trimEnd = static_cast<std::uint32_t>(scaleFrames(m.trimEnd, inFrames, outFrames));
+    n.fadeIn = static_cast<std::uint32_t>(scaleFrames(m.fadeIn, inFrames, outFrames));
+    n.fadeOut = static_cast<std::uint32_t>(scaleFrames(m.fadeOut, inFrames, outFrames));
+    s.markers.push_back(std::move(n));
+  }
+  std::int64_t tooShort = 0;
+  for (std::size_t i = 1; i < s.markers.size(); ++i)
+    if (s.markers[i].position - s.markers[i - 1].position < map.minRegion_) ++tooShort;
+  if (!s.markers.empty() && map.info_.frames - s.markers.back().position < map.minRegion_) ++tooShort;
+  if (tooShort > 0) return makeError(ErrorCode::Conflict, "markers would end up closer than the minimum region length", tooShort);
+  Status v = map.validate(s);
+  if (!v.ok()) return v.error();
+  map.history_.reset(std::move(s));
+  return map;
+}
+
 const Marker* ChopMap::find(ChopId id) const {
   for (const Marker& m : markers())
     if (m.id == id) return &m;

@@ -34,6 +34,7 @@ ChopFractalProcessor::ChopFractalProcessor()
 
 ChopFractalProcessor::~ChopFractalProcessor() {
   stopTimer();
+  stretch_.cancel();  // a stretch in flight must stop before the pool is drained
   loadPool_.removeAllJobs(true, 15000);  // a decode in flight must not outlive the plugin's code
 }
 
@@ -306,6 +307,8 @@ std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(c
 }
 
 void ChopFractalProcessor::loadFileAsync(const juce::File& file, bool relink) {
+  stretch_.clearUndo();
+  captureController().clearUndo();
   setStatusMessage("Loading " + file.getFileName() + "...");
   juce::WeakReference<ChopFractalProcessor> self(this);
   const std::uint64_t ticket = ++loadTicket_;
@@ -361,6 +364,7 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
 }
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
+  stretch_.clearUndo();
   ++loadTicket_;  // a file load still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};

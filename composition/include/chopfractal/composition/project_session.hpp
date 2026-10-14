@@ -17,6 +17,7 @@
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <chopfractal/recursive_hit_zoom/zoom.hpp>
 #include <chopfractal/scenes/scenes.hpp>
+#include <chopfractal/time_stretch/stretch.hpp>
 #include <chopfractal/source_chop/analysis.hpp>
 #include <chopfractal/source_chop/chop_map.hpp>
 #include <chopfractal/state_codec/codec.hpp>
@@ -149,6 +150,19 @@ struct TakeReport {
   int added = 0, replaced = 0, skippedLocked = 0, skippedCap = 0, skippedUnmapped = 0, skippedDuplicate = 0;
 };
 
+// ---- tempo matching (docs/specs/roadmap/F14-tempo-match-stretch.md) ----
+struct StretchRequest {
+  double sourceBpm = 120.0;
+  double targetBpm = 120.0;
+  stretch::Quality quality = stretch::Quality::Standard;
+};
+struct StretchPlan {
+  stretch::Plan plan;
+  std::shared_ptr<const render::SourceData> input;  // immutable snapshot taken at plan time
+  SourceId inputId;                                  // identity check at apply time
+  StretchRequest request;
+};
+
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
@@ -159,6 +173,9 @@ struct KitOptions {
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
 using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(const source::SourceInfo&)>;
+
+// Content hash of decoded audio (the identity a saved project compares against).
+SourceId sourceIdOf(const render::SourceData& data);
 
 class ProjectSession {
  public:
@@ -223,6 +240,12 @@ class ProjectSession {
   bool redo();
   Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
+
+  // ---- tempo matching ----
+  // Validates the request and snapshots the audio; the heavy stretch::stretch runs elsewhere (a worker thread).
+  Result<StretchPlan> planStretch(const StretchRequest& request) const;
+  // All-or-nothing: replaces the source with `stretched`, scales markers and sub-regions, keeps ids, roles and locks.
+  Status applyStretched(const StretchPlan& plan, std::shared_ptr<const render::SourceData> stretched);
 
   // ---- live pads ----
   void attachPadMailbox(render::Mailbox<render::PadBank>* mailbox) {

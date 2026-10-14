@@ -127,6 +127,12 @@ inline juce::String forName(const juce::String& name) {
     {"Record pad hits into the pattern", "Record pad and MIDI hits into the pattern while the host plays. Hits are quantized and merged at the loop midpoint as one undo step."},
     {"Discard Take", "Throw away the hits recorded since the last merge."},
     {"Close Pads", "Hide the performance pads."},
+    {"Tempo", "Show tempo matching: stretch the loop to the host tempo while keeping every chop boundary on its scaled position."},
+    {"Show tempo matching", "Show tempo matching: stretch the loop to the host tempo while keeping every chop boundary on its scaled position."},
+    {"Use host", "Set the target tempo to the host tempo (or the manual tempo when the host gives none)."},
+    {"Match to host", "Stretch the source to the target tempo. Chop ids, roles and the pattern rhythm are kept. Use Undo Stretch to go back."},
+    {"Undo Stretch", "Restore the source and project exactly as they were before the last stretch."},
+    {"Close Tempo", "Hide tempo matching."},
     {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},
     {"Load Loop > Detect Chops > Generate > Play", "Start by loading or dropping a loop, detecting chops, generating a pattern, and pressing Play."},
   };

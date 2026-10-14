@@ -12,6 +12,7 @@
 #include <chopfractal/chop_contracts/time.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -155,6 +156,10 @@ Result<Pattern> collapse(const Pattern& p, EventId id);  // drops the child tree
 Result<Pattern> setChildActive(const Pattern& p, EventId id, bool active);  // keep the tree, toggle parent/child playback
 // Reconcile after marker edits: drops events whose chop vanished, clears sub-regions that left their chop.
 Pattern sanitize(const Pattern& p, const ChopSnapshot& chops);
+
+// Applies `fn` to every non-empty sub-region of every hit, including zoomed children (empty = whole chop stays empty).
+// Structure, ids, seeds and locks are untouched. Used when the source timeline is scaled (tempo matching).
+Pattern mapRegions(const Pattern& p, const std::function<SampleRange(SampleRange)>& fn);
 
 // ---- state ----
 std::vector<std::uint8_t> serialize(const Pattern& p);

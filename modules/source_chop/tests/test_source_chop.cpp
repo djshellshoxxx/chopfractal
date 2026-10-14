@@ -248,3 +248,52 @@ CHOP_TEST(state_roundtrips_and_rejects_malformed_input) {
   bad[blob.size() - 3] ^= 0xFF;
   (void)ChopMap::deserialize(bad.data(), bad.size());  // must not crash
 }
+
+CHOP_TEST(rescaled_preserves_ids_flags_and_scales_positions_trims_and_fades) {
+  auto m = ChopMap::create(info(96000));
+  CHECK(m.ok());
+  auto a = m.value().addMarker(1000, false);
+  auto b = m.value().addMarker(24000, true);
+  auto c = m.value().addMarker(60000, true);
+  CHECK(a.ok() && b.ok() && c.ok());
+  CHECK(m.value().setLabel(b.value(), "snare").ok());
+  CHECK(m.value().setGroup(b.value(), 4).ok());
+  CHECK(m.value().setTrim(b.value(), 100, 200).ok());
+  CHECK(m.value().setFades(b.value(), 30, 40).ok());
+  CHECK(m.value().setEnabled(c.value(), false).ok());
+  SourceInfo ni = info(76800);
+  ni.name = "stretched";
+  auto r = ChopMap::rescaled(m.value(), ni, 96000, 76800);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  const auto& ms = r.value().markers();
+  CHECK_EQ(ms.size(), 3u);
+  CHECK(ms[0].id == a.value() && ms[1].id == b.value() && ms[2].id == c.value());
+  CHECK_EQ(ms[0].position, 800);       // floor((2*1000*76800 + 96000) / (2*96000))
+  CHECK_EQ(ms[1].position, 19200);
+  CHECK_EQ(ms[2].position, 48000);
+  CHECK(ms[1].label == "snare" && ms[1].group == 4 && ms[1].manual && !ms[0].manual && !ms[2].enabled);
+  CHECK_EQ(ms[1].trimStart, 80u);
+  CHECK_EQ(ms[1].trimEnd, 160u);
+  CHECK_EQ(ms[1].fadeIn, 24u);
+  CHECK_EQ(ms[1].fadeOut, 32u);
+  CHECK(!r.value().canUndo());  // fresh history
+  auto again = ChopMap::deserialize(r.value().serialize().data(), r.value().serialize().size());
+  CHECK(again.ok() && again.value().markers().size() == 3);
+  // the next id is preserved so a later marker never reuses an existing id
+  auto d = r.value().addMarker(70000, true);
+  CHECK(d.ok() && d.value().value > c.value().value);
+}
+
+CHOP_TEST(rescaled_rejects_markers_closer_than_min_region_with_the_count_as_hint) {
+  auto m = ChopMap::create(info(96000));
+  CHECK(m.ok());
+  CHECK(m.value().addMarker(1000, true).ok());
+  CHECK(m.value().addMarker(1100, true).ok());   // 100 apart: fine now
+  CHECK(m.value().addMarker(1200, true).ok());
+  CHECK(m.value().addMarker(50000, true).ok());
+  auto r = ChopMap::rescaled(m.value(), info(48000), 96000, 48000);  // halving makes 50-frame gaps
+  CHECK(!r.ok());
+  CHECK(r.error().code == ErrorCode::Conflict);
+  CHECK_EQ(r.error().hint, 2);
+}

@@ -256,3 +256,39 @@ CHOP_TEST(random_pairs_validate_flatten_and_freeze_matches_the_preview) {
     }
   }
 }
+
+CHOP_TEST(map_regions_scales_nested_regions_and_leaves_regionless_patterns_alone) {
+  const auto c = chopsOf();
+  const Pattern plain = gen(c, 7);
+  auto doubled = [](SampleRange r) { return SampleRange{r.start * 2, r.end * 2}; };
+  CHECK(serialize(mapRegions(plain, doubled)) == serialize(plain));  // no sub-regions: bytes unchanged
+  Pattern p = plain;
+  Event* target = nullptr;
+  for (Bar& b : p.bars)
+    for (Beat& bt : b.beats)
+      for (Event& e : bt.events) if (!target) target = &e;
+  CHECK(target != nullptr);
+  if (!target) return;
+  target->region = {100, 500};
+  auto child = std::make_shared<NestedPattern>();
+  child->windowDuration = target->duration;
+  Event inner;
+  inner.id = EventId{p.nextId + 50};
+  inner.chop = target->chop;
+  inner.start = 0;
+  inner.duration = std::max<Ticks>(1, target->duration / 2);
+  inner.region = {200, 300};
+  child->events.push_back(inner);
+  target->child = child;
+  const Pattern m = mapRegions(p, doubled);
+  const Event* e = nullptr;
+  for (const Bar& b : m.bars)
+    for (const Beat& bt : b.beats)
+      for (const Event& x : bt.events) if (x.id == target->id) e = &x;
+  CHECK(e != nullptr);
+  if (e) {
+    CHECK(e->region.start == 200 && e->region.end == 1000);
+    CHECK(e->child && e->child->events[0].region.start == 400 && e->child->events[0].region.end == 600);
+  }
+  CHECK(target->region.start == 100);  // the input was not touched
+}

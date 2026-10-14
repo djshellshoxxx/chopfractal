@@ -1813,3 +1813,112 @@ CHOP_TEST(pad_panel_pads_trigger_and_expose_settings) {
   }
   r.click("Close Pads", true);
 }
+
+namespace {
+std::shared_ptr<const cf::render::SourceData> beatLoop(int seconds = 0) {
+  auto d = std::make_shared<cf::render::SourceData>();
+  d->channels = 1;
+  d->sampleRate = 48000;
+  d->frames = seconds > 0 ? 48000ll * seconds : 120000;
+  d->samples.assign(static_cast<std::size_t>(d->frames), 0.f);
+  const int spacing = seconds > 0 ? 24000 : 30000;
+  for (std::int64_t at = 0; at + 6000 < d->frames; at += spacing)
+    for (int i = 0; i < 6000; ++i) d->samples[static_cast<std::size_t>(at + i)] = 0.8f * static_cast<float>(std::exp(-i / 1500.0) * std::sin(2.0 * 3.14159265358979 * 250.0 * i / 48000.0));
+  return d;
+}
+bool waitFor(ChopFractalProcessor& p, const char* text, int ms = 20000) {
+  for (int waited = 0; waited < ms && !p.statusMessage().contains(text); waited += 30) juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+  return p.statusMessage().contains(text);
+}
+}  // namespace
+
+CHOP_TEST(tempo_match_stretches_keeps_ids_and_undo_restores_the_original) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.loadSource(beatLoop(), "loop", "/music/loop.wav").ok());
+    CHECK(s.editMarkers([](cf::source::ChopMap& m) {
+      for (int b = 0; b < 4; ++b) m.addMarker(b * 30000, true);
+      return cf::Status{};
+    }).ok());
+    cf::pattern::Settings st;
+    st.bars = 1;
+    st.seed = 3;
+    CHECK(s.generate(st).ok());
+  });
+  std::vector<cf::ChopId> ids;
+  std::vector<std::uint8_t> original;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& c : s.chops()->chops) ids.push_back(c.id);
+    original = s.saveState(true).value();
+  });
+  cf::composition::StretchRequest r;
+  r.sourceBpm = 96.0;
+  r.targetBpm = 120.0;
+  r.quality = cf::stretch::Quality::Draft;
+  CHECK(p.stretchController().start(r).isEmpty());
+  CHECK(p.stretchController().running());
+  CHECK(!p.stretchController().start(r).isEmpty());  // one at a time
+  CHECK(waitFor(p, "Stretched to 120.0 BPM"));
+  CHECK(!p.stretchController().running());
+  CHECK(p.embedSource.load());
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(s.chopMap()->info().frames, 96000);
+    for (std::size_t i = 0; i < ids.size(); ++i) CHECK(s.chops()->chops[i].id == ids[i]);
+  });
+  juce::MemoryBlock saved;
+  p.getStateInformation(saved);
+  ChopFractalProcessor q;
+  q.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  q.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.hasSource() && !s.sourceMissing() && s.chopMap()->info().frames == 96000); });
+  CHECK(p.stretchController().canUndo());
+  CHECK(p.stretchController().undo());
+  std::vector<std::uint8_t> restored;
+  p.withSession([&](cf::composition::ProjectSession& s) { restored = s.saveState(true).value(); });
+  CHECK(restored == original);
+  CHECK(!p.stretchController().canUndo());
+}
+
+CHOP_TEST(tempo_match_cancel_leaves_the_project_unchanged_and_bad_requests_are_refused) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(beatLoop(40), "long", "/music/long.wav").ok()); });
+  cf::composition::StretchRequest r;
+  r.sourceBpm = 100.0;
+  r.targetBpm = 130.0;
+  r.quality = cf::stretch::Quality::High;
+  CHECK(p.stretchController().start(r).isEmpty());
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(60);
+  p.stretchController().cancel();
+  CHECK(waitFor(p, "cancelled"));
+  CHECK(!p.stretchController().running());
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK_EQ(s.chopMap()->info().frames, 48000 * 40); });
+  r.targetBpm = 20.0;
+  CHECK(p.stretchController().start(r).contains("Out of range"));
+  CHECK(!p.stretchController().canUndo());
+}
+
+CHOP_TEST(tempo_panel_disables_matching_outside_the_range_and_shows_the_exact_text) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(beatLoop(), "loop", "/music/loop.wav").ok()); });
+  r.click("Tempo");
+  auto* src = findByTitle<juce::TextEditor>(*r.ed, "Source BPM");
+  auto* tgt = findByTitle<juce::TextEditor>(*r.ed, "Target BPM");
+  CHECK(src != nullptr && tgt != nullptr);
+  if (!src || !tgt) return;
+  auto* loop = findByTitle<juce::ComboBox>(*r.ed, "Loop length");
+  CHECK(loop != nullptr);
+  loop->setSelectedId(loop->getNumItems(), juce::sendNotificationSync);  // Custom BPM
+  src->setText("96", true);
+  tgt->setText("20", true);
+  RulesRig::pump(150);
+  auto* match = findButtonDeep(*r.ed, "Match to host");
+  CHECK(match != nullptr);
+  if (match) CHECK(!match->isEnabled());
+  tgt->setText("120", true);
+  RulesRig::pump(150);
+  if (match) CHECK(match->isEnabled());
+}

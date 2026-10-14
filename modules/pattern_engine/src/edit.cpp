@@ -520,4 +520,26 @@ Pattern sanitize(const Pattern& p, const ChopSnapshot& chops) {
   return q;
 }
 
+namespace {
+std::vector<Event> mapEvents(const std::vector<Event>& events, const std::function<SampleRange(SampleRange)>& fn) {
+  std::vector<Event> out = events;
+  for (Event& e : out) {
+    if (!e.region.empty()) e.region = fn(e.region);
+    if (e.child) {
+      auto child = std::make_shared<NestedPattern>(*e.child);
+      child->events = mapEvents(e.child->events, fn);
+      e.child = std::move(child);
+    }
+  }
+  return out;
+}
+}  // namespace
+
+Pattern mapRegions(const Pattern& p, const std::function<SampleRange(SampleRange)>& fn) {
+  Pattern q = p;
+  for (Bar& bar : q.bars)
+    for (Beat& bt : bar.beats) bt.events = mapEvents(bt.events, fn);
+  return q;
+}
+
 }  // namespace chopfractal::pattern

@@ -5,6 +5,13 @@
 #include <cstring>
 
 namespace chopfractal::composition {
+
+SourceId sourceIdOf(const render::SourceData& d) {
+  std::vector<const float*> ptrs;
+  for (int c = 0; c < d.channels; ++c) ptrs.push_back(d.channel(c));
+  return source::computeSourceId(ptrs.data(), d.channels, d.frames, d.sampleRate);
+}
+
 namespace {
 
 // The dependency-free modules (state_codec, variation_history) own private Error types with the same
@@ -34,10 +41,7 @@ bool validSource(const std::shared_ptr<const render::SourceData>& d) {
          d->samples.size() == static_cast<std::size_t>(d->channels) * static_cast<std::size_t>(d->frames);
 }
 
-SourceId idOf(const render::SourceData& d) {
-  auto ptrs = channelPointers(d);
-  return source::computeSourceId(ptrs.data(), d.channels, d.frames, d.sampleRate);
-}
+SourceId idOf(const render::SourceData& d) { return sourceIdOf(d); }
 
 Result<source::Proposal> propose(const std::optional<source::ChopMap>& map, const render::SourceData* data, const DetectOptions& o) {
   if (!map) return makeError(ErrorCode::InvalidArgument, "load a source first");

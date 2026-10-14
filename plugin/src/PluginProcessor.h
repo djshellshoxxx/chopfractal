@@ -15,6 +15,7 @@
 
 #include "CaptureController.h"
 #include "PadInput.h"
+#include "StretchController.h"
 
 class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
@@ -61,6 +62,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   CaptureController& captureController() { return capture_; }
   // ---- live pads ----
+  StretchController& stretchController() { return stretch_; }
   PadInput& pads() { return pads_; }
   void padTrigger(int note, int velocity, bool on) { pads_.trigger(note, velocity, on); }
   void setRecordArmed(bool armed);
@@ -98,6 +100,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   chopfractal::composition::ProjectSession session_;
   CaptureController capture_{*this};
   PadInput pads_;
+  StretchController stretch_{*this};
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};
