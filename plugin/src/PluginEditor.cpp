@@ -14,7 +14,7 @@ juce::Colour laneColour(int chopIndex) {
 }  // namespace
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor) {
-  setSize(940, 996);
+  setSize(940, 912);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
@@ -1177,10 +1177,18 @@ bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
     return true;
   }
   if (k.getTextCharacter() == 'm' || k.getTextCharacter() == 'M') {
+    auto ids = selectedHits_;
+    if (ids.empty()) ids.push_back(id);
     editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) -> cf::Result<cf::pattern::Pattern> {
-      const cf::Event* ev = cf::pattern::findEvent(p, id);
-      if (!ev) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
-      return cf::pattern::setEventEnabled(p, id, !ev->enabled);
+      cf::pattern::Pattern edited = p;
+      for (const auto hit : ids) {
+        const auto* ev = cf::pattern::findEvent(edited, hit);
+        if (!ev) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
+        auto result = cf::pattern::setEventEnabled(edited, hit, !ev->enabled);
+        if (!result.ok()) return result.error();
+        edited = std::move(result.value());
+      }
+      return edited;
     });
     return true;
   }
