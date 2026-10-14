@@ -112,7 +112,7 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 ## Known gaps
 
 - **Input capture** (F12) is implemented with an input meter and latching clip indicator; there is no Discard-on-Arm confirmation (Arm is disabled until the capture is kept or discarded). Not run in a real DAW.
-- **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
+- **Editor polish:** no marker dragging, snap controls, or detection preview/Merge dialog. (Rule editor, resizable layout, interface scale, Simple/Advanced view and keyboard shortcuts now exist; see roadmap round below.) (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Restoring a reference-only project decodes its audio file on the calling thread (the spec wants a worker thread). Embedded projects avoid file access.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
 - Export runs on the message thread (a few seconds for very long exports); direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
@@ -121,3 +121,13 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 ## Input capture (F12) and audit round 6
 
 New portable module `input_capture` (11 tests, TSan-clean, allocation-free `process`), composition `loadCapturedSource` / `sourceNeedsEmbed` / `sourceData`, plugin `CaptureController` + `CapturePanel`, forced embedding of pathless audio, Undo Keep. Shell tests 31/31 (xvfb), all 36 ctest targets pass, portability and include gates pass.
+
+## Roadmap round (F02-F04, F06, F07, F09-F11, F13-F15) and audit round 7
+
+Built: A/B morph, rule editor (Why?/preview), scenes with armed loop-boundary switching, pad voices + MIDI input + take recording, WSOLA tempo matching (`time_stretch`, no GPL engines), per-chop aux outputs (Main + Out 2-9, stems), input meter/clip, keyboard shortcuts, resizable window, scale 75-200%, Simple/Advanced view, accessibility regions, `describeParam`, F15 build-side (VERSION, BuildInfo, license gate, crash-safe log).
+
+Verified: 19 modules pass the portability and include gates; 40/40 ctest (Release and GCC ASan+UBSan); TSan clean on audio_renderer (42 cases) and input_capture (11); transfer smoke 0 failures; plugin shell tests 51/51 under xvfb; golden hashes unchanged; saved-state modules for new features are absent when unused (old projects byte-identical).
+
+Deviations from specs: parameter manifest is v4 (append-only: `perf_mode`, `perf_velocity_curve`), not v3; new features use independent optional state modules instead of F01's state v2/ProjectExtras; overlay panels instead of F00 panel classes; F04 keeps M=mute (Mutate is G-less: Shift+M, or M with no selection) and Left/Right nudge; clear-all/stretch confirmations use AlertWindow (not exercised headless).
+
+Not built / not run: F00, F01, F05, F08 as specified; F15 signing, notarization, installers, release workflow, About box, notices bundle (need maintainer secrets, see `docs/RELEASING.md`); the official VST3 validator with MIDI input and 9 output buses (could not build locally: gtkmm missing; runs in CI `plugin-linux`); real DAW hosts (`docs/COMPATIBILITY.md`).

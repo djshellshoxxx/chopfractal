@@ -28,7 +28,7 @@ branch you can return to.
 
 | Path | What it is |
 |---|---|
-| `modules/<id>/` | Seventeen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
+| `modules/<id>/` | Nineteen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
 | `composition/` | The headless composition root (`ProjectSession`) that wires the modules together |
 | `plugin/` | The JUCE VST3 shell: thin glue over the composition root (optional build) |
 | `tools/` | Portability checker, doc generator, module transfer script, clean-consumer smoke test, VST3 validator runner |
