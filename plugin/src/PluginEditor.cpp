@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "ControlHelp.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -282,11 +283,35 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   exportLoops_.setTitle("Export loops");
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
+  // Each non-obvious control gets guidance from the catalog, including labels.
+  for (int i = 0; i < getNumChildComponents(); ++i) {
+    auto* component = getChildComponent(i);
+    auto* client = dynamic_cast<juce::SettableTooltipClient*>(component);
+    if (!client) continue;
+    auto name = component->getTitle();
+    if (auto* button = dynamic_cast<juce::Button*>(component)) name = button->getButtonText();
+    if (auto* label = dynamic_cast<juce::Label*>(component)) name = label->getText();
+    const auto help = control_help::forName(name);
+    if (help.isNotEmpty()) client->setTooltip(help);
+  }
   refresh(true);
   startTimerHz(10);
 }
 
 ChopFractalEditor::~ChopFractalEditor() { stopTimer(); }
+
+juce::String ChopFractalEditor::getTooltip() {
+  const auto point = getMouseXYRelative();
+  if (waveArea_.contains(point))
+    return "Source waveform: click a chop to select and audition it; drag across sections to select several. Shift-click adds a marker; Alt-click removes the nearest marker. Drop a sample anywhere to load it.";
+  if (patternArea_.contains(point))
+    return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
+  if (historyArea_.contains(point))
+    return "Variation family tree: click a node to recall it, at the next loop boundary during playback. Right-click for favorite, rename, compare and delete actions. Each Generate, Mutate, Zoom and completed edit adds a branch.";
+  if (orbitArea_.contains(point))
+    return "Orbit view: concentric rings show chop lanes and their rhythmic positions. The moving line is the playhead. Click a hit to select it in the pattern.";
+  return "ChopFractal: load or drop a loop, Detect Chops, Generate and Play. Hover controls for instructions.";
+}
 
 void ChopFractalEditor::addSlider(ParamSlider& s, const char* paramId, const juce::String& title) {
   s.slider.setSliderStyle(juce::Slider::LinearHorizontal);

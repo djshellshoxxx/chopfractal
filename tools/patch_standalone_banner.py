@@ -15,6 +15,7 @@ REPLACEMENTS = [
      'NotificationArea (Button::Listener* settingsButtonListener, std::function<void()> dismiss)'),
     ('                addAndMakeVisible (settingsButton);',
      '                addAndMakeVisible (settingsButton);\n'
+     '                settingsButton.setTooltip ("Open audio device settings and the input mute option.");\n'
      '                dismissButton.onClick = std::move (dismiss);\n'
      '                dismissButton.setTooltip ("Hide this notice. Audio input remains muted.");\n'
      '                addAndMakeVisible (dismissButton);'),

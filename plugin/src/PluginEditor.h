@@ -13,11 +13,12 @@
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
-class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer {
+class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer {
  public:
   explicit ChopFractalEditor(ChopFractalProcessor& processor);
   ~ChopFractalEditor() override;
 
+  juce::String getTooltip() override;
   bool isInterestedInFileDrag(const juce::StringArray& files) override;
   void filesDropped(const juce::StringArray& files, int x, int y) override;
   void paint(juce::Graphics&) override;

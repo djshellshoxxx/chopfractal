@@ -1146,3 +1146,21 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
       (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0, sessions, audioChecks,
       static_cast<unsigned long long>(seed - 1));
 }
+
+CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  ChopFractalEditor editor(p);
+  int controls = 0;
+  for (int i = 0; i < editor.getNumChildComponents(); ++i) {
+    auto* component = editor.getChildComponent(i);
+    if (!(dynamic_cast<juce::Button*>(component) || dynamic_cast<juce::Slider*>(component) ||
+          dynamic_cast<juce::ComboBox*>(component) || dynamic_cast<juce::TextEditor*>(component))) continue;
+    auto* tooltip = dynamic_cast<juce::TooltipClient*>(component);
+    CHECK(tooltip != nullptr);
+    if (tooltip) CHECK(tooltip->getTooltip().length() > 20);
+    ++controls;
+  }
+  CHECK(controls > 35);
+  CHECK(editor.getTooltip().length() > 20);
+}
