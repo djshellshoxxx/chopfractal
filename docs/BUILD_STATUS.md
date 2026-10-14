@@ -12,7 +12,7 @@ Last updated with the implementation pass that added all code (the repository pr
 | 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. **Not done: input capture** (Arm / Capture / Stop / Keep) |
 | 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
 | 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
-| 6 State, presets, export | **State done; presets and WAV export not done** | Save/restore, missing-source recovery, optional embedding. Offline renderer exists and shares the live path, but there is no WAV writer or export UI, and no factory presets |
+| 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
 | 7 Compatibility, optimization, beta | **Not started** | Needs real DAWs, macOS/Windows *plugin* builds (the portable modules already build there), performance thresholds, installers |
 | 8 Release | **Not started** | |
 
@@ -20,7 +20,7 @@ Modular plan: Stages A to D are complete; Stage E (portability and release) is c
 
 ## What exists
 
-Fifteen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
+Sixteen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
 
 | Module | Role | Test cases |
 |---|---|---|
@@ -77,7 +77,7 @@ Defects found and fixed during integration (each now has a test): derived child 
 | Retrigger | expanded into decaying sub-events (x0.8 per hit) when playback is prepared |
 | Preview with stopped transport | audition plays; the generated pattern is silent when the transport is stopped unless Dry/Source is raised |
 | Seed | never an automatable parameter; Generate/Mutate are explicit actions |
-| Automation parameters | `variation_amount`, `density`, `swing`, `pattern_bars`, `dry_mix`, `output_gain_db`, `effect_enable`, `allow_reverse`, `allow_pitch`, `allow_retrigger`; manifest version 2 appends `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity`. IDs are permanent and append-only |
+| Automation parameters | `variation_amount`, `density`, `swing`, `pattern_bars`, `dry_mix`, `output_gain_db`, `effect_enable`, `allow_reverse`, `allow_pitch`, `allow_retrigger`; manifest version 2 appends `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity`; version 3 appends `chaos`. IDs are permanent and append-only |
 | JUCE | 8.0.15 via FetchContent (`-DCHOPFRACTAL_JUCE_DIR` for a local checkout) |
 
 ## Needs your decision
@@ -89,7 +89,13 @@ Defects found and fixed during integration (each now has a test): derived child 
 
 Three independent read-only audits (core logic, audio/export/feature modules, plugin shell and GUI) plus a button-driving GUI test found and fixed: a failed marker edit that wedged the session (now transactional, and zoomed content stranded by a deleted chop is dropped); undo, redo and A/B recall restoring patterns that reference deleted chops; roles lost when a chop is disabled; per-event locks bypassed by bar replacement and bar duplication; signed overflow in event timing; grammar labels that saved but could not be loaded; duplicate marker IDs and a zero id counter in saved state; a history config that could write unreadable state; voice-pool exhaustion hard-cutting a sounding voice, and newest-voice stealing; MIDI decoder accepting invalid tempo, meter, running status and zero-length notes (and a shift-exponent bug); non-atomic WAV overwrite and false clip reports at 0 dB; stale waveform after loading a new source; embed flag, manual tempo not persisted; no Locate Source for a missing audio file; use-after-free risk in menu callbacks; Lock Bar acting on bar 0 with nothing selected; Evolve toggle out of sync with the session; repaint 10 times a second while idle. Each has a regression test.
 
-Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, seed field and motif not persisted, A/B snapshots not saved with the project, export runs on the message thread, no preset menu or meters.
+Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, seed field and motif not persisted, A/B snapshots not saved with the project, export runs on the message thread, no meters.
+
+## Pass 3 (pre-beta)
+
+Four features, specified in `docs/specs/pass3/pass3-features.md`, implemented and tested: **Chaos** macro + Reroll (fun), **MIDI/WAV drag-out** (valuable), **presets** (usable, new module `preset_store`), **direct hit editing** with Shift+click markers/hits, drag move/resize, Delete/M/D keys (the essential missing editor feature). The host manifest is version 3 (`chaos` appended). All golden pattern hashes are unchanged.
+
+Builds: Linux VST3 (validator-checked) and **CLAP** (via clap-juce-extensions, pinned commit) and a **Windows (MSVC) VST3 + CLAP** job in CI that uploads pre-beta artifacts. The Windows plugin is verified only by that CI job; it has not been run in a DAW. CLAP has not been run through clap-validator or a CLAP host.
 
 ## Known gaps
 
@@ -97,5 +103,5 @@ Not fixed (documented): marker trim validation for disabled markers, history tre
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Restoring a reference-only project decodes its audio file on the calling thread (the spec wants a worker thread). Embedded projects avoid file access.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
-- No factory presets. Export runs on the message thread (a few seconds for very long exports); direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
+- Export runs on the message thread (a few seconds for very long exports); direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
 - The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (no motif presets, no export progress bar, fixed Fractal accent decay).

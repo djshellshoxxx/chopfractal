@@ -7,7 +7,9 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
+#include <vector>
 
 #include "chop_test.hpp"
 
@@ -560,4 +562,104 @@ CHOP_TEST(absurd_event_times_and_rule_labels_are_rejected) {
   CHECK(saved.ok());
   ProjectSession t;
   CHECK(t.loadState(saved.value().data(), saved.value().size(), [](const source::SourceInfo&) { return nullptr; }).ok());
+}
+
+// ---- Chaos macro ----
+namespace {
+bool settingsEqual(const pattern::Settings& a, const pattern::Settings& b) {
+  return a.density == b.density && a.variation.phrase == b.variation.phrase && a.variation.bar == b.variation.bar &&
+         a.variation.beat == b.variation.beat && a.variation.event == b.variation.event && a.allowReverse == b.allowReverse &&
+         a.allowPitch == b.allowPitch && a.allowRetrigger == b.allowRetrigger && a.allowFilter == b.allowFilter &&
+         a.allowGlide == b.allowGlide && a.allowCrunch == b.allowCrunch && a.fxIntensity == b.fxIntensity &&
+         a.pitchRange == b.pitchRange && a.maxRetrigger == b.maxRetrigger && a.maxShiftTicks == b.maxShiftTicks && a.swing == b.swing;
+}
+}  // namespace
+
+CHOP_TEST(chaos_zero_and_invalid_values_leave_settings_untouched) {
+  const pattern::Settings base = settings(11, 4);
+  for (double c : {0.0, -1.0, -1e9, std::nan(""), -std::numeric_limits<double>::infinity()}) CHECK(settingsEqual(applyChaos(base, c), base));
+  CHECK(settingsEqual(applyChaos(base, 7.0), applyChaos(base, 1.0)));      // values above 1 clamp
+  CHECK(settingsEqual(applyChaos(base, std::numeric_limits<double>::infinity()), base));  // non-finite is ignored
+}
+
+CHOP_TEST(chaos_is_monotone_valid_and_never_switches_features_off) {
+  Rng rng(99);
+  for (int trial = 0; trial < 200; ++trial) {
+    pattern::Settings b;
+    b.bars = std::vector<int>{1, 2, 4, 8}[rng.uniform(4)];
+    b.density = rng.uniform01();
+    b.variation = {rng.uniform01(), rng.uniform01(), rng.uniform01(), rng.uniform01()};
+    b.swing = rng.uniform01();
+    b.fxIntensity = rng.uniform01();
+    b.pitchRange = static_cast<int>(rng.uniform(25));
+    b.maxRetrigger = 2 + static_cast<int>(rng.uniform(7));
+    b.allowReverse = rng.uniform01() < 0.5;
+    b.allowCrunch = rng.uniform01() < 0.5;
+    b.maxShiftTicks = static_cast<Ticks>(rng.uniform(static_cast<std::uint64_t>(gridTicks(b.grid) / 8 + 1)));
+    CHECK(pattern::validateSettings(b).ok());
+    pattern::Settings prev = b;
+    for (int k = 1; k <= 20; ++k) {
+      const pattern::Settings s = applyChaos(b, k / 20.0);
+      CHECK(pattern::validateSettings(s).ok());
+      CHECK(s.density >= prev.density && s.variation.event >= prev.variation.event && s.variation.bar >= prev.variation.bar &&
+            s.variation.beat >= prev.variation.beat && s.variation.phrase >= prev.variation.phrase && s.fxIntensity >= prev.fxIntensity);
+      CHECK(s.pitchRange >= prev.pitchRange && s.maxRetrigger >= prev.maxRetrigger && s.maxShiftTicks >= prev.maxShiftTicks);
+      CHECK((!prev.allowReverse || s.allowReverse) && (!prev.allowCrunch || s.allowCrunch) && (!prev.allowFilter || s.allowFilter));
+      CHECK(s.swing == b.swing && s.bars == b.bars && s.seed == b.seed);   // everything else is left alone
+      prev = s;
+    }
+  }
+}
+
+CHOP_TEST(chaos_changes_generated_patterns_deterministically_and_comes_from_the_parameter) {
+  ProjectSession a, b, plain;
+  for (ProjectSession* p : {&a, &b, &plain}) CHECK(ready(*p));
+  host::ParamValues pv = host::ParamValues::defaults();
+  const pattern::Settings calm = settingsFromParams(pv, settings(21, 4));
+  pv.set(host::kChaos, 1.0);
+  const pattern::Settings wild = settingsFromParams(pv, settings(21, 4));
+  CHECK(!settingsEqual(calm, wild) && wild.allowCrunch && wild.allowRetrigger && !calm.allowRetrigger);
+  CHECK(a.generate(wild).ok() && b.generate(wild).ok() && plain.generate(calm).ok());
+  CHECK(pattern::serialize(*a.pattern()) == pattern::serialize(*b.pattern()));        // deterministic
+  CHECK(pattern::serialize(*a.pattern()) != pattern::serialize(*plain.pattern()));    // and different from calm
+  CHECK(settingsEqual(calm, settingsFromParams(host::ParamValues::defaults(), settings(21, 4))));  // default param = no chaos
+  int fx = 0, tx = 0;
+  for (const auto& bar : a.pattern()->bars)
+    for (const auto& bt : bar.beats)
+      for (const Event& e : bt.events) {
+        fx += e.fx.active();
+        tx += e.tx.reverse || e.tx.retrigger > 1 || e.tx.pitchSemitones != 0.f;
+      }
+  CHECK(fx > 0 && tx > 0);
+  CHECK(audible(a.renderOffline(render::OfflineSettings{}).value()));
+}
+
+// ---- drag-out bytes (renderMidi / renderWavBytes) ----
+CHOP_TEST(rendered_midi_and_wav_bytes_match_the_exported_files_exactly) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(!s.renderMidi(KitOptions{}).ok() && !s.renderWavBytes(ExportWavOptions{}).ok());   // no pattern yet
+  CHECK(s.generate(settings(14, 2)).ok());
+  const std::string dir = tmpDir("dragbytes");
+  KitOptions k;
+  k.bpm = 133;
+  k.loops = 2;
+  CHECK(s.exportKit(dir, k).ok());
+  auto mid = s.renderMidi(k);
+  CHECK(mid.ok() && mid.value() == readFile(dir + "/chopfractal.mid"));
+  ExportWavOptions o;
+  o.bpm = 133;
+  o.loops = 2;
+  CHECK(s.exportWav(dir + "/x.wav", o).ok());
+  auto wavBytes = s.renderWavBytes(o);
+  CHECK(wavBytes.ok() && wavBytes.value() == readFile(dir + "/x.wav"));
+  KitOptions bad = k;
+  bad.loops = 0;
+  CHECK(!s.renderMidi(bad).ok());
+  bad = k;
+  bad.baseNote = 127;
+  CHECK(!s.renderMidi(bad).ok());
+  ExportWavOptions badw = o;
+  badw.tailSeconds = 99;
+  CHECK(!s.renderWavBytes(badw).ok());
 }

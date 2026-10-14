@@ -15,7 +15,7 @@
 
 namespace chopfractal::host {
 
-constexpr int kManifestVersion = 2;
+constexpr int kManifestVersion = 3;
 
 enum class ParamKind { Float, Choice, Bool };
 
@@ -35,6 +35,7 @@ enum ParamIndex : std::size_t {
   kAllowGlide,
   kAllowCrunch,
   kFxIntensity,
+  kChaos,         // manifest version 3
   kParamCount
 };
 

@@ -1,0 +1,44 @@
+{
+  "id": "preset_store",
+  "name": "Preset store",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::preset_store",
+  "public_headers": [
+    "include/chopfractal/preset_store/presets.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "byte codec, Result/Status"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe. Not real-time safe (allocates).",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/preset_store -B build/preset_store && cmake --build build/preset_store && ctest --test-dir build/preset_store",
+  "summary": "Versioned preset records for generation settings, Fractal Rhythm motif and Evolve cadence: validation, bounded binary (de)serialization with a checksum, six factory presets, and safe file-name derivation. Pure data: files and folders are handled by the plugin shell.",
+  "public_api": [
+    "`validate(Preset)`, `serialize(Preset)`, `deserialize(bytes)`",
+    "`factoryPresets()` (6 validated presets)",
+    "`fileNameFor(name)` -> sanitized `.cfpreset` name"
+  ],
+  "limits": [
+    "Name 1..48 characters; motif 2..8 cells of x, a, .",
+    "Files are small (under 512 bytes); deserialize rejects truncation, trailing bytes, bad magic or checksum, unknown versions"
+  ],
+  "adapters": [
+    "Your app maps a Preset onto its own parameters and UI fields; this module never touches a host or filesystem."
+  ],
+  "adapter_notes": "Presets never contain a seed or a pattern; applying one changes settings only.",
+  "removal": "Delete the folder; callers lose presets only.",
+  "example": "examples/minimal.cpp"
+}

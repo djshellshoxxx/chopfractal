@@ -283,3 +283,25 @@ CHOP_TEST(orbit_playhead_pulse_and_hit_testing) {
   CHECK(!hitTest(v, std::nan(""), 0, R).valid() && !hitTest(v, 1, 1, 0).valid());
   CHECK(!hitTest(OrbitView{}, 10, 10, R).valid());
 }
+
+// ---- direct editing geometry ----
+#include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
+
+CHOP_TEST(hit_edit_geometry_converts_snaps_and_clamps) {
+  CHECK(xToTick(0, 800, 7680) == 0);
+  CHECK(xToTick(400, 800, 7680) == 3840);
+  CHECK(xToTick(799.99, 800, 7680) == 7679);
+  CHECK(xToTick(5000, 800, 7680) == 7679 && xToTick(-50, 800, 7680) == 0);
+  CHECK(xToTick(std::nan(""), 800, 7680) == 0 && xToTick(10, 0, 7680) == 0 && xToTick(10, 800, 0) == 0);
+  CHECK(snapDown(250, 240) == 240 && snapDown(239, 240) == 0 && snapDown(480, 240) == 480);
+  CHECK(snapNearest(119, 240) == 0 && snapNearest(120, 240) == 240 && snapNearest(359, 240) == 240 && snapNearest(360, 240) == 480);
+  CHECK(snapDown(77, 0) == 77 && snapNearest(77, -3) == 77);
+  const auto a = splitTick(3840 + 100, 3840, 2);
+  CHECK(a.bar == 1 && a.startInBar == 100);
+  const auto b = splitTick(99999, 3840, 2);
+  CHECK(b.bar == 1 && b.startInBar == 3839);       // clamped into the last bar
+  CHECK(splitTick(-5, 3840, 2).bar == 0 && splitTick(10, 0, 2).bar == 0);
+  CHECK(laneAtY(0, 100, 4) == 0 && laneAtY(24.9, 100, 4) == 0 && laneAtY(25, 100, 4) == 1 && laneAtY(99.9, 100, 4) == 3);
+  CHECK(laneAtY(500, 100, 4) == 3 && laneAtY(-5, 100, 4) == 0);
+  CHECK(laneAtY(10, 100, 0) == -1 && laneAtY(std::nan(""), 100, 4) == -1 && laneAtY(10, 0, 4) == -1);
+}

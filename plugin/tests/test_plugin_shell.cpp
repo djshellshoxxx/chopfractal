@@ -5,6 +5,7 @@
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -462,6 +463,161 @@ CHOP_TEST(editor_buttons_drive_the_session) {
   for (auto* c : ed->getChildren())
     if (auto* b = dynamic_cast<juce::Button*>(c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
   (void)findCombo;
+}
+
+namespace {
+juce::MouseEvent mouseAt(juce::Component& c, juce::Point<int> p, juce::ModifierKeys mods = {}) {
+  auto src = juce::Desktop::getInstance().getMainMouseSource();
+  return juce::MouseEvent(src, p.toFloat(), mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, juce::Time::getCurrentTime(), p.toFloat(), juce::Time::getCurrentTime(), 1, false);
+}
+std::size_t hitCount(ChopFractalProcessor& p) {
+  std::size_t n = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    if (s.pattern() && s.chops()) {
+      auto f = cf::pattern::flatten(*s.pattern(), *s.chops());
+      if (f.ok()) n = f.value().size();
+    }
+  });
+  return n;
+}
+juce::Point<int> hitPoint(const ChopFractalEditor& ed, const cf::ui::EventRect& r, double fraction = 0.5) {
+  const auto b = ed.patternBounds();
+  const float laneH = static_cast<float>(b.getHeight()) / static_cast<float>(std::max(1, ed.laneCount()));
+  return {b.getX() + static_cast<int>((r.x0 + (r.x1 - r.x0) * fraction) * b.getWidth()), b.getY() + static_cast<int>((static_cast<float>(r.chopIndex) + 0.5f) * laneH)};
+}
+}  // namespace
+
+// Pass 3: chaos reroll, presets, drag-out files, and direct hit editing through real mouse events.
+CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
+  if (!std::getenv("DISPLAY")) return;
+  const juce::File tmp = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_pass3_" + juce::String(juce::Random::getSystemRandom().nextInt()));
+  PresetManager::setFolderOverride(tmp.getChildFile("presets"));
+  dragout::setFolderOverride(tmp.getChildFile("drag"));
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
+    cf::composition::DetectOptions d;
+    d.analysis.sensitivity = 0.8;
+    CHECK(s.applyChops(d).ok());
+  });
+  std::unique_ptr<juce::AudioProcessorEditor> base(p.createEditor());
+  auto* ed = dynamic_cast<ChopFractalEditor*>(base.get());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  ed->setVisible(true);
+  auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(60); };
+  pump();
+
+  // Reroll generates a pattern and moves the seed.
+  ed->doReroll();
+  CHECK(!patternBytes(p).empty());
+  const auto first = patternBytes(p);
+  ed->doReroll();
+  CHECK(patternBytes(p) != first);
+
+  // Presets: factory loads set the controls; a saved user preset round-trips and can be deleted.
+  const auto list = PresetManager::list();
+  CHECK(list.size() >= 6);
+  ed->applyPreset(list[1].preset);
+  CHECK(std::fabs(p.currentParams().get(cf::host::kDensity) - list[1].preset.density) < 0.01);
+  setParam(p, "chaos", 0.8f);
+  ed->savePresetNamed("Test One", false);
+  CHECK(PresetManager::list().size() == list.size() + 1);
+  ed->savePresetNamed("Test One", false);  // refused: exists
+  CHECK(p.statusMessage().contains("already exists"));
+  ed->savePresetNamed("Test One", true);
+  CHECK(PresetManager::list().size() == list.size() + 1);
+  setParam(p, "chaos", 0.0f);
+  const auto after = PresetManager::list();
+  ed->applyPreset(after.back().preset);
+  CHECK(std::fabs(p.currentParams().get(cf::host::kChaos) - 0.8) < 0.01);
+  // A corrupt file in the folder is skipped, not fatal.
+  CHECK(tmp.getChildFile("presets").getChildFile("bad.cfpreset").replaceWithText("garbage"));
+  int skipped = 0;
+  CHECK(PresetManager::list(&skipped).size() == after.size());
+  CHECK(skipped == 1);
+  CHECK(PresetManager::remove(after.back().file).ok());
+  CHECK(!PresetManager::remove(tmp.getChildFile("outside.cfpreset")).ok());
+
+  // Drag-out files are real MIDI / WAV.
+  const juce::File mid = ed->makeDragFile(false);
+  CHECK(mid.existsAsFile());
+  juce::MemoryBlock mb;
+  mid.loadFileAsData(mb);
+  CHECK(mb.getSize() > 14 && std::memcmp(mb.getData(), "MThd", 4) == 0);
+  const juce::File wav = ed->makeDragFile(true);
+  mb.reset();
+  wav.loadFileAsData(mb);
+  CHECK(mb.getSize() > 44 && std::memcmp(mb.getData(), "RIFF", 4) == 0);
+
+  // Direct hit editing with real mouse events.
+  ed->doReroll();
+  pump();
+  const auto before = patternBytes(p);
+  const std::size_t hits = hitCount(p);
+  const cf::ui::EventRect* target = nullptr;
+  for (const auto& r : ed->hitRects())
+    if (r.depth == 0 && !r.locked && (r.x1 - r.x0) * ed->patternBounds().getWidth() > 24) {
+      target = &r;
+      break;
+    }
+  CHECK(target != nullptr);
+  if (!target) return;
+  const cf::EventId tid = target->id;
+  const auto start = hitPoint(*ed, *target, 0.3);
+  ed->mouseDown(mouseAt(*ed, start));
+  CHECK(ed->selectedHit() == tid);
+  ed->mouseDrag(mouseAt(*ed, start + juce::Point<int>(80, 0)));
+  ed->mouseUp(mouseAt(*ed, start + juce::Point<int>(80, 0)));
+  pump();
+  CHECK(patternBytes(p) != before);
+  CHECK(hitCount(p) == hits);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.undo()); });
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(250);  // the editor timer runs at 10 Hz
+  CHECK(patternBytes(p) == before);
+
+  // A tiny movement is a click, not an edit.
+  ed->mouseDown(mouseAt(*ed, start));
+  ed->mouseUp(mouseAt(*ed, start + juce::Point<int>(1, 0)));
+  CHECK(patternBytes(p) == before);
+
+  // Delete removes the selected hit (one undo step), M mutes it.
+  ed->mouseDown(mouseAt(*ed, start));
+  ed->mouseUp(mouseAt(*ed, start));
+  CHECK(ed->keyPressed(juce::KeyPress('m', juce::ModifierKeys(), 'm')));
+  CHECK(patternBytes(p) != before);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.undo()); });
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(250);  // the editor timer runs at 10 Hz
+  ed->mouseDown(mouseAt(*ed, start));
+  CHECK(ed->keyPressed(juce::KeyPress(juce::KeyPress::deleteKey)));
+  CHECK(patternBytes(p) != before);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.undo()); });
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(250);  // the editor timer runs at 10 Hz
+  CHECK(patternBytes(p) == before);
+
+  // Shift-click on an empty cell adds a hit; a plain click there selects nothing and changes nothing.
+  const auto b = ed->patternBounds();
+  bool added = false;
+  for (int lane = 0; lane < ed->laneCount() && !added; ++lane)
+    for (int px = 4; px < b.getWidth() && !added; px += 16) {
+      const double fx = static_cast<double>(px) / b.getWidth();
+      bool covered = false;
+      for (const auto& r : ed->hitRects()) covered = covered || (r.chopIndex == lane && fx >= r.x0 - 0.02 && fx <= r.x1 + 0.02);
+      if (covered) continue;
+      const juce::Point<int> pt(b.getX() + px, b.getY() + static_cast<int>((static_cast<float>(lane) + 0.5f) * b.getHeight() / static_cast<float>(ed->laneCount())));
+      ed->mouseDown(mouseAt(*ed, pt));
+      CHECK(patternBytes(p) == before);
+      ed->mouseUp(mouseAt(*ed, pt));
+      ed->mouseDown(mouseAt(*ed, pt, juce::ModifierKeys(juce::ModifierKeys::shiftModifier)));
+      ed->mouseUp(mouseAt(*ed, pt));
+      pump();
+      added = hitCount(p) == hits + 1;
+    }
+  CHECK(added);
+  tmp.deleteRecursively();
+  PresetManager::setFolderOverride(juce::File());
+  dragout::setFolderOverride(juce::File());
 }
 
 int main() {

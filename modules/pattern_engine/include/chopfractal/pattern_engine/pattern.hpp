@@ -129,6 +129,14 @@ Pattern clearLocks(const Pattern& p);
 Result<Pattern> addEvent(const Pattern& p, int bar, ChopId chop, Ticks startInBar, Ticks duration, const ChopSnapshot& chops);
 Result<Pattern> deleteEvent(const Pattern& p, EventId id);
 Result<Pattern> moveEvent(const Pattern& p, EventId id, int newBar, Ticks newStartInBar);
+// Direct-editing helpers (docs/specs/pass3/_BRIEF.md P4). All refuse locked events/scopes with Blocked.
+// resizeEvent keeps the start and sets a new duration (must stay inside the bar); a resized hit loses its child
+// tree because the child window always equals the parent's duration.
+Result<Pattern> resizeEvent(const Pattern& p, EventId id, Ticks newDuration);
+// Copies a hit (without children, unlocked, user-owned, fresh id) to `newStartInBar` of the same bar; the
+// copy's duration is clipped to the bar end. Counts against the event cap.
+Result<Pattern> duplicateEvent(const Pattern& p, EventId id, Ticks newStartInBar);
+Result<Pattern> setEventEnabled(const Pattern& p, EventId id, bool enabled);  // mute / unmute without deleting
 Result<Pattern> setEventChop(const Pattern& p, EventId id, ChopId chop, const ChopSnapshot& chops);
 Result<Pattern> setEventTransform(const Pattern& p, EventId id, const EventTransform& tx);
 Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx);

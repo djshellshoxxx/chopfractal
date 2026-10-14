@@ -866,3 +866,55 @@ CHOP_TEST(set_bar_events_replaces_a_bar_and_marks_it_user_owned) {
   const Pattern small = gen(chops, tight);
   CHECK(!setBarEvents(small, 0, evs, chops).ok() || eventCount(small) <= 4);
 }
+
+// ---- direct editing: resize, duplicate, mute ----
+CHOP_TEST(resize_duplicate_and_mute_edit_one_hit_and_respect_locks_and_limits) {
+  const auto chops = makeChops();
+  const Pattern p = gen(chops, baseSettings());
+  const Event* e = firstEventOf(p, 0);
+  CHECK(e != nullptr);
+  if (!e) return;
+  const EventId id = e->id;
+  const Ticks barT = barTicks(p.settings);
+
+  auto r = resizeEvent(p, id, 120);
+  CHECK(r.ok() && findEvent(r.value(), id)->duration == 120 && findEvent(r.value(), id)->userOwned);
+  CHECK(findEvent(p, id)->duration != 120 || e->duration == 120);          // the input is untouched
+  CHECK(!resizeEvent(p, id, 0).ok() && !resizeEvent(p, id, -5).ok());
+  CHECK(!resizeEvent(p, id, barT - e->start + 1).ok());                    // would run past the bar
+  CHECK(resizeEvent(p, id, barT - e->start).ok());                         // exactly to the bar end is fine
+  CHECK(!resizeEvent(p, EventId{987654}, 10).ok());
+  CHECK(validate(r.value()).ok());
+
+  const std::size_t before = eventCount(p);
+  auto d = duplicateEvent(p, id, 0);
+  CHECK(d.ok() && eventCount(d.value()) == before + 1 && validate(d.value()).ok());
+  CHECK(!duplicateEvent(p, id, barT).ok() && !duplicateEvent(p, id, -1).ok());
+  auto clipped = duplicateEvent(p, id, barT - 10);
+  CHECK(clipped.ok());
+  if (clipped.ok()) {  // the copy is clipped to the bar end
+    bool found = false;
+    for (const Beat& bt : clipped.value().bars[0].beats)
+      for (const Event& c : bt.events)
+        if (c.id != id && c.start == barT - 10) found = found || c.duration <= 10;
+    CHECK(found);
+  }
+  Settings tight = baseSettings();
+  tight.maxEvents = static_cast<int>(before);
+  Pattern capped = p;
+  capped.settings = tight;
+  CHECK(!duplicateEvent(capped, id, 0).ok());                              // event cap
+
+  auto m = setEventEnabled(p, id, false);
+  CHECK(m.ok() && !findEvent(m.value(), id)->enabled);
+  auto flatBefore = flatten(p, chops), flatAfter = flatten(m.value(), chops);
+  CHECK(flatBefore.ok() && flatAfter.ok() && flatAfter.value().size() + 1 == flatBefore.value().size());
+  CHECK(setEventEnabled(m.value(), id, true).ok());
+
+  auto locked = setLock(p, ScopeRef{ScopeLevel::Event, 0, 0, id}, true);
+  CHECK(locked.ok());
+  CHECK(!resizeEvent(locked.value(), id, 100).ok() && !setEventEnabled(locked.value(), id, false).ok());
+  CHECK(resizeEvent(locked.value(), id, 100).error().code == ErrorCode::Blocked);
+  auto barLocked = setLock(p, ScopeRef{ScopeLevel::Bar, 0, 0, EventId{}}, true);
+  CHECK(barLocked.ok() && !duplicateEvent(barLocked.value(), id, 0).ok());
+}
