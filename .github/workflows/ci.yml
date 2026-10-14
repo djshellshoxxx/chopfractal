@@ -21,6 +21,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 tools/check_modules.py
       - run: python3 tools/gen_module_docs.py --check
+      - run: python3 tools/check_version.py && python3 -m unittest tools/tests/test_check_version.py
+      - name: Release license gate refuses an undecided JUCE license
+        run: '! cmake -S . -B build-gate -DCHOPFRACTAL_RELEASE=ON'
       # Standard headers must be included directly, not inherited from one compiler's library internals.
       - run: python3 tools/check_includes.py
       # Licensing: no GPL/LGPL/commercial stretch engines (docs/specs/roadmap/F14-tempo-match-stretch.md).

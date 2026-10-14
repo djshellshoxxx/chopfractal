@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
 
+#include "Log.h"
+
 #include <chopfractal/plugin_host_adapter/loop_position.hpp>
 
 #include <algorithm>
@@ -37,12 +39,14 @@ ChopFractalProcessor::ChopFractalProcessor()
   session_.attachArmMailbox(&renderer_.armMailbox());
   session_.attachPadMailbox(&renderer_.padMailbox());
   startTimerHz(30);
+  cflog::init();
 }
 
 ChopFractalProcessor::~ChopFractalProcessor() {
   stopTimer();
   stretch_.cancel();  // a stretch in flight must stop before the pool is drained
   loadPool_.removeAllJobs(true, 15000);  // a decode in flight must not outlive the plugin's code
+  cflog::shutdown();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ChopFractalProcessor::createLayout() {

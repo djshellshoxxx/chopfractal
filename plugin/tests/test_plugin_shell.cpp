@@ -11,6 +11,8 @@
 #include <cstring>
 
 #include "PluginEditor.h"
+#include "BuildInfo.h"
+#include "Log.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
 
@@ -2063,4 +2065,36 @@ CHOP_TEST(window_resizes_within_limits_and_simple_view_hides_advanced_controls) 
   CHECK(static_cast<bool>(r.p.apvts.state.getProperty("uiSimple", false)));
   view->setToggleState(false, juce::sendNotificationSync);
   if (fx) CHECK(fx->isVisible());
+}
+
+CHOP_TEST(version_stamp_matches_VERSION_file) {
+  const juce::File f(CHOPFRACTAL_VERSION_FILE);
+  CHECK(f.existsAsFile());
+  CHECK(f.loadFileAsString().trim() == juce::String(buildinfo::kVersionFull));
+  CHECK(juce::String(buildinfo::kVersionFull).startsWith(buildinfo::kVersionNum));
+}
+
+CHOP_TEST(log_files_are_capped_rotated_flushed_and_session_marker_detects_unclean_exit) {
+  const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_log_test_" + juce::String(juce::Random::getSystemRandom().nextInt64()));
+  cflog::setFolderForTesting(dir);
+  cflog::init();
+  const juce::String line(std::string(1000, 'x'));
+  for (int i = 0; i < 3 * 1024 + 100; ++i) cflog::info(line);  // ~3 MiB
+  const auto files = dir.findChildFiles(juce::File::findFiles, false, "chopfractal-*.log");
+  CHECK(files.size() >= 3 && files.size() <= cflog::kMaxFiles);
+  for (const auto& f : files) CHECK(f.getSize() <= cflog::kMaxFileBytes + 1100);
+  CHECK(cflog::tail(5).contains("[INFO]"));  // readable without closing the logger
+  // No clean shutdown: a second init sees the marker.
+  cflog::setFolderForTesting(dir);
+  cflog::init();
+  CHECK(cflog::tail(5).contains("previous session ended unexpectedly"));
+  cflog::shutdown();
+  CHECK(!dir.getChildFile("session.marker").existsAsFile());
+  dir.deleteRecursively();
+  // An unwritable folder never throws.
+  cflog::setFolderForTesting(juce::File("/proc/definitely/not/writable"));
+  cflog::init();
+  cflog::error("ignored");
+  cflog::shutdown();
+  cflog::setFolderForTesting(juce::File());
 }
