@@ -249,6 +249,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   chops_ = chopMap_->snapshot();
   roles_ = roles::RoleMap{};
   rules_ = roles::RuleSet{};  // rules can name chop ids, which restart at 1 for a new source
+  foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -261,6 +262,7 @@ void ProjectSession::clearSource() {
   chops_.reset();
   roles_ = roles::RoleMap{};
   rules_ = roles::RuleSet{};
+  foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -658,6 +660,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     mw.u64(es.startSeed);
   }
   st.modules[kModSession] = {kSessionSchemaVersion, std::move(meta)};
+  for (const auto& kv : foreignModules_) st.modules.emplace(kv.first, kv.second);  // never overwrites a module this build wrote
   auto enc = codec::encode(st);
   if (!enc.ok()) return convert(enc.error());
   return enc.value();
@@ -679,6 +682,10 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     return {};
   };
 
+  std::map<std::string, codec::ModulePayload> foreign;  // anything this build does not know stays attached to the project
+  for (const auto& kv : st.modules)
+    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession)
+      foreign.insert(kv);
   std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes;
   bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
@@ -796,6 +803,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   chops_ = std::move(newChops);
   roles_ = std::move(newRoles.roles);
   rules_ = std::move(newRoles.rules);
+  foreignModules_ = std::move(foreign);
   history_ = std::move(newHistory);
   pendingActivation_ = history::kNoNode;
   patterns_.reset();

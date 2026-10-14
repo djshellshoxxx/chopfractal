@@ -122,8 +122,9 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     freeRunQuarters_ = 0.0;
   }
   const cf::host::LoopPosition lp = cf::host::computeLoopPosition(lpBlock, frames, sr, patternQuarters_.load(std::memory_order_relaxed));
-  if (lp.boundary) boundaryFlag_.store(true, std::memory_order_relaxed);
-  if (lp.midpoint) midpointFlag_.store(true, std::memory_order_relaxed);
+  // Counters, not flags: a fast offline bounce crosses several loop points between two timer ticks.
+  if (lp.boundary) boundaryCount_.fetch_add(1, std::memory_order_relaxed);
+  if (lp.midpoint) midpointCount_.fetch_add(1, std::memory_order_relaxed);
   playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
 }
 
@@ -133,14 +134,21 @@ void ChopFractalProcessor::pollAudioFlags() {
     withSession([](cf::composition::ProjectSession& s) {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
-  if (boundaryFlag_.exchange(false)) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
-  if (midpointFlag_.exchange(false)) {
-    // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins.
+  if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
+  if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
+    // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
+    // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).
     const double chaos = currentParams().get(cf::host::kChaos);
-    withSession([this, chaos](cf::composition::ProjectSession& s) {
-      auto r = s.evolveStep(chaos);
-      if (!r.ok()) setStatusMessage("Evolve: " + juce::String(r.error().message));
-      else if (r.value()) setStatusMessage("Evolve stepped");
+    const std::uint32_t steps = std::min<std::uint32_t>(crossings, 16);
+    withSession([this, chaos, steps](cf::composition::ProjectSession& s) {
+      for (std::uint32_t i = 0; i < steps; ++i) {
+        auto r = s.evolveStep(chaos);
+        if (!r.ok()) {
+          setStatusMessage("Evolve: " + juce::String(r.error().message));
+          break;
+        }
+        if (r.value()) setStatusMessage("Evolve stepped");
+      }
     });
   }
 }

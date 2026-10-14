@@ -164,7 +164,7 @@ Result<int> ProjectSession::acceptRoleSuggestions(const std::vector<insight::Rol
 
 Result<SetupSuggestion> ProjectSession::smartSetup(double hostBpm) {
   if (!sourceData_) return makeError(ErrorCode::InvalidArgument, "load a source first");
-  if (chopMap_->markers().empty()) {  // nothing placed yet: detect (a user's markers are never replaced)
+  {  // detect every time, merging with whatever the user already placed (their markers are never replaced)
     DetectOptions d;
     d.merge = source::MergeMode::Merge;  // keeps any marker the user already placed
     Status st = applyChops(d);
