@@ -121,6 +121,12 @@ inline juce::String forName(const juce::String& name) {
     {"Wrap", "After the last scene continue with the first."},
     {"Stop Scenes", "Stop scene playback and return to your real pattern."},
     {"Close Scenes", "Hide the scene list."},
+    {"Pads", "Show the performance pads: play the chops from the screen or a MIDI keyboard, and record your hits into the pattern."},
+    {"Show the performance pads", "Show the performance pads: play the chops from the screen or a MIDI keyboard, and record your hits into the pattern."},
+    {"Record", "Record pad and MIDI hits into the pattern while the host plays. Hits are quantized and merged at the loop midpoint as one undo step."},
+    {"Record pad hits into the pattern", "Record pad and MIDI hits into the pattern while the host plays. Hits are quantized and merged at the loop midpoint as one undo step."},
+    {"Discard Take", "Throw away the hits recorded since the last merge."},
+    {"Close Pads", "Hide the performance pads."},
     {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},
     {"Load Loop > Detect Chops > Generate > Play", "Start by loading or dropping a loop, detecting chops, generating a pattern, and pressing Play."},
   };

@@ -14,6 +14,7 @@ Everything about the VST3 host boundary that needs no JUCE: the append-only auto
 - Manifest version 2 appends `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity`
 - `computeLoopPosition(TransportBlock, frames, sampleRate, patternQuarters)` -> `{boundary, midpoint, playheadQuarters}`: loop-boundary / loop-midpoint crossing and playhead position for one host block (extracted unchanged from the plugin's processBlock; pure and audio-thread safe)
 - Manifest version 3 appends `chaos` (0..1 macro, default 0 = off)
+- Manifest version 4 appends `perf_mode` (Poly, Mono, Gate) and `perf_velocity_curve` (Linear, Soft, Hard, Fixed) for live pads
 
 Public headers:
 

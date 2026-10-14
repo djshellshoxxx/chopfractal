@@ -27,6 +27,7 @@ const roles::Rule* ruleById(const roles::RuleSet& set, std::uint32_t id) {
 Status ProjectSession::clearRole(ChopId chop) {
   if (!chopMap_ || !chopMap_->find(chop)) return makeError(ErrorCode::NotFound, "unknown chop");
   roles_.clearRole(chop);
+  publishPadBank();
   return {};
 }
 

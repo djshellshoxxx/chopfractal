@@ -100,23 +100,42 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   };
   rulesPanel_ = std::make_unique<RulesPanel>(proc_, hooks);
   addChildComponent(*rulesPanel_);
-  rulesToggle_.onClick = [this] {
+  padPanel_ = std::make_unique<PadPanel>(proc_);
+  addChildComponent(*padPanel_);
+  padsToggle_.setTitle("Show the performance pads");
+  addAndMakeVisible(padsToggle_);
+  // One overlay at a time: opening a panel closes the others.
+  auto showOnly = [this](int which) {
+    if (which != 0) { rulesPanel_->close(); rulesToggle_.setToggleState(false, juce::dontSendNotification); }
+    if (which != 1) { scenePanel_->close(); scenesToggle_.setToggleState(false, juce::dontSendNotification); }
+    if (which != 2) { padPanel_->close(); padsToggle_.setToggleState(false, juce::dontSendNotification); }
+  };
+  rulesToggle_.onClick = [this, showOnly] {
     if (rulesToggle_.getToggleState()) {
-      scenePanel_->close();
-      scenesToggle_.setToggleState(false, juce::dontSendNotification);
+      showOnly(0);
+      rulesToggle_.setToggleState(true, juce::dontSendNotification);
       rulesPanel_->open();
     } else {
       rulesPanel_->close();
+    }
+  };
+  padsToggle_.onClick = [this, showOnly] {
+    if (padsToggle_.getToggleState()) {
+      showOnly(2);
+      padsToggle_.setToggleState(true, juce::dontSendNotification);
+      padPanel_->open();
+    } else {
+      padPanel_->close();
     }
   };
   scenesToggle_.setTitle("Show the scene list");
   addAndMakeVisible(scenesToggle_);
   scenePanel_ = std::make_unique<ScenePanel>(proc_);
   addChildComponent(*scenePanel_);
-  scenesToggle_.onClick = [this] {
+  scenesToggle_.onClick = [this, showOnly] {
     if (scenesToggle_.getToggleState()) {
-      rulesPanel_->close();
-      rulesToggle_.setToggleState(false, juce::dontSendNotification);
+      showOnly(1);
+      scenesToggle_.setToggleState(true, juce::dontSendNotification);
       scenePanel_->open();
     } else {
       scenePanel_->close();
@@ -438,9 +457,10 @@ void ChopFractalEditor::resized() {
   capturePanel_.setBounds(area.removeFromTop(46));
   {
     auto row = area.removeFromTop(28);
-    morphPanel_.setBounds(row.removeFromLeft(row.getWidth() - 180));
-    rulesToggle_.setBounds(row.removeFromLeft(90));
-    scenesToggle_.setBounds(row);
+    morphPanel_.setBounds(row.removeFromLeft(row.getWidth() - 260));
+    rulesToggle_.setBounds(row.removeFromLeft(80));
+    scenesToggle_.setBounds(row.removeFromLeft(90));
+    padsToggle_.setBounds(row);
   }
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
@@ -449,6 +469,7 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   if (rulesPanel_) rulesPanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
+  if (padPanel_) padPanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
   if (scenePanel_) scenePanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));

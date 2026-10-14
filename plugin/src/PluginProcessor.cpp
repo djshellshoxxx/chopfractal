@@ -28,6 +28,7 @@ ChopFractalProcessor::ChopFractalProcessor()
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
   session_.attachArmMailbox(&renderer_.armMailbox());
+  session_.attachPadMailbox(&renderer_.padMailbox());
   startTimerHz(30);
 }
 
@@ -79,7 +80,7 @@ bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
   return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels());
 }
 
-void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
+void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
   const int frames = buffer.getNumSamples();
   const int channels = juce::jmin(2, buffer.getNumChannels());
@@ -129,7 +130,17 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     capture_.engine().process(buffer.getArrayOfReadPointers(), juce::jmin(channels, getTotalNumInputChannels()), frames, ct);
   }
 
-  renderer_.process(tt.block, cf::host::toRenderParams(pv), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
+  // Live pads: MIDI notes and on-screen presses, plus the take being recorded when armed and the host reports a position.
+  cf::render::LiveInput live;
+  {
+    const bool armed = pads_.recordArmed();
+    if (armed && tt.block.playing && !tt.block.positionValid) pads_.noPositionFlag();
+    const double recordPpq = (armed && tt.block.playing && tt.block.positionValid) ? tt.block.ppq : -1.0;
+    live.pads = pads_.collect(midi, frames, recordPpq, tt.block.bpm, sampleRate_.load(std::memory_order_relaxed), live.numPads);
+    live.padParams.mode = static_cast<cf::render::PadMode>(juce::jlimit(0, 2, juce::roundToInt(pv.v[cf::host::kPerfMode])));
+    live.padParams.curve = static_cast<cf::render::VelocityCurve>(juce::jlimit(0, 3, juce::roundToInt(pv.v[cf::host::kPerfVelocityCurve])));
+  }
+  renderer_.process(tt.block, cf::host::toRenderParams(pv), live, buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
@@ -174,6 +185,12 @@ void ChopFractalProcessor::pollAudioFlags() {
       for (std::uint32_t i = 0; i < std::min<std::uint32_t>(crossings, 8); ++i) s.onSceneBoundary(renderer_.appliedSwitchToken());
     });
   }
+  pads_.pollTake();
+  if (pads_.takeBufferWasFull()) setStatusMessage("Take buffer full (4096 hits); extra hits were ignored.");
+  if (pads_.noPositionWhileArmed()) setStatusMessage("Recording needs the host to report its song position.");
+  if (!playingNow && pads_.waitingHits() > 0) flushTake();  // the transport stopped: commit what was played
+  const std::uint32_t midpoints = midpointCount_.load(std::memory_order_relaxed);
+  if (midpoints > 0 && pads_.waitingHits() > 0) flushTake();  // hits land at the loop midpoint so they are not re-triggered in the same pass
   if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
     // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).
@@ -193,6 +210,7 @@ void ChopFractalProcessor::pollAudioFlags() {
 }
 
 void ChopFractalProcessor::syncAudioInfo() {
+  pads_.setChannel(session_.padSettings().midiChannel);
   const auto pb = session_.playback();
   patternQuarters_.store((pb && !pb->passThrough && pb->source && pb->lengthTicks > 0) ? static_cast<double>(pb->lengthTicks) / static_cast<double>(cf::kTicksPerQuarter) : 0.0);
 }
@@ -387,3 +405,45 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
 juce::AudioProcessorEditor* ChopFractalProcessor::createEditor() { return new ChopFractalEditor(*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ChopFractalProcessor(); }
+
+// ---------------------------------------------------------------------------------------------
+// recording pad hits into the pattern
+// ---------------------------------------------------------------------------------------------
+
+void ChopFractalProcessor::setRecordArmed(bool armed) {
+  pads_.setRecordArmed(armed);
+  if (armed) setStatusMessage("Recording armed: start the transport and play the pads.");
+  else flushTake();
+}
+
+void ChopFractalProcessor::discardTake() { pads_.discardTake(); }
+
+void ChopFractalProcessor::flushTake(const char*) {
+  auto hits = pads_.takeHits();
+  if (hits.empty()) return;
+  cf::Result<cf::composition::TakeReport> r = cf::makeError(cf::ErrorCode::InvalidArgument, "nothing recorded");
+  const cf::host::ParamValues pv = currentParams();
+  withSession([&](cf::composition::ProjectSession& s) {
+    cf::composition::TakeOptions o;
+    const auto& ps = s.padSettings();
+    o.quantizeDivision = ps.quantizeDivision;
+    o.triplet = ps.quantizeTriplet;
+    o.merge = ps.merge;
+    o.baseNote = ps.baseNote;
+    o.mode = static_cast<cf::render::PadMode>(juce::jlimit(0, 2, juce::roundToInt(pv.get(cf::host::kPerfMode))));
+    o.curve = static_cast<cf::render::VelocityCurve>(juce::jlimit(0, 3, juce::roundToInt(pv.get(cf::host::kPerfVelocityCurve))));
+    r = s.mergeTake(hits, o);
+  });
+  if (!r.ok()) {
+    setStatusMessage(r.error().message);
+    return;
+  }
+  const auto& t = r.value();
+  juce::String msg = "Recorded " + juce::String(t.added) + (t.added == 1 ? " hit." : " hits.");
+  juce::StringArray skipped;
+  if (t.skippedLocked) skipped.add(juce::String(t.skippedLocked) + " skipped: their beat is locked.");
+  if (t.skippedCap) skipped.add(juce::String(t.skippedCap) + " skipped: the event cap (512) is reached.");
+  if (t.skippedUnmapped) skipped.add(juce::String(t.skippedUnmapped) + " skipped: they matched no chop.");
+  if (skipped.size() > 0) msg += " " + skipped.joinIntoString(" ");
+  setStatusMessage(msg);
+}

@@ -12,6 +12,7 @@
 // real-time safe: no allocation, locks, I/O, or logging. requestPreview() may be called from one
 // non-RT producer thread.
 #include <chopfractal/audio_renderer/mailbox.hpp>
+#include <chopfractal/audio_renderer/pads.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/result.hpp>
 #include <chopfractal/chop_contracts/time.hpp>
@@ -87,16 +88,22 @@ class Renderer {
   void prepare(const Config& config);  // non-RT; allocates all voice and scratch memory
   Mailbox<Playback>& mailbox();
   Mailbox<ArmedSwitch>& armMailbox();
+  Mailbox<PadBank>& padMailbox();  // note -> chop map; publish from non-RT threads
   std::uint64_t appliedSwitchToken() const;  // token of the last armed switch the audio thread applied
 
   // `in` may alias `out`. numChannels is 1 or 2. frames may be 0.
   void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+              int numChannels, int frames);
+  // With live input (pad events sorted by frame, at most kMaxPadEventsPerBlock). The six-argument form is LiveInput{}.
+  void process(const TransportBlock& transport, const RenderParams& params, const LiveInput& live, const float* const* in, float* const* out,
               int numChannels, int frames);
 
   bool requestPreview(const PreviewRequest& request);  // false when the queue is full
   void reset();                                         // RT-safe: silences everything immediately
   int activeVoices() const;                             // sounding + fading voices (preview excluded)
   std::uint64_t droppedTriggers() const;
+  std::uint64_t padUnmapped() const;  // pad notes ignored because they map to nothing
+  int activePadVoices() const;
 
  private:
   struct Impl;

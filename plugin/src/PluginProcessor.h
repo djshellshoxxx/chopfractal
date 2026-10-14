@@ -14,6 +14,7 @@
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 
 #include "CaptureController.h"
+#include "PadInput.h"
 
 class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
@@ -29,7 +30,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   using juce::AudioProcessor::processBlock;
   juce::AudioProcessorEditor* createEditor() override;
   bool hasEditor() const override { return true; }
-  bool acceptsMidi() const override { return false; }
+  bool acceptsMidi() const override { return true; }
   bool producesMidi() const override { return false; }
   bool isMidiEffect() const override { return false; }
   double getTailLengthSeconds() const override { return 0.0; }
@@ -59,6 +60,12 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   CaptureController& captureController() { return capture_; }
+  // ---- live pads ----
+  PadInput& pads() { return pads_; }
+  void padTrigger(int note, int velocity, bool on) { pads_.trigger(note, velocity, on); }
+  void setRecordArmed(bool armed);
+  void discardTake();
+  void flushTake(const char* why = nullptr);  // merges the recorded take into the pattern (one undo step)
   juce::ThreadPool& workerPool() { return loadPool_; }
   double currentSampleRate() const { return sampleRate_.load(std::memory_order_relaxed); }
   juce::String statusMessage() const;
@@ -90,6 +97,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   chopfractal::render::Renderer renderer_;
   chopfractal::composition::ProjectSession session_;
   CaptureController capture_{*this};
+  PadInput pads_;
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};

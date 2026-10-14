@@ -24,6 +24,8 @@ const std::vector<ParamDef>& parameterManifest() {
       {"allow_crunch", "Allow Crunch", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 2, nullptr},
       {"fx_intensity", "Effect Intensity", "%", ParamKind::Float, 0.0, 1.0, 0.5, 0.0, 20.0, 2, nullptr},
       {"chaos", "Chaos", "%", ParamKind::Float, 0.0, 1.0, 0.0, 0.0, 20.0, 3, nullptr},
+      {"perf_mode", "Pad Mode", "", ParamKind::Choice, 0.0, 2.0, 0.0, 1.0, 0.0, 4, "Poly|Mono|Gate"},
+      {"perf_velocity_curve", "Velocity Curve", "", ParamKind::Choice, 0.0, 3.0, 0.0, 1.0, 0.0, 4, "Linear|Soft|Hard|Fixed"},
   };
   return manifest;
 }

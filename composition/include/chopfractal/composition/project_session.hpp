@@ -118,6 +118,37 @@ struct SceneStatus {
   bool waitingForTransport = false;  // scene playback is armed but the host is not playing
 };
 
+// ---- live pads (docs/specs/roadmap/F07-performance-pads.md) ----
+struct PadSettings {
+  std::uint8_t baseNote = 36;        // chop i plays on note baseNote + i
+  std::uint8_t midiChannel = 0;      // 0 = omni, 1..16
+  std::uint8_t quantizeDivision = 16;  // recording grid: 0 off, 4, 8, 16, 32
+  bool quantizeTriplet = false;
+  std::uint8_t merge = 0;            // 0 add to the pattern, 1 replace the slots hit
+  std::map<std::uint64_t, std::uint8_t> chokeOverride;  // chop id -> 0 off, 1..4; absent = default (role "hat" -> 1)
+  friend bool operator==(const PadSettings& a, const PadSettings& b) {
+    return a.baseNote == b.baseNote && a.midiChannel == b.midiChannel && a.quantizeDivision == b.quantizeDivision &&
+           a.quantizeTriplet == b.quantizeTriplet && a.merge == b.merge && a.chokeOverride == b.chokeOverride;
+  }
+};
+struct TakeHit {
+  double ppqOn = 0.0;
+  double ppqOff = -1.0;  // < 0 = no note off seen
+  std::uint8_t note = 0;
+  std::uint8_t velocity = 100;
+};
+struct TakeOptions {
+  int quantizeDivision = 16;
+  bool triplet = false;
+  std::uint8_t merge = 0;
+  render::VelocityCurve curve = render::VelocityCurve::Linear;
+  render::PadMode mode = render::PadMode::Poly;
+  int baseNote = 36;
+};
+struct TakeReport {
+  int added = 0, replaced = 0, skippedLocked = 0, skippedCap = 0, skippedUnmapped = 0, skippedDuplicate = 0;
+};
+
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
@@ -192,6 +223,16 @@ class ProjectSession {
   bool redo();
   Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
+
+  // ---- live pads ----
+  void attachPadMailbox(render::Mailbox<render::PadBank>* mailbox) {
+    padMailbox_ = mailbox;
+    publishPadBank();
+  }
+  Status setPadSettings(const PadSettings& settings);
+  const PadSettings& padSettings() const { return padSettings_; }
+  Status setChokeGroup(ChopId chop, std::uint8_t group);  // 0 off, 1..4
+  Result<TakeReport> mergeTake(const std::vector<TakeHit>& hits, const TakeOptions& options);
 
   // ---- Evolve scenes (docs/specs/roadmap/F09-evolve-scenes.md) ----
   // Scene playback is an override: pattern(), history and undo are never touched while scenes play, and any command
@@ -288,6 +329,7 @@ class ProjectSession {
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
   void endMorph(bool announce);
+  void publishPadBank();
   Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p) const;
   Result<std::shared_ptr<const render::Playback>> buildScenePlayback(const scenes::Scene& scene, pattern::Pattern* out = nullptr) const;
   void stopScenesForEdit(bool announce, bool republishNow);
@@ -321,6 +363,8 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  PadSettings padSettings_;
+  render::Mailbox<render::PadBank>* padMailbox_ = nullptr;
   scenes::SceneList sceneList_;
   scenes::Sequencer sequencer_;
   render::Mailbox<render::ArmedSwitch>* armMailbox_ = nullptr;

@@ -20,6 +20,7 @@ constexpr char kModRoles[] = "chop_roles_grammar";
 constexpr char kModHistory[] = "variation_history";
 constexpr char kModAudio[] = "source_audio";
 constexpr char kModScenes[] = "scenes";
+constexpr char kModPads[] = "pads";
 constexpr char kModSession[] = "composition";
 
 std::vector<const float*> channelPointers(const render::SourceData& d) {
@@ -148,6 +149,7 @@ void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
   if (pb != armedHold_) cancelArm();  // an edit or a loaded project must never be overwritten by a stale armed scene
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
+  publishPadBank();
 }
 
 std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
@@ -243,6 +245,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   stopScenesForEdit(false, false);
   sceneList_ = scenes::SceneList{};
   recordingScenes_ = false;
+  padSettings_.chokeOverride.clear();  // chop ids belong to the old source
   endMorph(true);
   if (!validSource(data)) return makeError(ErrorCode::InvalidArgument, "the audio buffer is empty or malformed");
   source::SourceInfo info;
@@ -273,6 +276,7 @@ void ProjectSession::clearSource() {
   stopScenesForEdit(false, false);
   sceneList_ = scenes::SceneList{};
   recordingScenes_ = false;
+  padSettings_.chokeOverride.clear();  // chop ids belong to the old source
   endMorph(true);
   ruleNotes_.clear();
   sourceData_.reset();
@@ -359,7 +363,9 @@ Status ProjectSession::relinkSource(std::shared_ptr<const render::SourceData> da
 
 Status ProjectSession::assignRole(ChopId chop, const std::string& role) {
   if (!chopMap_ || !chopMap_->find(chop)) return makeError(ErrorCode::NotFound, "unknown chop");
-  return roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  Status st = roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  if (st.ok()) publishPadBank();  // a role can change the default choke group
+  return st;
 }
 
 Status ProjectSession::setRules(roles::RuleSet rules) {
@@ -675,6 +681,21 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     st.modules[kModAudio] = {1, std::move(payload)};
   }
   if (!sceneList_.scenes.empty()) st.modules[kModScenes] = {scenes::kSchemaVersion, scenes::serialize(sceneList_)};  // absent when empty
+  if (!(padSettings_ == PadSettings{})) {  // absent for projects that never touched the pads
+    std::vector<std::uint8_t> pads;
+    bytes::Writer pw(pads);
+    pw.u8(padSettings_.baseNote);
+    pw.u8(padSettings_.midiChannel);
+    pw.u8(padSettings_.quantizeDivision);
+    pw.boolean(padSettings_.quantizeTriplet);
+    pw.u8(padSettings_.merge);
+    pw.u32(static_cast<std::uint32_t>(padSettings_.chokeOverride.size()));
+    for (const auto& kv : padSettings_.chokeOverride) {
+      pw.u64(kv.first);
+      pw.u8(kv.second);
+    }
+    st.modules[kModPads] = {1, std::move(pads)};
+  }
   std::vector<std::uint8_t> meta;
   bytes::Writer mw(meta);
   mw.boolean(embedded);
@@ -716,13 +737,13 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 
   std::map<std::string, codec::ModulePayload> foreign;  // anything this build does not know stays attached to the project
   for (const auto& kv : st.modules)
-    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession && kv.first != kModScenes)
+    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession && kv.first != kModScenes && kv.first != kModPads)
       foreign.insert(kv);
-  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes, sceneBytes;
-  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false, hasScenes = false;
+  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes, sceneBytes, padBytes;
+  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false, hasScenes = false, hasPads = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
                    take(kModRoles, roles::kSchemaVersion, roleBytes, hasRoles), take(kModHistory, history::kSchemaVersion, histBytes, hasHist),
-                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession), take(kModScenes, scenes::kSchemaVersion, sceneBytes, hasScenes)})
+                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession), take(kModScenes, scenes::kSchemaVersion, sceneBytes, hasScenes), take(kModPads, 1, padBytes, hasPads)})
     if (!s.ok()) return s;
 
   // ---- build everything in temporaries; the live session is untouched until all of it validates ----
@@ -832,7 +853,29 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     newScenes = std::move(sl.value());
   }
 
+  PadSettings newPads;
+  if (hasPads) {
+    bytes::Reader pr(padBytes.data(), padBytes.size());
+    newPads.baseNote = pr.u8();
+    newPads.midiChannel = pr.u8();
+    newPads.quantizeDivision = pr.u8();
+    newPads.quantizeTriplet = pr.boolean();
+    newPads.merge = pr.u8();
+    const std::uint32_t n = pr.u32();
+    if (!pr.ok() || n > 256 || newPads.baseNote > 111 || newPads.midiChannel > 16 || newPads.merge > 1 ||
+        !(newPads.quantizeDivision == 0 || newPads.quantizeDivision == 4 || newPads.quantizeDivision == 8 || newPads.quantizeDivision == 16 || newPads.quantizeDivision == 32))
+      return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const std::uint64_t chop = pr.u64();
+      const std::uint8_t group = pr.u8();
+      if (!pr.ok() || group > 4) return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+      newPads.chokeOverride[chop] = group;
+    }
+    if (!pr.ok() || pr.remaining() != 0) return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+  }
+
   // ---- commit ----
+  padSettings_ = std::move(newPads);
   sceneList_ = std::move(newScenes);
   loadedEmbedded_ = loadedFlag;
   if (newEvolve) {

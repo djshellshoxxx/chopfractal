@@ -152,7 +152,7 @@ CHOP_TEST(only_matching_mono_and_stereo_bus_layouts_are_supported) {
   CHECK(p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::mono())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::create5point1(), juce::AudioChannelSet::create5point1())));
-  CHECK(!p.acceptsMidi() && !p.producesMidi() && p.getTailLengthSeconds() == 0.0);
+  CHECK(p.acceptsMidi() && !p.producesMidi() && !p.isMidiEffect() && p.getTailLengthSeconds() == 0.0 && p.getLatencySamples() == 0);
   CHECK(p.getNumPrograms() >= 1 && p.getProgramName(0).isNotEmpty());  // the VST3 validator rejects unnamed programs
 }
 
@@ -1610,4 +1610,206 @@ CHOP_TEST(scene_panel_captures_plays_wraps_and_stops_without_touching_the_patter
   r.p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.clearScenes().ok()); });
   RulesRig::pump(300);
   CHECK_EQ(list->getListBoxModel()->getNumRows(), 0);
+}
+
+namespace {
+// Runs `blocks` blocks of 512 with a host that is playing or not, injecting `midi` into the first block, and
+// returns the left channel. The playhead position continues from `ph.ppq` (unlike run(), which restarts at zero).
+std::vector<float> runMidi(ChopFractalProcessor& p, FakePlayHead& ph, int blocks, const juce::MidiBuffer& first = {}) {
+  p.setPlayHead(&ph);
+  std::vector<float> out;
+  for (int b = 0; b < blocks; ++b) {
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    juce::MidiBuffer midi;
+    if (b == 0) midi = first;
+    p.processBlock(buf, midi);
+    for (int i = 0; i < 512; ++i) out.push_back(buf.getSample(0, i));
+    if (ph.playing) ph.ppq += 512.0 * ph.bpm / (60.0 * 48000.0);
+  }
+  p.setPlayHead(nullptr);
+  return out;
+}
+}  // namespace
+
+CHOP_TEST(midi_note_on_triggers_the_mapped_chop_at_the_event_sample) {
+  for (bool hostPlaying : {false, true}) {
+    ChopFractalProcessor p;
+    prepare(p);
+    makeSession(p);
+    FakePlayHead ph;
+    ph.playing = hostPlaying;
+    ph.ppq = 7.0;  // late in the loop: the pattern itself is quiet here, the pad is what we measure
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 100);
+    const auto silent = runMidi(p, ph, 1);
+    ph.ppq = 7.0;
+    const auto out = runMidi(p, ph, 4, midi);
+    if (!hostPlaying) {
+      CHECK(peak(silent) < 1e-6f);
+      for (int i = 0; i <= 100; ++i) CHECK_NEAR(out[static_cast<std::size_t>(i)], 0.0, 1e-9);
+      CHECK(peak(std::vector<float>(out.begin() + 100, out.begin() + 2000)) > 0.05f);
+    } else {
+      CHECK(peak(out) > 0.0f);
+    }
+  }
+}
+
+CHOP_TEST(midi_channel_filter_gate_all_notes_off_and_bypass) {
+  auto make = [] {
+    auto p = std::make_unique<ChopFractalProcessor>();
+    prepare(*p);
+    makeSession(*p);
+    return p;
+  };
+  FakePlayHead ph;
+  ph.playing = false;
+  {  // channel filter
+    auto p = make();
+    p->withSession([](cf::composition::ProjectSession& s) {
+      cf::composition::PadSettings ps;
+      ps.midiChannel = 2;
+      CHECK(s.setPadSettings(ps).ok());
+    });
+    juce::MidiBuffer ch1, ch2;
+    ch1.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 10);
+    ch2.addEvent(juce::MidiMessage::noteOn(2, 36, static_cast<juce::uint8>(100)), 10);
+    CHECK(peak(runMidi(*p, ph, 3, ch1)) < 1e-6f);
+    CHECK(peak(runMidi(*p, ph, 3, ch2)) > 0.05f);
+  }
+  {  // Gate: note off stops the voice
+    auto p = make();
+    setParam(*p, "perf_mode", 2.f);
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    runMidi(*p, ph, 1, on);
+    juce::MidiBuffer off;
+    off.addEvent(juce::MidiMessage::noteOff(1, 36), 0);
+    const auto tail = runMidi(*p, ph, 3, off);
+    CHECK(peak(std::vector<float>(tail.begin() + 200, tail.end())) < 1e-4f);
+  }
+  {  // CC 123 silences pad voices
+    auto p = make();
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    runMidi(*p, ph, 1, on);
+    juce::MidiBuffer all;
+    all.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+    const auto tail = runMidi(*p, ph, 3, all);
+    CHECK(peak(std::vector<float>(tail.begin() + 200, tail.end())) < 1e-4f);
+  }
+  {  // effect off: MIDI ignored
+    auto p = make();
+    setParam(*p, "effect_enable", 0.f);
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    CHECK(peak(runMidi(*p, ph, 3, on)) < 1e-6f);
+  }
+  {  // on-screen presses reach the audio one block later
+    auto p = make();
+    p->padTrigger(36, 100, true);
+    CHECK(peak(runMidi(*p, ph, 3)) > 0.05f);
+  }
+  {  // more events than a block can carry: dropped and counted, never fatal
+    auto p = make();
+    juce::MidiBuffer many;
+    for (int i = 0; i < 300; ++i) many.addEvent(juce::MidiMessage::noteOn(1, 36 + (i % 8), static_cast<juce::uint8>(90)), i);
+    runMidi(*p, ph, 2, many);
+    CHECK(p->pads().droppedEvents() > 0u);
+  }
+}
+
+CHOP_TEST(recording_a_take_adds_quantized_events_at_the_midpoint_and_flushes_on_disarm) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  FakePlayHead ph;
+  ph.playing = true;
+  ph.ppq = 0.0;
+  p.setRecordArmed(true);
+  CHECK(p.statusMessage().contains("Recording armed"));
+  std::size_t before = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { before = cf::pattern::eventCount(*s.pattern()); });
+  p.setPlayHead(&ph);
+  // Find a free slot (no event of that chop at that tick) so the merge cannot be skipped as a duplicate.
+  int freeChop = -1;
+  int freeStart = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (int chop = 0; chop < 8 && freeChop < 0; ++chop)
+      for (int slot = 2; slot < 12 && freeChop < 0; ++slot) {
+        bool taken = false;
+        for (const auto& bt : s.pattern()->bars[0].beats)
+          for (const auto& e : bt.events) taken = taken || (e.chop == s.chops()->chops[static_cast<std::size_t>(chop)].id && e.start == slot * 240);
+        if (!taken) {
+          freeChop = chop;
+          freeStart = slot * 240;
+        }
+      }
+  });
+  CHECK(freeChop >= 0);
+  const double targetPpq = freeStart / 960.0;
+  juce::MidiBuffer midi;
+  midi.addEvent(juce::MidiMessage::noteOn(1, 36 + freeChop, static_cast<juce::uint8>(100)), 0);
+  bool played = false;
+  for (int b = 0; b < 400; ++b) {  // ppq 0 .. 8.5 (the loop is 8 quarters, the midpoint is ppq 4)
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    juce::MidiBuffer m;
+    if (!played && ph.ppq >= targetPpq) {
+      m = midi;
+      played = true;
+    }
+    p.processBlock(buf, m);
+    ph.ppq += 512.0 * ph.bpm / (60.0 * 48000.0);
+    if (b % 4 == 0) p.pollAudioFlags();
+  }
+  p.setPlayHead(nullptr);
+  CHECK(played);
+  CHECK(p.statusMessage().contains("Recorded 1 hit"));
+  bool found = false;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(cf::pattern::eventCount(*s.pattern()), before + 1);
+    for (const auto& bt : s.pattern()->bars[0].beats)
+      for (const auto& e : bt.events) found = found || (e.userOwned && e.chop == s.chops()->chops[static_cast<std::size_t>(freeChop)].id && e.start == freeStart);
+  });
+  CHECK(found);
+  // Disarming flushes whatever is waiting, and a take with nothing in it changes nothing.
+  p.padTrigger(37, 90, true);
+  p.setRecordArmed(true);
+  runMidi(p, ph, 1);
+  p.setRecordArmed(false);
+  p.setRecordArmed(false);
+}
+
+CHOP_TEST(pad_panel_pads_trigger_and_expose_settings) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.click("Detect Chops");
+  r.click("Generate");
+  r.click("Pads");
+  auto* pad = dynamic_cast<juce::Button*>(findButtonDeep(*r.ed, "Pad 1"));
+  CHECK(pad != nullptr);
+  if (!pad) return;
+  CHECK(pad->isEnabled());
+  pad->setState(juce::Button::buttonDown);
+  RulesRig::pump();
+  FakePlayHead ph;
+  ph.playing = false;
+  CHECK(peak(runMidi(r.p, ph, 4)) > 0.05f);
+  pad->setState(juce::Button::buttonNormal);
+  RulesRig::pump();
+  CHECK(findByTitle<juce::ComboBox>(*r.ed, "Pad mode") != nullptr);
+  CHECK(findByTitle<juce::ComboBox>(*r.ed, "Velocity curve") != nullptr);
+  auto* base = findByTitle<juce::Slider>(*r.ed, "Base note");
+  CHECK(base != nullptr);
+  if (base) {
+    base->setValue(48, juce::sendNotificationSync);
+    RulesRig::pump();
+    int note = 0;
+    r.p.withSession([&](cf::composition::ProjectSession& s) { note = s.padSettings().baseNote; });
+    CHECK_EQ(note, 48);
+  }
+  r.click("Close Pads", true);
 }
