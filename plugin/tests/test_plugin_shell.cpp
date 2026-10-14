@@ -1003,3 +1003,35 @@ CHOP_TEST(editor_accepts_dropped_audio_and_rejects_unrelated_files) {
   editor.filesDropped(juce::StringArray{"/tmp/readme.txt"}, 0, 0);
   CHECK(p.statusMessage().containsIgnoreCase("drop an audio"));
 }
+
+CHOP_TEST(dropped_wav_is_loaded_by_the_async_source_loader) {
+  if (!haveDisplay()) return;
+  const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+      .getNonexistentChildFile("cf_drop", ".wav");
+  juce::WavAudioFormat format;
+  auto stream = file.createOutputStream();
+  CHECK(stream != nullptr);
+  if (!stream) return;
+  std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), 48000, 1, 16, {}, 0));
+  CHECK(writer != nullptr);
+  if (!writer) return;
+  stream.release();
+  juce::AudioBuffer<float> samples(1, 4800);
+  for (int i = 0; i < samples.getNumSamples(); ++i) samples.setSample(0, i, 0.4f * std::sin(0.05f * i));
+  CHECK(writer->writeFromAudioSampleBuffer(samples, 0, samples.getNumSamples()));
+  writer.reset();
+  {
+    ChopFractalProcessor p;
+    ChopFractalEditor editor(p);
+    editor.filesDropped(juce::StringArray{file.getFullPathName()}, 10, 10);
+    bool loaded = false;
+    for (int i = 0; i < 100 && !loaded; ++i) {
+      juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+      p.withSession([&](cf::composition::ProjectSession& s) {
+        loaded = s.playback() && s.playback()->source && s.playback()->source->frames == 4800;
+      });
+    }
+    CHECK(loaded);
+  }
+  file.deleteFile();
+}

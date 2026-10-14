@@ -972,6 +972,8 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
   } else if (patternArea_.contains(pt)) {
     grabKeyboardFocus();
     selected_ = cf::EventId{};
+    selectedHits_.clear();
+    selectedChops_.clear();
     dragMode_ = DragMode::None;
     const double w = static_cast<double>(patternArea_.getWidth());
     const double fx = static_cast<double>(pt.x - patternArea_.getX()) / w;
@@ -1156,7 +1158,17 @@ bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
     return true;
   }
   if (k == juce::KeyPress::deleteKey || k == juce::KeyPress::backspaceKey) {
-    editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) { return cf::pattern::deleteEvent(p, id); });
+    auto ids = selectedHits_;
+    if (ids.empty()) ids.push_back(id);
+    editSelected([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) -> cf::Result<cf::pattern::Pattern> {
+      cf::pattern::Pattern edited = p;
+      for (const auto hit : ids) {
+        auto result = cf::pattern::deleteEvent(edited, hit);
+        if (!result.ok()) return result.error();
+        edited = std::move(result.value());
+      }
+      return edited;  // session commits all selected deletions as one undoable edit
+    });
     return true;
   }
   if (k.getTextCharacter() == 'm' || k.getTextCharacter() == 'M') {
