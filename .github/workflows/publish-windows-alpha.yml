@@ -1,9 +1,9 @@
 name: Publish Windows alpha
 
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/publish-windows-alpha.yml]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -16,13 +16,14 @@ concurrency:
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == '194f48f5e4a98c40f9593de0d6a32557c8ea659a' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: "38510702415"
-      BUILD_SHA: "103c612dd7be1916a507ff60f1802210c566d21d"
+      BUILD_RUN: "38510771672"
+      BUILD_SHA: "194f48f5e4a98c40f9593de0d6a32557c8ea659a"
       RELEASE_TAG: v0.1.0-alpha.2
     steps:
       - name: Verify the tested build
@@ -47,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Windows x64 alpha 2, built from commit 103c612dd7be1916a507ff60f1802210c566d21d.
+          Windows x64 alpha 2, built from commit 194f48f5e4a98c40f9593de0d6a32557c8ea659a.
 
           Fixes and usability changes:
           - Green Play and red Stop: local pattern playback works in the standalone app without a DAW and restarts from the beginning.
