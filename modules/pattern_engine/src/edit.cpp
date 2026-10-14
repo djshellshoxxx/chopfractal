@@ -121,7 +121,7 @@ Result<FlatEventList> flatten(const Pattern& p, const ChopSnapshot& chops) {
   FlattenLimits lim;
   lim.maxEvents = static_cast<std::size_t>(p.settings.maxEvents);
   const Ticks barT = barTicks(p.settings);
-  const std::uint64_t probSeed = hashCombine(p.settings.seed, 0x50524F42ull);
+  const std::uint64_t probSeed = probabilitySeedFor(p.settings.seed);
   for (std::size_t b = 0; b < p.bars.size(); ++b)
     for (const Beat& bt : p.bars[b].beats) {
       Status s = flattenInto(out, bt.events, static_cast<Ticks>(b) * barT, barT, {}, chops, lim, probSeed);
@@ -517,6 +517,28 @@ Pattern sanitize(const Pattern& p, const ChopSnapshot& chops) {
       }
       bt.events = std::move(kept);
     }
+  return q;
+}
+
+namespace {
+std::vector<Event> mapEvents(const std::vector<Event>& events, const std::function<SampleRange(SampleRange)>& fn) {
+  std::vector<Event> out = events;
+  for (Event& e : out) {
+    if (!e.region.empty()) e.region = fn(e.region);
+    if (e.child) {
+      auto child = std::make_shared<NestedPattern>(*e.child);
+      child->events = mapEvents(e.child->events, fn);
+      e.child = std::move(child);
+    }
+  }
+  return out;
+}
+}  // namespace
+
+Pattern mapRegions(const Pattern& p, const std::function<SampleRange(SampleRange)>& fn) {
+  Pattern q = p;
+  for (Bar& bar : q.bars)
+    for (Beat& bt : bar.beats) bt.events = mapEvents(bt.events, fn);
   return q;
 }
 

@@ -99,6 +99,9 @@ class RoleMap {
 // Static checks; contradictory rules are Warnings (the engine keeps the previous valid event at run time).
 ValidationReport validateRules(const RuleSet& rules, const RoleMap* roles = nullptr);
 
+// Plain-English one-line description of a rule, e.g. "Forbid hat in bars 3-4". Deterministic, at most ~200 chars.
+std::string describe(const Rule& r);
+
 class GrammarPolicy : public ICandidatePolicy {
  public:
   // `chops` are the candidate chops in a stable order; role -> chop resolution takes the first match.
@@ -106,6 +109,8 @@ class GrammarPolicy : public ICandidatePolicy {
 
   Decision evaluate(const CandidateQuery& q) const override;
   bool isPreserved(const CandidateQuery& q) const override;
+  // Id of the first enabled Preserve rule (file order) that protects this query, else 0.
+  std::uint32_t preservingRule(const CandidateQuery& q) const;
   std::vector<Requirement> required(const ScopeContext& scope, const std::vector<ChopId>& placedInScope) const override;
 
   // Human-readable "why this stayed / changed" text agreeing with the actual decision.

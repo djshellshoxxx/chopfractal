@@ -35,6 +35,7 @@ class PatternSession {
   Status storeSnapshot(std::size_t slot);
   Status recallSnapshot(std::size_t slot);  // undoable
   bool hasSnapshot(std::size_t slot) const { return slot < 2 && slots_[slot] != nullptr; }
+  std::shared_ptr<const Pattern> snapshot(std::size_t slot) const { return slot < 2 ? slots_[slot] : nullptr; }
 
  private:
   SnapshotStack<std::shared_ptr<const Pattern>> history_;

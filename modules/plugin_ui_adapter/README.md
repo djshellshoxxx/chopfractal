@@ -12,6 +12,7 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`
 - `layoutHistoryTree()`
 - `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
+- `RuleEditorModel` (draft rules: add, templates, duplicate, remove, update, rows in engine order, issues)
 - `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
 
 Public headers:
@@ -35,6 +36,7 @@ Public headers:
 - `source_chop` ^0.1 — marker views read the chop map
 - `pattern_engine` ^0.1 — pattern views read the pattern tree
 - `variation_history` ^0.1 — the tree layout reads node summaries
+- `chop_roles_grammar` ^0.1 — the rule editor model drafts, validates and describes rules
 
 ## Build and test
 

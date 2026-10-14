@@ -1,5 +1,7 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+#include <functional>
+#include <string>
 #include <algorithm>
 #include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
@@ -9,6 +11,8 @@
 #include <cstring>
 
 #include "PluginEditor.h"
+#include "BuildInfo.h"
+#include "Log.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
 
@@ -78,7 +82,7 @@ void prepare(ChopFractalProcessor& p, int block = 512) {
 
 void makeSession(ChopFractalProcessor& p, std::uint64_t seed = 42) {
   p.withSession([&](cf::composition::ProjectSession& s) {
-    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
+    CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok());
     cf::composition::DetectOptions d;
     d.analysis.sensitivity = 0.8;
     CHECK(s.applyChops(d).ok());
@@ -150,7 +154,20 @@ CHOP_TEST(only_matching_mono_and_stereo_bus_layouts_are_supported) {
   CHECK(p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::mono())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::create5point1(), juce::AudioChannelSet::create5point1())));
-  CHECK(!p.acceptsMidi() && !p.producesMidi() && p.getTailLengthSeconds() == 0.0);
+  {  // optional aux outputs: stereo main plus stereo "Out 2" is fine, a mono main with an aux output is not
+    auto withAux = [&](juce::AudioChannelSet main, juce::AudioChannelSet aux, juce::AudioChannelSet in) {
+      auto l = layout(in, main);
+      l.outputBuses.add(aux);
+      return l;
+    };
+    CHECK(p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo())));
+    CHECK(!p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo(), juce::AudioChannelSet::mono())));
+    CHECK(!p.isBusesLayoutSupported(withAux(juce::AudioChannelSet::stereo(), juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
+    CHECK_EQ(p.getBusCount(false), 9);  // Main + eight optional outputs, the extras disabled by default
+    CHECK(!p.getBus(false, 1)->isEnabled());
+    CHECK_EQ(p.activeAuxBuses(), 0);
+  }
+  CHECK(p.acceptsMidi() && !p.producesMidi() && !p.isMidiEffect() && p.getTailLengthSeconds() == 0.0 && p.getLatencySamples() == 0);
   CHECK(p.getNumPrograms() >= 1 && p.getProgramName(0).isNotEmpty());  // the VST3 validator rejects unnamed programs
 }
 
@@ -1182,4 +1199,902 @@ CHOP_TEST(local_preview_can_return_to_the_daw_transport) {
   host.playing = false;
   const auto stopped = run(p, host, 40);
   CHECK(peak(std::vector<float>(stopped.end() - 4096, stopped.end())) < 1e-6f);
+}
+
+namespace {
+namespace capt = chopfractal::capture;
+
+// Records `blocks` blocks of the test sine in Free mode and leaves the engine in Captured.
+void recordFree(ChopFractalProcessor& p, FakePlayHead& ph, int blocks) {
+  auto& cc = p.captureController();
+  CHECK(cc.arm(capt::CaptureMode::Free, 4, 30.0).isEmpty());
+  CHECK(cc.engine().status().state == capt::CaptureState::Armed);
+  CHECK(cc.start().isEmpty());
+  run(p, ph, blocks, 512, 0.5f);
+  cc.engine().requestStop();
+  run(p, ph, 1, 512, 0.5f);
+  CHECK(cc.engine().status().state == capt::CaptureState::Captured);
+}
+
+bool waitForStatus(ChopFractalProcessor& p, const char* text) {
+  for (int i = 0; i < 100 && !p.statusMessage().contains(text); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+  return p.statusMessage().contains(text);
+}
+}  // namespace
+
+CHOP_TEST(capture_flow_through_the_real_processor_keeps_input_and_embeds_it) {
+  ChopFractalProcessor p;
+  prepare(p);
+  FakePlayHead ph;
+  recordFree(p, ph, 100);
+  CHECK_EQ(p.captureController().engine().status().framesCaptured, 51200);
+  p.captureController().keepAsync(true);
+  CHECK(waitForStatus(p, "Captured audio is saved"));
+  bool has = false, needs = false;
+  std::shared_ptr<const cf::render::SourceData> data;
+  std::string name;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    has = s.hasSource();
+    needs = s.sourceNeedsEmbed();
+    data = s.sourceData();
+    if (has) name = s.chopMap()->info().name;
+  });
+  CHECK(has && needs && data);
+  CHECK(name.rfind("Capture ", 0) == 0);
+  CHECK(p.embedSource.load());
+  CHECK_EQ(data->frames, 51200);
+  CHECK_EQ(data->channels, 2);
+  CHECK_NEAR(data->samples[100], 0.5f * std::sin(0.05f * 100.f), 1e-6);  // the input, not the rendered output
+  juce::MemoryBlock saved;
+  p.getStateInformation(saved);
+  ChopFractalProcessor q;
+  q.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  q.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.hasSource() && !s.sourceMissing());
+    CHECK_EQ(s.chopMap()->info().frames, 51200);
+  });
+}
+
+CHOP_TEST(capture_undo_keep_restores_previous_source) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  FakePlayHead ph;
+  std::size_t markers = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { markers = s.chopMap()->markers().size(); });
+  recordFree(p, ph, 40);
+  p.captureController().keepAsync(false);
+  CHECK(waitForStatus(p, "Captured audio is saved"));
+  CHECK(p.captureController().canUndoKeep());
+  CHECK(p.captureController().undoKeep());
+  CHECK(!p.captureController().canUndoKeep());
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(s.chopMap()->info().frames, 96000);
+    CHECK_EQ(s.chopMap()->markers().size(), markers);
+    CHECK(!s.sourceNeedsEmbed() || s.chopMap()->info().path.empty());
+  });
+}
+
+CHOP_TEST(capture_is_refused_offline_and_idle_capture_leaves_audio_untouched) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.setNonRealtime(true);
+  CHECK(p.captureController().arm(capt::CaptureMode::Free, 4, 30.0).contains("offline render"));
+  p.setNonRealtime(false);
+  CHECK(p.captureController().engine().status().state == capt::CaptureState::Idle);
+  ChopFractalProcessor q;
+  prepare(q);
+  CHECK(q.captureController().engine().status().capacityFrames == 0);  // no memory held while idle
+}
+
+CHOP_TEST(capture_panel_meter_shows_level_and_latches_clipping) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  ChopFractalEditor editor(p);
+  FakePlayHead ph;
+  auto& cc = p.captureController();
+  CHECK(cc.arm(capt::CaptureMode::Free, 4, 30.0).isEmpty());
+  run(p, ph, 4, 512, 0.5f);  // armed: metering without recording
+  CHECK_NEAR(cc.engine().takeRecentPeak(), 0.5f, 0.01);
+  CHECK_EQ(cc.engine().status().clippedSamples, 0u);
+  CHECK(cc.start().isEmpty());
+  run(p, ph, 4, 512, 1.0f);  // full-scale sine reaches the clip threshold
+  CHECK(cc.engine().status().clippedSamples > 0);
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
+  CHECK(editor.getTooltip().isNotEmpty());
+}
+
+namespace {
+juce::Button* findButtonDeep(juce::Component& root, const juce::String& text) {
+  if (auto* b = dynamic_cast<juce::Button*>(&root))
+    if (b->getButtonText() == text) return b;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findButtonDeep(*root.getChildComponent(i), text)) return f;
+  return nullptr;
+}
+juce::Slider* findSliderByTitle(juce::Component& root, const juce::String& title) {
+  if (auto* s = dynamic_cast<juce::Slider*>(&root))
+    if (s->getTitle() == title) return s;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findSliderByTitle(*root.getChildComponent(i), title)) return f;
+  return nullptr;
+}
+}  // namespace
+
+CHOP_TEST(morph_controls_enable_with_both_slots_and_commit_adds_a_node) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok()); });
+  std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  ed->setVisible(true);
+  auto pump = [](int ms = 120) { juce::MessageManager::getInstance()->runDispatchLoopUntil(ms); };
+  auto click = [&](const char* text) {
+    juce::Button* b = findButtonDeep(*ed, text);
+    CHECK(b != nullptr);
+    if (b && b->isEnabled()) b->triggerClick();
+    pump();
+  };
+  auto nodes = [&] {
+    std::size_t n = 0;
+    p.withSession([&](cf::composition::ProjectSession& s) { n = s.history().size(); });
+    return n;
+  };
+  auto active = [&] {
+    bool a = false;
+    p.withSession([&](cf::composition::ProjectSession& s) { a = s.morphActive(); });
+    return a;
+  };
+  click("Detect Chops");
+  click("Generate");
+  click("Store A");
+  click("Mutate");
+  click("Store B");
+  pump(200);
+  auto* toggle = dynamic_cast<juce::ToggleButton*>(findButtonDeep(*ed, "Morph"));
+  auto* slider = findSliderByTitle(*ed, "Morph amount");
+  CHECK(toggle != nullptr && slider != nullptr);
+  if (!toggle || !slider) return;
+  CHECK(toggle->isEnabled());
+  CHECK(!slider->isEnabled());
+  toggle->setToggleState(true, juce::sendNotificationSync);
+  pump();
+  CHECK(active());
+  CHECK(p.statusMessage().contains("Morphing 50% toward B"));
+  slider->setValue(0.25, juce::sendNotificationSync);
+  pump(250);
+  double amount = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { amount = s.morphAmount(); });
+  CHECK_NEAR(amount, 0.25, 0.005);
+  const std::size_t before = nodes();
+  const auto pre = patternBytes(p);
+  click("Commit Morph");
+  CHECK(!active());
+  CHECK_EQ(nodes(), before + 1);
+  click("Undo");
+  CHECK(patternBytes(p) == pre);
+  toggle->setToggleState(true, juce::sendNotificationSync);
+  pump();
+  CHECK(active());
+  click("Cancel Morph");
+  CHECK(!active());
+  CHECK(patternBytes(p) == pre);
+  CHECK(p.statusMessage().contains("Morph cancelled; your pattern is unchanged."));
+}
+
+namespace {
+template <class T>
+T* findByTitle(juce::Component& root, const juce::String& title) {
+  if (auto* c = dynamic_cast<T*>(&root))
+    if (c->getTitle() == title) return c;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findByTitle<T>(*root.getChildComponent(i), title)) return f;
+  return nullptr;
+}
+
+struct RulesRig {
+  ChopFractalProcessor p;
+  std::unique_ptr<juce::AudioProcessorEditor> ed;
+  RulesPanel* panel = nullptr;
+  RulesRig() {
+    prepare(p);
+    p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok()); });
+    ed.reset(p.createEditor());
+    if (!ed) return;
+    ed->setVisible(true);
+    for (int i = 0; i < ed->getNumChildComponents(); ++i)
+      if (auto* r = dynamic_cast<RulesPanel*>(ed->getChildComponent(i))) panel = r;
+    pump();
+  }
+  static void pump(int ms = 100) { juce::MessageManager::getInstance()->runDispatchLoopUntil(ms); }
+  void click(const char* text, bool deep = false) {
+    juce::Button* b = deep ? findButtonDeep(*ed, text) : findButton(*ed, text);
+    CHECK(b != nullptr);
+    if (b && b->isEnabled()) b->triggerClick();
+    pump();
+  }
+  void detectAndRoles() {
+    click("Detect Chops");
+    p.withSession([&](cf::composition::ProjectSession& s) {
+      const auto& c = s.chops()->chops;
+      for (std::size_t i = 0; i < c.size(); ++i) s.assignRole(c[i].id, i == 0 ? "kick" : (i == 1 ? "hat" : "snare"));
+    });
+  }
+};
+}  // namespace
+
+CHOP_TEST(rules_panel_template_apply_and_generate) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Rules");
+  CHECK(r.panel->isVisible());
+  findByTitle<juce::ComboBox>(*r.panel, "Template role")->setText("hat", juce::sendNotificationSync);
+  findByTitle<juce::TextEditor>(*r.panel, "Template bar from")->setText("1", true);
+  findByTitle<juce::TextEditor>(*r.panel, "Template bar to")->setText("2", true);
+  r.click("Exclude from bars", true);
+  CHECK_EQ(r.panel->model().rows().size(), 1u);
+  CHECK(r.panel->hasUnapplied());
+  r.click("Apply", true);
+  cf::roles::RuleSet rs;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { rs = s.rules(); });
+  CHECK_EQ(rs.rules.size(), 1u);
+  if (rs.rules.size() == 1) {
+    CHECK(rs.rules[0].action.kind == cf::roles::ActionKind::Forbid);
+    CHECK(rs.rules[0].when.role == "hat");
+    CHECK_EQ(rs.rules[0].when.barMin, 0);
+    CHECK_EQ(rs.rules[0].when.barMax, 1);
+  }
+  CHECK(r.p.statusMessage().contains("Rules applied."));
+  CHECK(!r.panel->hasUnapplied());
+  r.click("Generate");
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    const cf::ChopId hat = s.chops()->chops[1].id;
+    for (std::size_t b = 0; b < 2 && b < s.pattern()->bars.size(); ++b)
+      for (const auto& bt : s.pattern()->bars[b].beats)
+        for (const auto& e : bt.events) CHECK(e.chop != hat);
+  });
+  r.click("Test Rules", true);
+  CHECK(r.p.statusMessage().startsWith("Test"));
+  r.click("Close", true);
+  CHECK(!r.panel->isVisible());
+}
+
+CHOP_TEST(rules_panel_invalid_rule_blocks_apply_and_revert_restores) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Rules");
+  r.click("Add Rule", true);
+  CHECK_EQ(r.panel->model().rows().size(), 1u);
+  findByTitle<juce::ComboBox>(*r.panel, "Action")->setSelectedId(5, juce::sendNotificationSync);  // Limit count per bar
+  findByTitle<juce::TextEditor>(*r.panel, "Count")->setText("0", true);
+  RulesRig::pump();
+  bool error = false;
+  for (const auto& i : r.panel->model().issues()) error |= i.error;
+  CHECK(error);
+  CHECK(!findButtonDeep(*r.ed, "Apply")->isEnabled());
+  CHECK(findButtonDeep(*r.ed, "Apply")->getTooltip().isNotEmpty());
+  r.click("Revert", true);
+  CHECK_EQ(r.panel->model().rows().size(), 0u);
+  bool empty = false;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { empty = s.rules().rules.empty(); });
+  CHECK(empty);
+}
+
+CHOP_TEST(rules_panel_why_explains_the_selected_hit) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Generate");
+  r.click("Rules");
+  r.click("Why?", true);
+  CHECK(r.p.statusMessage().contains("Select a hit first; Why? explains that hit."));
+  auto* editor = dynamic_cast<ChopFractalEditor*>(r.ed.get());
+  CHECK(editor != nullptr);
+  cf::EventId first;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& bt : s.pattern()->bars[0].beats)
+      if (!bt.events.empty() && !first.valid()) first = bt.events.front().id;
+  });
+  CHECK(first.valid());
+  editor->setSelectedHits({first});
+  r.click("Why?", true);
+  CHECK(r.p.statusMessage().contains("rule") || r.p.statusMessage().contains("nothing constrains"));
+}
+
+CHOP_TEST(rules_panel_roles_tab_assigns_and_clears_and_controls_are_titled) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.click("Detect Chops");
+  r.click("Rules");
+  r.click("Roles", true);
+  auto* list = findByTitle<juce::ListBox>(*r.panel, "Chop roles");
+  CHECK(list != nullptr);
+  if (!list) return;
+  list->selectRow(1);
+  RulesRig::pump();
+  auto* combo = findByTitle<juce::ComboBox>(*r.panel, "Role for the selected chop");
+  CHECK(combo != nullptr);
+  if (!combo) return;
+  combo->setText("snare", juce::sendNotificationSync);
+  RulesRig::pump();
+  cf::ChopId chop;
+  std::string role;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    chop = s.chops()->chops[1].id;
+    role = s.roleMap().roleOf(chop);
+  });
+  CHECK(role == "snare");
+  list->selectRow(1);
+  combo->setText("(none)", juce::sendNotificationSync);
+  RulesRig::pump();
+  r.p.withSession([&](cf::composition::ProjectSession& s) { role = s.roleMap().roleOf(chop); });
+  CHECK(role.empty());
+  // every interactive control in the panel has an accessible name
+  std::function<void(juce::Component&)> check = [&](juce::Component& c) {
+    if (auto* b = dynamic_cast<juce::Button*>(&c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
+    if (dynamic_cast<juce::ComboBox*>(&c) || dynamic_cast<juce::Slider*>(&c) || dynamic_cast<juce::TextEditor*>(&c)) {
+      if (c.getParentComponent() == r.panel) CHECK(c.getTitle().isNotEmpty());
+    }
+    for (int i = 0; i < c.getNumChildComponents(); ++i) check(*c.getChildComponent(i));
+  };
+  check(*r.panel);
+}
+
+CHOP_TEST(scene_panel_captures_plays_wraps_and_stops_without_touching_the_pattern) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.click("Detect Chops");
+  r.click("Generate");
+  r.click("Scenes");
+  r.click("Capture Scene", true);
+  r.click("Mutate");
+  r.click("Capture Scene", true);
+  auto* list = findByTitle<juce::ListBox>(*r.ed, "Scene list");
+  CHECK(list != nullptr);
+  if (!list) return;
+  CHECK_EQ(list->getListBoxModel()->getNumRows(), 2);
+  auto* loops = findByTitle<juce::Slider>(*r.ed, "Scene loops");
+  CHECK(loops != nullptr);
+  for (int row = 0; row < 2; ++row) {
+    list->selectRow(row);
+    RulesRig::pump();
+    loops->setValue(1, juce::sendNotificationSync);
+    RulesRig::pump();
+  }
+  std::vector<cf::scenes::SceneId> ids;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& sc : s.sceneList().scenes) {
+      ids.push_back(sc.id);
+      CHECK_EQ(sc.loops, 1);
+    }
+  });
+  list->selectRow(0);  // play from the first scene
+  RulesRig::pump();
+  const auto before = patternBytes(r.p);
+  r.click("Play Scenes", true);
+  FakePlayHead host;
+  host.playing = true;
+  r.p.setPlayHead(&host);
+  juce::MidiBuffer midi;
+  int bars = 4;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { bars = s.pattern()->settings.bars; });
+  const double loopFrames = bars * 4.0 * 0.5 * 48000.0;
+  std::vector<cf::scenes::SceneId> seen;
+  host.ppq = 0.0;
+  for (double done = 0; done < 3.5 * loopFrames; done += 512) {
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    r.p.processBlock(buf, midi);
+    host.ppq += 512.0 * 120.0 / (60.0 * 48000.0);
+    if (static_cast<int>(done / 512) % 8 == 0) {
+      r.p.pollAudioFlags();
+      r.p.withSession([&](cf::composition::ProjectSession& s) {
+        const auto id = s.sceneStatus().playing;
+        if (seen.empty() || seen.back() != id) seen.push_back(id);
+      });
+    }
+  }
+  r.p.setPlayHead(nullptr);
+  CHECK(seen.size() >= 3);
+  if (seen.size() >= 3) {
+    CHECK_EQ(seen[0], ids[0]);
+    CHECK_EQ(seen[1], ids[1]);
+    CHECK_EQ(seen[2], ids[0]);  // wrap
+  }
+  CHECK(patternBytes(r.p) == before);
+  r.click("Stop Scenes", true);
+  bool running = true;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { running = s.sceneStatus().running; });
+  CHECK(!running);
+  CHECK(patternBytes(r.p) == before);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.clearScenes().ok()); });
+  RulesRig::pump(300);
+  CHECK_EQ(list->getListBoxModel()->getNumRows(), 0);
+}
+
+namespace {
+// Runs `blocks` blocks of 512 with a host that is playing or not, injecting `midi` into the first block, and
+// returns the left channel. The playhead position continues from `ph.ppq` (unlike run(), which restarts at zero).
+std::vector<float> runMidi(ChopFractalProcessor& p, FakePlayHead& ph, int blocks, const juce::MidiBuffer& first = {}) {
+  p.setPlayHead(&ph);
+  std::vector<float> out;
+  for (int b = 0; b < blocks; ++b) {
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    juce::MidiBuffer midi;
+    if (b == 0) midi = first;
+    p.processBlock(buf, midi);
+    for (int i = 0; i < 512; ++i) out.push_back(buf.getSample(0, i));
+    if (ph.playing) ph.ppq += 512.0 * ph.bpm / (60.0 * 48000.0);
+  }
+  p.setPlayHead(nullptr);
+  return out;
+}
+}  // namespace
+
+CHOP_TEST(midi_note_on_triggers_the_mapped_chop_at_the_event_sample) {
+  for (bool hostPlaying : {false, true}) {
+    ChopFractalProcessor p;
+    prepare(p);
+    makeSession(p);
+    FakePlayHead ph;
+    ph.playing = hostPlaying;
+    ph.ppq = 7.0;  // late in the loop: the pattern itself is quiet here, the pad is what we measure
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 100);
+    const auto silent = runMidi(p, ph, 1);
+    ph.ppq = 7.0;
+    const auto out = runMidi(p, ph, 4, midi);
+    if (!hostPlaying) {
+      CHECK(peak(silent) < 1e-6f);
+      for (int i = 0; i <= 100; ++i) CHECK_NEAR(out[static_cast<std::size_t>(i)], 0.0, 1e-9);
+      CHECK(peak(std::vector<float>(out.begin() + 100, out.begin() + 2000)) > 0.05f);
+    } else {
+      CHECK(peak(out) > 0.0f);
+    }
+  }
+}
+
+CHOP_TEST(midi_channel_filter_gate_all_notes_off_and_bypass) {
+  auto make = [] {
+    auto p = std::make_unique<ChopFractalProcessor>();
+    prepare(*p);
+    makeSession(*p);
+    return p;
+  };
+  FakePlayHead ph;
+  ph.playing = false;
+  {  // channel filter
+    auto p = make();
+    p->withSession([](cf::composition::ProjectSession& s) {
+      cf::composition::PadSettings ps;
+      ps.midiChannel = 2;
+      CHECK(s.setPadSettings(ps).ok());
+    });
+    juce::MidiBuffer ch1, ch2;
+    ch1.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 10);
+    ch2.addEvent(juce::MidiMessage::noteOn(2, 36, static_cast<juce::uint8>(100)), 10);
+    CHECK(peak(runMidi(*p, ph, 3, ch1)) < 1e-6f);
+    CHECK(peak(runMidi(*p, ph, 3, ch2)) > 0.05f);
+  }
+  {  // Gate: note off stops the voice
+    auto p = make();
+    setParam(*p, "perf_mode", 2.f);
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    runMidi(*p, ph, 1, on);
+    juce::MidiBuffer off;
+    off.addEvent(juce::MidiMessage::noteOff(1, 36), 0);
+    const auto tail = runMidi(*p, ph, 3, off);
+    CHECK(peak(std::vector<float>(tail.begin() + 200, tail.end())) < 1e-4f);
+  }
+  {  // CC 123 silences pad voices
+    auto p = make();
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    runMidi(*p, ph, 1, on);
+    juce::MidiBuffer all;
+    all.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+    const auto tail = runMidi(*p, ph, 3, all);
+    CHECK(peak(std::vector<float>(tail.begin() + 200, tail.end())) < 1e-4f);
+  }
+  {  // effect off: MIDI ignored
+    auto p = make();
+    setParam(*p, "effect_enable", 0.f);
+    juce::MidiBuffer on;
+    on.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(100)), 0);
+    CHECK(peak(runMidi(*p, ph, 3, on)) < 1e-6f);
+  }
+  {  // on-screen presses reach the audio one block later
+    auto p = make();
+    p->padTrigger(36, 100, true);
+    CHECK(peak(runMidi(*p, ph, 3)) > 0.05f);
+  }
+  {  // more events than a block can carry: dropped and counted, never fatal
+    auto p = make();
+    juce::MidiBuffer many;
+    for (int i = 0; i < 300; ++i) many.addEvent(juce::MidiMessage::noteOn(1, 36 + (i % 8), static_cast<juce::uint8>(90)), i);
+    runMidi(*p, ph, 2, many);
+    CHECK(p->pads().droppedEvents() > 0u);
+  }
+}
+
+CHOP_TEST(recording_a_take_adds_quantized_events_at_the_midpoint_and_flushes_on_disarm) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  FakePlayHead ph;
+  ph.playing = true;
+  ph.ppq = 0.0;
+  p.setRecordArmed(true);
+  CHECK(p.statusMessage().contains("Recording armed"));
+  std::size_t before = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { before = cf::pattern::eventCount(*s.pattern()); });
+  p.setPlayHead(&ph);
+  // Find a free slot (no event of that chop at that tick) so the merge cannot be skipped as a duplicate.
+  int freeChop = -1;
+  int freeStart = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (int chop = 0; chop < 8 && freeChop < 0; ++chop)
+      for (int slot = 2; slot < 12 && freeChop < 0; ++slot) {
+        bool taken = false;
+        for (const auto& bt : s.pattern()->bars[0].beats)
+          for (const auto& e : bt.events) taken = taken || (e.chop == s.chops()->chops[static_cast<std::size_t>(chop)].id && e.start == slot * 240);
+        if (!taken) {
+          freeChop = chop;
+          freeStart = slot * 240;
+        }
+      }
+  });
+  CHECK(freeChop >= 0);
+  const double targetPpq = freeStart / 960.0;
+  juce::MidiBuffer midi;
+  midi.addEvent(juce::MidiMessage::noteOn(1, 36 + freeChop, static_cast<juce::uint8>(100)), 0);
+  bool played = false;
+  for (int b = 0; b < 400; ++b) {  // ppq 0 .. 8.5 (the loop is 8 quarters, the midpoint is ppq 4)
+    juce::AudioBuffer<float> buf(2, 512);
+    buf.clear();
+    juce::MidiBuffer m;
+    if (!played && ph.ppq >= targetPpq) {
+      m = midi;
+      played = true;
+    }
+    p.processBlock(buf, m);
+    ph.ppq += 512.0 * ph.bpm / (60.0 * 48000.0);
+    if (b % 4 == 0) p.pollAudioFlags();
+  }
+  p.setPlayHead(nullptr);
+  CHECK(played);
+  CHECK(p.statusMessage().contains("Recorded 1 hit"));
+  bool found = false;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(cf::pattern::eventCount(*s.pattern()), before + 1);
+    for (const auto& bt : s.pattern()->bars[0].beats)
+      for (const auto& e : bt.events) found = found || (e.userOwned && e.chop == s.chops()->chops[static_cast<std::size_t>(freeChop)].id && e.start == freeStart);
+  });
+  CHECK(found);
+  // Disarming flushes whatever is waiting, and a take with nothing in it changes nothing.
+  p.padTrigger(37, 90, true);
+  p.setRecordArmed(true);
+  runMidi(p, ph, 1);
+  p.setRecordArmed(false);
+  p.setRecordArmed(false);
+}
+
+CHOP_TEST(pad_panel_pads_trigger_and_expose_settings) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.click("Detect Chops");
+  r.click("Generate");
+  r.click("Pads");
+  auto* pad = dynamic_cast<juce::Button*>(findButtonDeep(*r.ed, "Pad 1"));
+  CHECK(pad != nullptr);
+  if (!pad) return;
+  CHECK(pad->isEnabled());
+  pad->setState(juce::Button::buttonDown);
+  RulesRig::pump();
+  FakePlayHead ph;
+  ph.playing = false;
+  CHECK(peak(runMidi(r.p, ph, 4)) > 0.05f);
+  pad->setState(juce::Button::buttonNormal);
+  RulesRig::pump();
+  CHECK(findByTitle<juce::ComboBox>(*r.ed, "Pad mode") != nullptr);
+  CHECK(findByTitle<juce::ComboBox>(*r.ed, "Velocity curve") != nullptr);
+  auto* base = findByTitle<juce::Slider>(*r.ed, "Base note");
+  CHECK(base != nullptr);
+  if (base) {
+    base->setValue(48, juce::sendNotificationSync);
+    RulesRig::pump();
+    int note = 0;
+    r.p.withSession([&](cf::composition::ProjectSession& s) { note = s.padSettings().baseNote; });
+    CHECK_EQ(note, 48);
+  }
+  r.click("Close Pads", true);
+}
+
+namespace {
+std::shared_ptr<const cf::render::SourceData> beatLoop(int seconds = 0) {
+  auto d = std::make_shared<cf::render::SourceData>();
+  d->channels = 1;
+  d->sampleRate = 48000;
+  d->frames = seconds > 0 ? 48000ll * seconds : 120000;
+  d->samples.assign(static_cast<std::size_t>(d->frames), 0.f);
+  const int spacing = seconds > 0 ? 24000 : 30000;
+  for (std::int64_t at = 0; at + 6000 < d->frames; at += spacing)
+    for (int i = 0; i < 6000; ++i) d->samples[static_cast<std::size_t>(at + i)] = 0.8f * static_cast<float>(std::exp(-i / 1500.0) * std::sin(2.0 * 3.14159265358979 * 250.0 * i / 48000.0));
+  return d;
+}
+bool waitFor(ChopFractalProcessor& p, const char* text, int ms = 20000) {
+  for (int waited = 0; waited < ms && !p.statusMessage().contains(text); waited += 30) juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+  return p.statusMessage().contains(text);
+}
+}  // namespace
+
+CHOP_TEST(tempo_match_stretches_keeps_ids_and_undo_restores_the_original) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.loadSource(beatLoop(), "loop", "/music/loop.wav").ok());
+    CHECK(s.editMarkers([](cf::source::ChopMap& m) {
+      for (int b = 0; b < 4; ++b) m.addMarker(b * 30000, true);
+      return cf::Status{};
+    }).ok());
+    cf::pattern::Settings st;
+    st.bars = 1;
+    st.seed = 3;
+    CHECK(s.generate(st).ok());
+  });
+  std::vector<cf::ChopId> ids;
+  std::vector<std::uint8_t> original;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& c : s.chops()->chops) ids.push_back(c.id);
+    original = s.saveState(true).value();
+  });
+  cf::composition::StretchRequest r;
+  r.sourceBpm = 96.0;
+  r.targetBpm = 120.0;
+  r.quality = cf::stretch::Quality::Draft;
+  CHECK(p.stretchController().start(r).isEmpty());
+  CHECK(p.stretchController().running());
+  CHECK(!p.stretchController().start(r).isEmpty());  // one at a time
+  CHECK(waitFor(p, "Stretched to 120.0 BPM"));
+  CHECK(!p.stretchController().running());
+  CHECK(p.embedSource.load());
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(s.chopMap()->info().frames, 96000);
+    for (std::size_t i = 0; i < ids.size(); ++i) CHECK(s.chops()->chops[i].id == ids[i]);
+  });
+  juce::MemoryBlock saved;
+  p.getStateInformation(saved);
+  ChopFractalProcessor q;
+  q.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  q.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.hasSource() && !s.sourceMissing() && s.chopMap()->info().frames == 96000); });
+  CHECK(p.stretchController().canUndo());
+  CHECK(p.stretchController().undo());
+  std::vector<std::uint8_t> restored;
+  p.withSession([&](cf::composition::ProjectSession& s) { restored = s.saveState(true).value(); });
+  CHECK(restored == original);
+  CHECK(!p.stretchController().canUndo());
+}
+
+CHOP_TEST(tempo_match_cancel_leaves_the_project_unchanged_and_bad_requests_are_refused) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(beatLoop(40), "long", "/music/long.wav").ok()); });
+  cf::composition::StretchRequest r;
+  r.sourceBpm = 100.0;
+  r.targetBpm = 130.0;
+  r.quality = cf::stretch::Quality::High;
+  CHECK(p.stretchController().start(r).isEmpty());
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(60);
+  p.stretchController().cancel();
+  CHECK(waitFor(p, "cancelled"));
+  CHECK(!p.stretchController().running());
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK_EQ(s.chopMap()->info().frames, 48000 * 40); });
+  r.targetBpm = 20.0;
+  CHECK(p.stretchController().start(r).contains("Out of range"));
+  CHECK(!p.stretchController().canUndo());
+}
+
+CHOP_TEST(tempo_panel_disables_matching_outside_the_range_and_shows_the_exact_text) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(beatLoop(), "loop", "/music/loop.wav").ok()); });
+  r.click("Tempo");
+  auto* src = findByTitle<juce::TextEditor>(*r.ed, "Source BPM");
+  auto* tgt = findByTitle<juce::TextEditor>(*r.ed, "Target BPM");
+  CHECK(src != nullptr && tgt != nullptr);
+  if (!src || !tgt) return;
+  auto* loop = findByTitle<juce::ComboBox>(*r.ed, "Loop length");
+  CHECK(loop != nullptr);
+  loop->setSelectedId(loop->getNumItems(), juce::sendNotificationSync);  // Custom BPM
+  src->setText("96", true);
+  tgt->setText("20", true);
+  RulesRig::pump(150);
+  auto* match = findButtonDeep(*r.ed, "Match to host");
+  CHECK(match != nullptr);
+  if (match) CHECK(!match->isEnabled());
+  tgt->setText("120", true);
+  RulesRig::pump(150);
+  if (match) CHECK(match->isEnabled());
+}
+
+CHOP_TEST(processor_writes_aux_buses_for_routed_chops_and_stays_silent_for_the_rest) {
+  ChopFractalProcessor p;
+  auto layout = p.getBusesLayout();
+  layout.outputBuses.set(1, juce::AudioChannelSet::stereo());
+  CHECK(p.setBusesLayout(layout));
+  CHECK(p.getBus(false, 1)->isEnabled());
+  p.prepareToPlay(48000.0, 512);
+  CHECK_EQ(p.activeAuxBuses(), 1);
+  makeSession(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    cf::composition::OutputRouting r;
+    r.mode = cf::composition::RoutingMode::Custom;
+    for (const auto& c : s.chops()->chops) r.chopBus[c.id.value] = 1;  // everything to Out 2
+    CHECK(s.setOutputRouting(r).ok());
+  });
+  FakePlayHead ph;
+  p.setPlayHead(&ph);
+  juce::MidiBuffer midi;
+  float mainPeak = 0.f, auxPeak = 0.f;
+  for (int b = 0; b < 100; ++b) {
+    juce::AudioBuffer<float> buf(4, 512);
+    buf.clear();
+    p.processBlock(buf, midi);
+    mainPeak = std::max(mainPeak, buf.getMagnitude(0, 0, 512));
+    auxPeak = std::max(auxPeak, std::max(buf.getMagnitude(2, 0, 512), buf.getMagnitude(3, 0, 512)));
+    ph.ppq += 512.0 * 120.0 / (60.0 * 48000.0);
+  }
+  p.setPlayHead(nullptr);
+  CHECK(auxPeak > 0.05f);
+  CHECK(mainPeak < 1e-6f);  // every chop is routed away from main
+  // the same session on a host that gave no aux outputs plays on main
+  ChopFractalProcessor q;
+  prepare(q);
+  makeSession(q);
+  q.withSession([&](cf::composition::ProjectSession& s) {
+    cf::composition::OutputRouting r;
+    r.mode = cf::composition::RoutingMode::Custom;
+    for (const auto& c : s.chops()->chops) r.chopBus[c.id.value] = 1;
+    CHECK(s.setOutputRouting(r).ok());
+  });
+  FakePlayHead ph2;
+  CHECK(peak(run(q, ph2, 100)) > 0.05f);
+}
+
+CHOP_TEST(outputs_panel_buttons_drive_the_routing) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.detectAndRoles();
+  r.click("Outputs");
+  r.click("Auto: by role", true);
+  cf::composition::OutputRouting routing;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing.mode == cf::composition::RoutingMode::ByRole);
+  CHECK_EQ(routing.roleBus.size(), 3u);  // kick, hat, snare
+  auto* list = findByTitle<juce::ListBox>(*r.ed, "Route table");
+  CHECK(list != nullptr);
+  auto* box = findByTitle<juce::ComboBox>(*r.ed, "Output for the selected chop");
+  CHECK(box != nullptr);
+  if (list && box) {
+    list->selectRow(1);
+    RulesRig::pump();
+    box->setSelectedId(5, juce::sendNotificationSync);  // Out 5
+    RulesRig::pump();
+    r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+    CHECK(routing.mode == cf::composition::RoutingMode::Custom);
+    CHECK_EQ(routing.chopBus.size(), 1u);
+  }
+  r.click("Reset to Main", true);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing == cf::composition::OutputRouting{});
+  r.click("Auto: by chop", true);
+  r.p.withSession([&](cf::composition::ProjectSession& s) { routing = s.outputRouting(); });
+  CHECK(routing.mode == cf::composition::RoutingMode::ByChop);
+}
+
+CHOP_TEST(keyboard_shortcuts_navigate_generate_and_undo_and_leave_other_chords_alone) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  r.detectAndRoles();
+  auto bytes = [&] { return patternBytes(r.p); };
+  const auto before = bytes();
+  const juce::ModifierKeys none, shift(juce::ModifierKeys::shiftModifier), cmd(juce::ModifierKeys::commandModifier);
+  CHECK(r.ed->keyPressed(juce::KeyPress('g', none, 'g')));
+  RulesRig::pump();
+  CHECK(bytes() != before);
+  CHECK(r.ed->keyPressed(juce::KeyPress('z', cmd, 'z')));  // undo
+  RulesRig::pump();
+  CHECK(bytes() == before);
+  CHECK(r.ed->keyPressed(juce::KeyPress('y', cmd, 'y')));  // redo
+  RulesRig::pump();
+  CHECK(bytes() != before);
+  CHECK(!r.ed->keyPressed(juce::KeyPress('c', cmd, 'c')));  // host chords are not consumed
+  // ] selects the first hit, Esc clears it.
+  auto* ed = dynamic_cast<ChopFractalEditor*>(r.ed.get());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  CHECK(ed->keyPressed(juce::KeyPress(']', none, ']')));
+  CHECK(ed->selectedHit().valid());
+  CHECK(ed->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)));
+  CHECK(!ed->selectedHit().valid());
+  (void)shift;
+}
+
+CHOP_TEST(window_resizes_within_limits_and_simple_view_hides_advanced_controls) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed != nullptr);
+  if (!r.ed) return;
+  CHECK(r.ed->isResizable());
+  r.ed->setSize(1400, 1200);
+  CHECK_EQ(r.ed->getWidth(), 1400);
+  CHECK(r.ed->getConstrainer() != nullptr);
+  if (auto* c = r.ed->getConstrainer()) CHECK(c->getMinimumWidth() == 940 && c->getMinimumHeight() == 992 && c->getMaximumWidth() == 1920);
+  auto* fx = findByTitle<juce::Slider>(*r.ed, "FX intensity");
+  auto* view = findByTitle<juce::ToggleButton>(*r.ed, "View mode");
+  CHECK(view != nullptr);
+  if (!view) return;
+  if (fx) CHECK(fx->isVisible());
+  view->setToggleState(true, juce::sendNotificationSync);
+  if (fx) CHECK(!fx->isVisible());
+  CHECK(static_cast<bool>(r.p.apvts.state.getProperty("uiSimple", false)));
+  view->setToggleState(false, juce::sendNotificationSync);
+  if (fx) CHECK(fx->isVisible());
+}
+
+CHOP_TEST(version_stamp_matches_VERSION_file) {
+  const juce::File f(CHOPFRACTAL_VERSION_FILE);
+  CHECK(f.existsAsFile());
+  CHECK(f.loadFileAsString().trim() == juce::String(buildinfo::kVersionFull));
+  CHECK(juce::String(buildinfo::kVersionFull).startsWith(buildinfo::kVersionNum));
+}
+
+CHOP_TEST(log_files_are_capped_rotated_flushed_and_session_marker_detects_unclean_exit) {
+  const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_log_test_" + juce::String(juce::Random::getSystemRandom().nextInt64()));
+  cflog::setFolderForTesting(dir);
+  cflog::init();
+  const juce::String line(std::string(1000, 'x'));
+  for (int i = 0; i < 3 * 1024 + 100; ++i) cflog::info(line);  // ~3 MiB
+  const auto files = dir.findChildFiles(juce::File::findFiles, false, "chopfractal-*.log");
+  CHECK(files.size() >= 3 && files.size() <= cflog::kMaxFiles);
+  for (const auto& f : files) CHECK(f.getSize() <= cflog::kMaxFileBytes + 1100);
+  CHECK(cflog::tail(5).contains("[INFO]"));  // readable without closing the logger
+  // No clean shutdown: a second init sees the marker.
+  cflog::setFolderForTesting(dir);
+  cflog::init();
+  CHECK(cflog::tail(5).contains("previous session ended unexpectedly"));
+  cflog::shutdown();
+  CHECK(!dir.getChildFile("session.marker").existsAsFile());
+  dir.deleteRecursively();
+  // An unwritable folder never throws.
+  cflog::setFolderForTesting(juce::File("/proc/definitely/not/writable"));
+  cflog::init();
+  cflog::error("ignored");
+  cflog::shutdown();
+  cflog::setFolderForTesting(juce::File());
 }

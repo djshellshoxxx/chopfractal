@@ -1,3 +1,4 @@
+#include <chopfractal/chop_contracts/rng.hpp>
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 
 #include "chop_test.hpp"
@@ -274,5 +275,76 @@ CHOP_TEST(state_roundtrips_and_malformed_state_is_rejected) {
     bad[i] ^= 0x77;
     auto r = deserialize(bad.data(), bad.size());
     if (r.ok()) CHECK(validateRules(r.value().rules).ok());  // survivors are still valid rule sets
+  }
+}
+
+CHOP_TEST(describe_renders_every_action_kind_in_plain_english) {
+  CHECK(describe(templates::excludeRole(7, "hat", 2, 3)) == "Forbid hat in bars 3-4");
+  CHECK(describe(templates::requireInFinalBeat(1, "kick")) == "Require kick in the final beat");
+  CHECK(describe(templates::preferAtPhraseBoundary(2, "snare")) == "Prefer snare at phrase boundaries (x3)");
+  CHECK(describe(templates::avoidAdjacentRepeats(3)) == "Allow at most 1 of the same chop in a row");
+  CHECK(describe(templates::preserveFirst(4, "kick")) == "Keep kick first in each bar");
+  Rule r;
+  r.action.kind = ActionKind::MaxCount;
+  r.action.count = 3;
+  r.when.role = "hat";
+  CHECK(describe(r) == "Allow at most 3 hat per bar");
+  r = Rule{};
+  r.action.kind = ActionKind::Forbid;
+  r.when.chop = ChopId{9};
+  r.when.barMin = 2;
+  r.when.beatMin = 0;
+  r.when.beatMax = 1;
+  CHECK(describe(r) == "Forbid chop #9 from bar 3 on beats 1-2");
+  r = Rule{};
+  r.action.kind = ActionKind::Prefer;
+  r.weight = 0.5;
+  r.when.role = "kick";
+  r.when.barMin = r.when.barMax = 1;
+  CHECK(describe(r) == "Avoid kick in bar 2 (x0.5)");
+  r.when.role = "snare";
+  r.when.chop = ChopId{4};
+  r.action.kind = ActionKind::MaxConsecutiveRepeats;
+  r.action.repeatBy = RepeatBy::SameRole;
+  r.action.count = 2;
+  CHECK(describe(r) == "Allow at most 2 snare chop #4 of the same role in a row in bar 2");
+}
+
+CHOP_TEST(preserving_rule_returns_first_matching_enabled_preserve_rule_or_zero) {
+  Rule first = templates::preserveFirst(3, "kick");
+  Rule second = templates::preserveFirst(5, "kick");
+  first.enabled = false;
+  GrammarPolicy p = policyOf({first, second});
+  CandidateQuery q;
+  q.chop = ChopId{1};
+  q.firstInBar = true;
+  q.scope.barCount = 4;
+  q.scope.beatsPerBar = 4;
+  CHECK_EQ(p.preservingRule(q), 5u);
+  CHECK(p.isPreserved(q));
+  q.chop = ChopId{2};
+  CHECK_EQ(p.preservingRule(q), 0u);
+  CHECK(!p.isPreserved(q));
+  CHECK_EQ(policyOf({}).preservingRule(q), 0u);
+}
+
+CHOP_TEST(describe_never_exceeds_200_chars_and_is_deterministic) {
+  Rng rng(7);
+  for (int i = 0; i < 500; ++i) {
+    Rule r;
+    r.id = static_cast<std::uint32_t>(i + 1);
+    r.action.kind = static_cast<ActionKind>(rng.next() % 6);
+    r.when.role = (rng.next() % 2) ? std::string(32, 'z') : std::string();
+    if (rng.next() % 2) r.when.chop = ChopId{rng.next() % 100000 + 1};
+    r.when.position = static_cast<Position>(rng.next() % 4);
+    r.when.barMin = static_cast<int>(rng.next() % 8);
+    r.when.barMax = (rng.next() % 2) ? -1 : r.when.barMin + static_cast<int>(rng.next() % 3);
+    r.when.beatMin = static_cast<int>(rng.next() % 4);
+    r.when.beatMax = (rng.next() % 2) ? -1 : r.when.beatMin + 1;
+    r.action.count = static_cast<int>(rng.next() % 500) + 1;
+    r.weight = 0.1 + static_cast<double>(rng.next() % 1000) / 10.0;
+    const std::string a = describe(r);
+    CHECK(a.size() <= 200 && !a.empty());
+    CHECK(a == describe(r));
   }
 }

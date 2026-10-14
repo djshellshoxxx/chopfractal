@@ -5,10 +5,18 @@
 
 #include <chopfractal/plugin_ui_adapter/orbit.hpp>
 #include <chopfractal/plugin_ui_adapter/views.hpp>
+#include <array>
 #include <functional>
 #include <memory>
 
+#include "CapturePanel.h"
 #include "DragOut.h"
+#include "MorphPanel.h"
+#include "RulesPanel.h"
+#include "OutputsPanel.h"
+#include "PadPanel.h"
+#include "ScenePanel.h"
+#include "TempoPanel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -43,6 +51,10 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   int laneCount() const { return static_cast<int>(chops_.size()); }
   chopfractal::EventId selectedHit() const { return selected_; }
   const std::vector<chopfractal::EventId>& selectedHits() const { return selectedHits_; }
+  void setSelectedHits(std::vector<chopfractal::EventId> ids) {  // used by tests and the rules panel
+    selectedHits_ = std::move(ids);
+    repaint();
+  }
   const std::vector<chopfractal::ChopId>& selectedChops() const { return selectedChops_; }
   juce::Rectangle<int> waveformBounds() const { return waveArea_; }
 
@@ -67,7 +79,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   std::uint64_t currentSeed() const;
   void setSeed(std::uint64_t seed);
   void doGenerate();
-  void doMutate();
+  void doMutate(bool rulesPass = false);
   void doToggleLock();
   void doSmartSetup();
   void doFractal();
@@ -124,6 +136,25 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
 
   // Feature controls (not host parameters: they act on the project).
+  CapturePanel capturePanel_;
+  MorphPanel morphPanel_;
+  std::unique_ptr<RulesPanel> rulesPanel_;
+  std::unique_ptr<ScenePanel> scenePanel_;
+  std::unique_ptr<PadPanel> padPanel_;
+  std::unique_ptr<TempoPanel> tempoPanel_;
+  std::unique_ptr<OutputsPanel> outputsPanel_;
+  juce::ToggleButton simpleView_{"Simple view"};
+  juce::ComboBox scale_;
+  std::array<std::unique_ptr<juce::Component>, 4> regions_;  // accessible names for the painted panels
+  void applyViewMode();
+  void persistUi();
+  bool handleShortcut(const juce::KeyPress& key);
+  void navigateHit(int dx, int dy);
+  juce::ToggleButton outputsToggle_{"Outputs"};
+  juce::ToggleButton tempoToggle_{"Tempo"};
+  juce::ToggleButton padsToggle_{"Pads"};
+  juce::ToggleButton scenesToggle_{"Scenes"};
+  juce::ToggleButton rulesToggle_{"Rules"};
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};

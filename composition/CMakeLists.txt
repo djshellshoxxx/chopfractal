@@ -14,7 +14,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 set(CHOPFRACTAL_COMPOSITION_DEPS chop_contracts state_codec variation_history source_chop pattern_engine
-    recursive_hit_zoom chop_roles_grammar wav_export midi_export evolve fractal_rhythm chop_insight audio_renderer
+    recursive_hit_zoom chop_roles_grammar wav_export midi_export evolve scenes time_stretch fractal_rhythm chop_insight audio_renderer
     plugin_host_adapter)
 foreach(dep ${CHOPFRACTAL_COMPOSITION_DEPS})
   if(NOT TARGET chopfractal::${dep})

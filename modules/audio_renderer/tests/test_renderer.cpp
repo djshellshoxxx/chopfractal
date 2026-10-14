@@ -709,3 +709,566 @@ CHOP_TEST(an_exhausted_voice_pool_never_hard_cuts_a_sounding_voice) {
   for (std::size_t k = 1; k < out.size(); ++k) biggest = std::max(biggest, std::fabs(out[k] - out[k - 1]));
   CHECK(biggest < 0.2f);  // every steal fades; no full-level step
 }
+
+namespace {
+struct ArmRun {
+  Renderer r;
+  std::vector<float> left;
+  double ppq = 0.0;
+  ArmRun() { r.prepare(Config{}); }
+  void run(std::int64_t frames, int block) {
+    std::vector<float> l(static_cast<std::size_t>(block)), rr(static_cast<std::size_t>(block)), in(static_cast<std::size_t>(block), 0.f);
+    for (std::int64_t done = 0; done < frames; done += block) {
+      const int n = static_cast<int>(std::min<std::int64_t>(block, frames - done));
+      TransportBlock tb;
+      tb.playing = true;
+      tb.positionValid = true;
+      tb.ppq = ppq;
+      tb.bpm = 120.0;
+      const float* inp[2] = {in.data(), in.data()};
+      float* outp[2] = {l.data(), rr.data()};
+      r.process(tb, RenderParams{}, inp, outp, 2, n);
+      left.insert(left.end(), l.begin(), l.begin() + n);
+      ppq += n * 120.0 / (60.0 * 48000.0);
+    }
+  }
+};
+std::shared_ptr<const Playback> loopOf(const SourcePtr& src, float level) {
+  FlatEvent e = ev(1, 24000, 0, 480);
+  e.tx.level = level;
+  return playback(src, {e}, 3840);
+}
+}  // namespace
+
+CHOP_TEST(armed_switch_lands_on_the_loop_boundary_frame_for_any_block_size) {
+  for (int block : {64, 333, 512, 1000}) {
+    auto src = makeSource(1, 48000, 24000, dc);
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(48000, block);  // a quarter of the way into the loop, A is playing
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 7}));
+    t.run(2 * 96000 - 48000, block);
+    CHECK_EQ(t.r.appliedSwitchToken(), 7u);
+    // Cycle 0 (A, level 1): plateau; cycle 1 (B, level 0.5) starts exactly at frame 96000 with the 32-frame attack.
+    CHECK_NEAR(t.left[5000], 1.0, 1e-6);
+    CHECK_NEAR(t.left[96000 + 16], 0.25, 1e-6);
+    CHECK_NEAR(t.left[96000 + 5000], 0.5, 1e-6);
+    CHECK_NEAR(t.left[96000 - 1], 0.0, 1e-6);  // nothing sounded at the end of cycle 0
+    CHECK_NEAR(t.left[96000 + 12000 + 100], 0.0, 1e-6);
+  }
+}
+
+CHOP_TEST(armed_switch_can_be_cancelled_and_foreign_sources_are_not_switched) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  {
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(1000, 512);
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 1}));
+    t.run(512, 512);  // armed and waiting for the boundary
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{nullptr, 2}));  // cancel
+    t.run(2 * 96000, 512);
+    CHECK_EQ(t.r.appliedSwitchToken(), 0u);
+    CHECK_NEAR(t.left[96000 + 5000], 1.0, 1e-6);  // still A
+  }
+  {
+    ArmRun t;
+    t.r.mailbox().publish(loopOf(src, 1.0f));
+    t.run(100, 100);
+    t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(makeSource(1, 48000, 24000, dc), 0.5f), 3}));
+    t.run(2 * 96000, 512);
+    CHECK_EQ(t.r.appliedSwitchToken(), 0u);
+    CHECK_NEAR(t.left[96000 + 5000], 1.0, 1e-6);
+  }
+}
+
+CHOP_TEST(main_mailbox_publish_of_the_armed_playback_after_a_switch_does_not_revert_or_kill_voices) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  ArmRun t;
+  t.r.mailbox().publish(loopOf(src, 1.0f));
+  auto b = loopOf(src, 0.5f);
+  t.run(1000, 512);
+  t.r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{b, 9}));
+  t.run(96000 + 2000, 512);
+  CHECK_EQ(t.r.appliedSwitchToken(), 9u);
+  t.r.mailbox().publish(b);  // the message thread now mirrors the switch into the main mailbox
+  const std::size_t before = t.left.size();
+  t.run(2 * 96000, 512);
+  CHECK_NEAR(t.left[96000 + 5000], 0.5, 1e-6);
+  CHECK_NEAR(t.left[2 * 96000 + 5000], 0.5, 1e-6);  // B keeps playing in the following cycle
+  CHECK(before + 2 * 96000 == t.left.size());
+  for (float x : t.left) CHECK(std::isfinite(x));
+}
+
+CHOP_TEST(armed_switch_processing_never_allocates) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  Renderer r;
+  r.prepare(Config{});
+  r.mailbox().publish(loopOf(src, 1.0f));
+  r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{loopOf(src, 0.5f), 5}));
+  std::vector<float> l(333), rr(333), in(333, 0.f);
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  double ppq = 0.0;
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 700; ++i) {  // crosses the loop boundary at frame 96000 inside a block
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = ppq;
+    r.process(tb, RenderParams{}, inp, outp, 2, 333);
+    ppq += 333 * 120.0 / (60.0 * 48000.0);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+  CHECK_EQ(r.appliedSwitchToken(), 5u);
+}
+
+// ---------------------------------------------------------------------------------------------
+// live pads
+// ---------------------------------------------------------------------------------------------
+#include <chopfractal/audio_renderer/spsc_queue.hpp>
+#include <initializer_list>
+
+namespace {
+
+std::shared_ptr<const PadBank> bankOf(std::initializer_list<std::pair<int, PadSlot>> slots) {
+  auto b = std::make_shared<PadBank>();
+  for (const auto& s : slots) b->slots[static_cast<std::size_t>(s.first)] = s.second;
+  return b;
+}
+PadSlot slot(std::int64_t end, std::uint8_t group = 0) {
+  PadSlot s;
+  s.region = {0, end};
+  s.chokeGroup = group;
+  return s;
+}
+PadEvent noteOn(int frame, int note, int vel = 127) {
+  PadEvent e;
+  e.frame = frame;
+  e.type = PadEvent::Type::NoteOn;
+  e.note = static_cast<std::uint8_t>(note);
+  e.velocity = static_cast<std::uint8_t>(vel);
+  return e;
+}
+PadEvent noteOff(int frame, int note) {
+  PadEvent e = noteOn(frame, note);
+  e.type = PadEvent::Type::NoteOff;
+  return e;
+}
+
+struct PadRig {
+  Renderer r;
+  double ppq = 0.0;
+  bool playing = false;
+  std::vector<float> out;
+  PadRig(std::shared_ptr<const Playback> pb, std::shared_ptr<const PadBank> bank) {
+    r.prepare(Config{});
+    r.mailbox().publish(std::move(pb));
+    r.padMailbox().publish(std::move(bank));
+  }
+  // Renders `frames` frames from absolute frame `done0`, feeding events by absolute frame; host blocks of `block`.
+  void run(std::int64_t frames, int block, const std::vector<PadEvent>& absolute, PadParams params = {}) {
+    std::vector<float> l(static_cast<std::size_t>(block)), rr(static_cast<std::size_t>(block)), in(static_cast<std::size_t>(block), 0.f);
+    for (std::int64_t done = 0; done < frames; done += block) {
+      const int n = static_cast<int>(std::min<std::int64_t>(block, frames - done));
+      std::vector<PadEvent> local;
+      for (PadEvent e : absolute)
+        if (e.frame >= base + done && e.frame < base + done + n) {
+          e.frame -= static_cast<std::int32_t>(base + done);
+          local.push_back(e);
+        }
+      TransportBlock tb;
+      tb.playing = playing;
+      tb.positionValid = true;
+      tb.ppq = ppq;
+      LiveInput live;
+      live.pads = local.data();
+      live.numPads = static_cast<int>(local.size());
+      live.padParams = params;
+      const float* inp[2] = {in.data(), in.data()};
+      float* outp[2] = {l.data(), rr.data()};
+      r.process(tb, RenderParams{}, live, inp, outp, 2, n);
+      out.insert(out.end(), l.begin(), l.begin() + n);
+      if (playing) ppq += n * 120.0 / (60.0 * 48000.0);
+    }
+    base += frames;
+  }
+  std::int64_t base = 0;
+};
+
+}  // namespace
+
+CHOP_TEST(pad_note_on_starts_a_voice_on_the_exact_frame_for_any_block_size) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  for (int block : {64, 333, 512, 2048}) {
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}}));
+    t.run(2000, block, {noteOn(100, 36)});
+    for (int i = 0; i <= 100; ++i) CHECK_NEAR(t.out[static_cast<std::size_t>(i)], 0.0, 0.0);
+    std::size_t first = 0;
+    while (first < t.out.size() && t.out[first] == 0.f) ++first;
+    CHECK(first == 101 || first == 102);
+    CHECK_NEAR(t.out[100 + 40], 1.0, 1e-6);  // past the 32-frame attack, full velocity
+    CHECK_EQ(t.r.activePadVoices(), 1);
+  }
+}
+
+CHOP_TEST(velocity_curves_are_exact) {
+  CHECK_EQ(velocityGain(VelocityCurve::Linear, 127), 1.f);
+  CHECK_NEAR(velocityGain(VelocityCurve::Linear, 64), 64.0 / 127.0, 1e-6);
+  CHECK_NEAR(velocityGain(VelocityCurve::Soft, 1), std::sqrt(1.0 / 127.0), 1e-6);
+  CHECK_NEAR(velocityGain(VelocityCurve::Hard, 64), (64.0 / 127.0) * (64.0 / 127.0), 1e-6);
+  CHECK_EQ(velocityGain(VelocityCurve::Fixed, 1), 1.f);
+  CHECK_EQ(velocityGain(VelocityCurve::Soft, 127), 1.f);
+  CHECK_EQ(velocityGain(VelocityCurve::Linear, 500), 1.f);  // clamped
+  CHECK_NEAR(velocityGain(VelocityCurve::Linear, -5), 1.0 / 127.0, 1e-6);
+  auto src = makeSource(1, 48000, 24000, dc);
+  PadRig t(playback(src, {}), bankOf({{36, slot(24000)}}));
+  PadParams hard;
+  hard.curve = VelocityCurve::Hard;
+  t.run(1000, 512, {noteOn(0, 36, 64)}, hard);
+  CHECK_NEAR(t.out[500], (64.0 / 127.0) * (64.0 / 127.0), 1e-5);
+}
+
+CHOP_TEST(mono_gate_and_choke_release_pad_voices_with_a_fade) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  {  // Poly layers, note off is ignored
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}, {37, slot(24000)}}));
+    t.run(2000, 512, {noteOn(0, 36), noteOn(10, 37), noteOff(500, 36)});
+    CHECK_EQ(t.r.activePadVoices(), 2);
+    CHECK_NEAR(t.out[1500], 2.0, 1e-5);  // two voices summed
+  }
+  {  // Mono: the second pad releases the first
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}, {37, slot(24000)}}));
+    PadParams mono;
+    mono.mode = PadMode::Mono;
+    t.run(2000, 512, {noteOn(0, 36), noteOn(10, 37)}, mono);
+    CHECK_EQ(t.r.activePadVoices(), 1);
+    CHECK_NEAR(t.out[1500], 1.0, 1e-5);
+  }
+  {  // Gate: note off fades the voice out within 64 frames
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}}));
+    PadParams gate;
+    gate.mode = PadMode::Gate;
+    t.run(2000, 512, {noteOn(0, 36), noteOff(1000, 36)}, gate);
+    CHECK_NEAR(t.out[999], 1.0, 1e-5);
+    CHECK_NEAR(t.out[1000 + 70], 0.0, 1e-6);
+    CHECK_EQ(t.r.activePadVoices(), 0);
+  }
+  {  // choke group releases only the same group
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000, 1)}, {37, slot(24000, 1)}, {38, slot(24000, 2)}}));
+    t.run(2000, 512, {noteOn(0, 36), noteOn(0, 38), noteOn(500, 37)});
+    CHECK_EQ(t.r.activePadVoices(), 2);  // 36 choked by 37; 38 (group 2) untouched
+  }
+  {  // all notes off
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}, {37, slot(24000)}}));
+    PadEvent all;
+    all.frame = 800;
+    all.type = PadEvent::Type::AllNotesOff;
+    t.run(2000, 512, {noteOn(0, 36), noteOn(0, 37), all});
+    CHECK_EQ(t.r.activePadVoices(), 0);
+  }
+}
+
+CHOP_TEST(pads_work_with_stopped_transport_pass_through_and_survive_transport_edges) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  {  // source loaded, no pattern yet
+    auto pt = makePassThroughPlayback(src);
+    CHECK(pt.ok());
+    PadRig t(pt.value(), bankOf({{36, slot(24000)}}));
+    t.run(1000, 512, {noteOn(50, 36)});
+    CHECK_NEAR(t.out[500], 1.0, 1e-5);
+  }
+  {  // pad voices keep sounding when the transport stops
+    PadRig t(playback(src, {}), bankOf({{36, slot(24000)}}));
+    t.playing = true;
+    t.run(1000, 512, {noteOn(0, 36)});
+    t.playing = false;
+    t.run(1000, 512, {});
+    CHECK_NEAR(t.out[1500], 1.0, 1e-5);
+    CHECK_EQ(t.r.activePadVoices(), 1);
+  }
+}
+
+CHOP_TEST(unmapped_notes_and_oversize_host_blocks) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  PadRig t(playback(src, {}), bankOf({{36, slot(24000)}, {40, slot(99999)}}));  // 40 reads outside the source
+  t.run(512, 512, {noteOn(10, 50), noteOn(20, 40), noteOn(30, 200)});
+  CHECK_EQ(t.r.activePadVoices(), 0);
+  CHECK_EQ(t.r.padUnmapped(), 3u);
+  // A host block larger than the prepared maximum is chunked; the event keeps its frame.
+  PadRig big(playback(src, {}), bankOf({{36, slot(24000)}}));
+  big.run(5000, 5000, {noteOn(3000, 36)});
+  CHECK_NEAR(big.out[3000], 0.0, 0.0);
+  CHECK_NEAR(big.out[3000 + 40], 1.0, 1e-5);
+}
+
+CHOP_TEST(pad_events_are_block_size_independent_and_absent_input_is_bit_identical) {
+  auto src = makeSource(1, 48000, 24000, ramp);
+  const std::vector<PadEvent> events = {noteOn(70, 36), noteOn(900, 37, 80), noteOff(1500, 36), noteOn(2100, 36, 30)};
+  std::vector<float> ref;
+  for (int block : {64, 333, 512, 2048}) {
+    PadRig t(playback(src, {ev(1, 24000, 480, 240)}), bankOf({{36, slot(12000, 1)}, {37, slot(8000, 1)}}));
+    t.playing = true;
+    PadParams p;
+    p.mode = PadMode::Gate;
+    t.run(6000, block, events, p);
+    if (ref.empty()) ref = t.out;
+    else CHECK(ref == t.out);
+  }
+  float pk = 0.f;
+  for (float x : ref) pk = std::max(pk, std::fabs(x));
+  CHECK(pk > 0.02f);
+  // no pad events: identical to the six-argument process
+  PadRig a(playback(src, {ev(1, 24000, 0, 960)}), bankOf({}));
+  a.playing = true;
+  a.run(4000, 512, {});
+  Renderer plain;
+  plain.prepare(Config{});
+  plain.mailbox().publish(playback(src, {ev(1, 24000, 0, 960)}));
+  std::vector<float> l(512), rr(512), in(512, 0.f), outAll;
+  double ppq = 0.0;
+  for (int done = 0; done < 4000; done += 512) {
+    const int n = std::min(512, 4000 - done);
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = ppq;
+    const float* inp[2] = {in.data(), in.data()};
+    float* outp[2] = {l.data(), rr.data()};
+    plain.process(tb, RenderParams{}, inp, outp, 2, n);
+    outAll.insert(outAll.end(), l.begin(), l.begin() + n);
+    ppq += n * 120.0 / (60.0 * 48000.0);
+  }
+  CHECK(outAll == a.out);
+}
+
+CHOP_TEST(pad_path_performs_no_heap_allocation_and_the_spsc_queue_keeps_order) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  Renderer r;
+  r.prepare(Config{});
+  r.mailbox().publish(playback(src, {ev(1, 24000, 0, 960)}));
+  r.padMailbox().publish(bankOf({{36, slot(24000, 1)}, {37, slot(24000, 1)}}));
+  std::vector<float> l(512), rr(512), in(512, 0.f);
+  std::array<PadEvent, 4> events = {noteOn(10, 36), noteOn(20, 37), noteOff(300, 36), noteOn(400, 36)};
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 100; ++i) {
+    TransportBlock tb;
+    tb.playing = true;
+    LiveInput live;
+    live.pads = events.data();
+    live.numPads = 4;
+    live.padParams.mode = i % 2 ? PadMode::Gate : PadMode::Mono;
+    r.process(tb, RenderParams{}, live, inp, outp, 2, 512);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+
+  SpscQueue<int, 4> q;
+  for (int i = 1; i <= 4; ++i) CHECK(q.push(i));
+  CHECK(!q.push(5));  // full: rejected, nothing lost or duplicated
+  int v = 0;
+  for (int i = 1; i <= 4; ++i) {
+    CHECK(q.pop(v));
+    CHECK_EQ(v, i);
+  }
+  CHECK(!q.pop(v) && q.empty());
+  CHECK(q.push(9) && q.pop(v) && v == 9);
+}
+
+// ---------------------------------------------------------------------------------------------
+// multi-output stems
+// ---------------------------------------------------------------------------------------------
+namespace {
+
+float peak(const std::vector<float>& v) {
+  float m = 0.f;
+  for (float x : v) m = std::max(m, std::fabs(x));
+  return m;
+}
+
+struct StemRun {
+  std::vector<float> main;
+  std::vector<std::vector<float>> aux;  // [bus] left channel
+};
+
+std::shared_ptr<const Playback> twoChopPlayback(const SourcePtr& src, std::uint8_t busA, std::uint8_t busB, std::uint8_t busC = 0) {
+  FlatEvent a = ev(1, 24000, 0, 960);
+  FlatEvent b = ev(2, 24000, 960, 960);
+  b.chop = ChopId{2};
+  b.tx.level = 0.5f;
+  FlatEvent c = ev(3, 24000, 1920, 960);
+  c.chop = ChopId{3};
+  c.tx.level = 0.25f;
+  BusRouting routing;
+  routing.chopBus = {{ChopId{1}, busA}, {ChopId{2}, busB}, {ChopId{3}, busC}};
+  auto r = makePlayback(src, {a, b, c}, 3840, &routing);
+  CHECK(r.ok());
+  return r.ok() ? r.value() : nullptr;
+}
+
+StemRun runStems(const std::shared_ptr<const Playback>& pb, int auxBuses, int enabledBuses, int block, float dry = 0.f, float gainDb = 0.f, const float* inputLevel = nullptr) {
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = auxBuses;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  StemRun out;
+  out.aux.resize(8);
+  std::vector<float> in(static_cast<std::size_t>(block), inputLevel ? *inputLevel : 0.f);
+  std::vector<float> l(static_cast<std::size_t>(block)), rr(static_cast<std::size_t>(block));
+  std::vector<std::vector<float>> al(8, std::vector<float>(static_cast<std::size_t>(block))), ar(8, std::vector<float>(static_cast<std::size_t>(block)));
+  RenderParams params;
+  params.dryMix = dry;
+  params.outputGainDb = gainDb;
+  for (std::int64_t done = 0; done < 96000; done += block) {
+    const int n = static_cast<int>(std::min<std::int64_t>(block, 96000 - done));
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = static_cast<double>(done) * 120.0 / (60.0 * 48000.0);
+    float* auxPairs[kMaxAuxBuses][2] = {};
+    AuxOutputs aux;
+    aux.count = enabledBuses;
+    for (int b = 0; b < enabledBuses; ++b) {
+      std::fill(al[static_cast<std::size_t>(b)].begin(), al[static_cast<std::size_t>(b)].end(), 0.7f);  // hosts do not clear aux buffers
+      std::fill(ar[static_cast<std::size_t>(b)].begin(), ar[static_cast<std::size_t>(b)].end(), 0.7f);
+      auxPairs[b][0] = al[static_cast<std::size_t>(b)].data();
+      auxPairs[b][1] = ar[static_cast<std::size_t>(b)].data();
+      aux.bus[b] = auxPairs[b];
+    }
+    const float* inp[2] = {in.data(), in.data()};
+    float* outp[2] = {l.data(), rr.data()};
+    r.process(tb, params, LiveInput{}, inp, outp, 2, n, aux);
+    out.main.insert(out.main.end(), l.begin(), l.begin() + n);
+    for (int b = 0; b < enabledBuses; ++b) out.aux[static_cast<std::size_t>(b)].insert(out.aux[static_cast<std::size_t>(b)].end(), al[static_cast<std::size_t>(b)].begin(), al[static_cast<std::size_t>(b)].begin() + n);
+  }
+  return out;
+}
+
+}  // namespace
+
+CHOP_TEST(bus_routing_lookup_and_event_bus_follow_the_sorted_events) {
+  BusRouting r;
+  r.chopBus = {{ChopId{2}, 3}, {ChopId{9}, 8}};
+  r.defaultBus = 1;
+  CHECK_EQ(r.busFor(ChopId{2}), 3);
+  CHECK_EQ(r.busFor(ChopId{9}), 8);
+  CHECK_EQ(r.busFor(ChopId{5}), 1);  // absent -> default
+  auto src = makeSource(1, 48000, 24000, dc);
+  auto pb = twoChopPlayback(src, 0, 0, 0);
+  CHECK(pb->eventBus.empty());  // everything on main keeps the plain form
+  pb = twoChopPlayback(src, 2, 0, 5);
+  CHECK_EQ(pb->eventBus.size(), pb->events.size());
+  for (std::size_t i = 0; i < pb->events.size(); ++i) CHECK_EQ(pb->eventBus[i], pb->events[i].chop.value == 1 ? 2 : (pb->events[i].chop.value == 3 ? 5 : 0));
+}
+
+CHOP_TEST(a_routed_chop_appears_only_on_its_bus_and_the_sum_equals_the_unrouted_main) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const auto unrouted = runStems(twoChopPlayback(src, 0, 0, 0), 0, 0, 512);
+  for (int block : {1, 7, 64, 333, 2048}) {
+    const auto routed = runStems(twoChopPlayback(src, 1, 0, 2), 2, 2, block);
+    // chop 1 (level 1.0) is on aux 1, chop 3 (0.25) on aux 2, chop 2 (0.5) on main
+    CHECK_NEAR(routed.aux[0][5000], 1.0, 1e-5);
+    CHECK_NEAR(routed.aux[0][24000 + 5000], 0.0, 1e-6);  // chop 2 is not on aux 1
+    CHECK_NEAR(routed.aux[1][2 * 24000 + 5000], 0.25, 1e-5);
+    CHECK_NEAR(routed.main[5000], 0.0, 1e-6);
+    CHECK_NEAR(routed.main[24000 + 5000], 0.5, 1e-5);
+    float worst = 0.f;
+    for (std::size_t i = 0; i < unrouted.main.size(); ++i)
+      worst = std::max(worst, std::fabs(routed.main[i] + routed.aux[0][i] + routed.aux[1][i] - unrouted.main[i]));
+    CHECK(worst < 1e-6f);
+    if (block != 512) {
+      const auto ref = runStems(twoChopPlayback(src, 1, 0, 2), 2, 2, 512);
+      CHECK(routed.aux[0] == ref.aux[0] && routed.aux[1] == ref.aux[1] && routed.main == ref.main);  // block-size independent
+    }
+  }
+}
+
+CHOP_TEST(disabled_aux_folds_into_main_bit_exactly_and_default_is_unchanged) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const auto plain = runStems(twoChopPlayback(src, 0, 0, 0), 0, 0, 512);
+  const auto foldedNoAux = runStems(twoChopPlayback(src, 3, 0, 1), 0, 0, 512);   // host enabled nothing
+  const auto foldedOne = runStems(twoChopPlayback(src, 3, 0, 0), 1, 1, 512);    // bus 3 is beyond the one enabled aux
+  CHECK(foldedNoAux.main == plain.main);
+  CHECK(foldedOne.main == plain.main);
+  CHECK(peak(foldedOne.aux[0]) < 1e-6f);  // the enabled aux bus stays silent
+}
+
+CHOP_TEST(dry_mix_reaches_main_only_output_gain_reaches_every_bus_and_silent_aux_is_zeroed) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  const float level = 0.3f;
+  const auto dryRun = runStems(twoChopPlayback(src, 1, 0, 0), 1, 1, 512, 1.0f, 0.f, &level);
+  CHECK_NEAR(dryRun.main[24000 + 5000], 0.5 + 0.3, 1e-4);   // chop 2 plus the dry input
+  CHECK_NEAR(dryRun.aux[0][5000], 1.0, 1e-4);                // the stem never contains the input
+  CHECK_NEAR(dryRun.aux[0][60000], 0.0, 1e-6);               // pre-filled with 0.7, rewritten with silence
+  const auto quiet = runStems(twoChopPlayback(src, 1, 0, 0), 1, 1, 512, 0.f, -6.0206f);
+  CHECK_NEAR(quiet.aux[0][5000], 0.5, 2e-3);
+  CHECK_NEAR(quiet.main[24000 + 5000], 0.25, 2e-3);
+  // disabled effect: everything silent but still written
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = 1;
+  r.prepare(cfg);
+  r.mailbox().publish(twoChopPlayback(src, 1, 0, 0));
+  std::vector<float> l(512), rr(512), in(512, 0.f), al(512, 0.7f), ar(512, 0.7f);
+  float* pair[2] = {al.data(), ar.data()};
+  AuxOutputs aux;
+  aux.count = 1;
+  aux.bus[0] = pair;
+  RenderParams off;
+  off.enabled = false;
+  TransportBlock tb;
+  tb.playing = tb.positionValid = true;
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  r.process(tb, off, LiveInput{}, inp, outp, 2, 512, aux);
+  CHECK(peak(al) == 0.f && peak(ar) == 0.f);
+}
+
+CHOP_TEST(stem_processing_never_allocates_and_offline_stems_sum_to_the_main_render) {
+  auto src = makeSource(1, 48000, 24000, dc);
+  auto pb = twoChopPlayback(src, 1, 0, 2);
+  Renderer r;
+  Config cfg;
+  cfg.auxBuses = 8;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  std::vector<float> l(512), rr(512), in(512, 0.f);
+  std::vector<std::vector<float>> bufs(16, std::vector<float>(512));
+  float* pairs[8][2];
+  AuxOutputs aux;
+  aux.count = 8;
+  for (int b = 0; b < 8; ++b) {
+    pairs[b][0] = bufs[static_cast<std::size_t>(b) * 2].data();
+    pairs[b][1] = bufs[static_cast<std::size_t>(b) * 2 + 1].data();
+    aux.bus[b] = pairs[b];
+  }
+  const float* inp[2] = {in.data(), in.data()};
+  float* outp[2] = {l.data(), rr.data()};
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 400; ++i) {
+    TransportBlock tb;
+    tb.playing = tb.positionValid = true;
+    tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
+    r.process(tb, RenderParams{}, LiveInput{}, inp, outp, 2, 512, aux);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+  OfflineSettings os;
+  os.tailSeconds = 0.0;
+  auto stems = renderOfflineStems(pb, os, 2);
+  auto plain = renderOffline(twoChopPlayback(src, 0, 0, 0), os);
+  CHECK(stems.ok() && plain.ok());
+  if (stems.ok() && plain.ok()) {
+    CHECK_EQ(stems.value().aux.size(), 2u);
+    float worst = 0.f;
+    for (std::size_t i = 0; i < plain.value()[0].size(); ++i)
+      worst = std::max(worst, std::fabs(stems.value().main[0][i] + stems.value().aux[0][0][i] + stems.value().aux[1][0][i] - plain.value()[0][i]));
+    CHECK(worst < 1e-6f);
+  }
+  CHECK(renderOffline(pb, os).ok());  // the plain offline render folds everything into main
+  CHECK(!renderOfflineStems(pb, os, 9).ok());
+}

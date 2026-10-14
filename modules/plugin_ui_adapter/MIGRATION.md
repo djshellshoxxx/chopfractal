@@ -12,6 +12,7 @@ Exact folders, in dependency order (minimum versions in parentheses):
 - `modules/source_chop/` (^0.1)
 - `modules/pattern_engine/` (^0.1)
 - `modules/variation_history/` (^0.1)
+- `modules/chop_roles_grammar/` (^0.1)
 - `modules/plugin_ui_adapter/` (this module)
 
 ## 2. Copy
@@ -31,6 +32,7 @@ add_subdirectory(modules/chop_contracts)
 add_subdirectory(modules/source_chop)
 add_subdirectory(modules/pattern_engine)
 add_subdirectory(modules/variation_history)
+add_subdirectory(modules/chop_roles_grammar)
 add_subdirectory(modules/plugin_ui_adapter)
 target_link_libraries(your_target PRIVATE chopfractal::plugin_ui_adapter)
 ```

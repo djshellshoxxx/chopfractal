@@ -16,6 +16,8 @@
 #include <chopfractal/pattern_engine/session.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <chopfractal/recursive_hit_zoom/zoom.hpp>
+#include <chopfractal/scenes/scenes.hpp>
+#include <chopfractal/time_stretch/stretch.hpp>
 #include <chopfractal/source_chop/analysis.hpp>
 #include <chopfractal/source_chop/chop_map.hpp>
 #include <chopfractal/state_codec/codec.hpp>
@@ -41,6 +43,27 @@ constexpr std::uint32_t kSessionSchemaVersion = 1;
 // (kCodecCeilingBytes) bounds what can ever be saved or loaded.
 constexpr std::size_t kMaxEmbeddedSourceBytes = 128u * 1024u * 1024u;
 constexpr std::size_t kCodecCeilingBytes = 256u * 1024u * 1024u;
+
+// One BlockedByRule note of the last Generate / Mutate / Evolve step, with display text.
+struct RuleNote {
+  int bar = 0;
+  int beat = 0;
+  std::uint32_t rule = 0;
+  std::string text;
+};
+struct EventExplanation {
+  bool allowed = true;
+  bool preserved = false;
+  bool handPlaced = false;
+  double weight = 1.0;
+  std::vector<std::uint32_t> rules;  // ascending, deduplicated
+  std::string text;
+};
+struct RulePreview {
+  int events = 0;
+  int blocked = 0;
+  std::vector<std::pair<std::uint32_t, int>> blockedByRule;  // sorted by rule id; id 0 = unnamed rule
+};
 
 struct Notice {
   enum class Level : std::uint8_t { Info, Warning, Error };
@@ -77,6 +100,78 @@ struct ExportReport {
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
 };
+struct SceneExportOptions {
+  bool list = true;       // scenes.tsv
+  bool midi = true;       // scene_NN_<name>.mid per scene
+  bool wav = false;       // scenes.wav: all scenes rendered back to back
+  double bpm = 120.0;
+  int baseNote = 36;
+  wav::Options wavOptions;
+  bool overwrite = false;
+};
+struct SceneStatus {
+  bool running = false;
+  scenes::SceneId playing = 0;
+  scenes::SceneId armed = 0;
+  int loopIndex = 0;
+  int loops = 0;
+  bool recording = false;
+  bool waitingForTransport = false;  // scene playback is armed but the host is not playing
+};
+
+// ---- live pads (docs/specs/roadmap/F07-performance-pads.md) ----
+struct PadSettings {
+  std::uint8_t baseNote = 36;        // chop i plays on note baseNote + i
+  std::uint8_t midiChannel = 0;      // 0 = omni, 1..16
+  std::uint8_t quantizeDivision = 16;  // recording grid: 0 off, 4, 8, 16, 32
+  bool quantizeTriplet = false;
+  std::uint8_t merge = 0;            // 0 add to the pattern, 1 replace the slots hit
+  std::map<std::uint64_t, std::uint8_t> chokeOverride;  // chop id -> 0 off, 1..4; absent = default (role "hat" -> 1)
+  friend bool operator==(const PadSettings& a, const PadSettings& b) {
+    return a.baseNote == b.baseNote && a.midiChannel == b.midiChannel && a.quantizeDivision == b.quantizeDivision &&
+           a.quantizeTriplet == b.quantizeTriplet && a.merge == b.merge && a.chokeOverride == b.chokeOverride;
+  }
+};
+struct TakeHit {
+  double ppqOn = 0.0;
+  double ppqOff = -1.0;  // < 0 = no note off seen
+  std::uint8_t note = 0;
+  std::uint8_t velocity = 100;
+};
+struct TakeOptions {
+  int quantizeDivision = 16;
+  bool triplet = false;
+  std::uint8_t merge = 0;
+  render::VelocityCurve curve = render::VelocityCurve::Linear;
+  render::PadMode mode = render::PadMode::Poly;
+  int baseNote = 36;
+};
+struct TakeReport {
+  int added = 0, replaced = 0, skippedLocked = 0, skippedCap = 0, skippedUnmapped = 0, skippedDuplicate = 0;
+};
+
+// ---- tempo matching (docs/specs/roadmap/F14-tempo-match-stretch.md) ----
+struct StretchRequest {
+  double sourceBpm = 120.0;
+  double targetBpm = 120.0;
+  stretch::Quality quality = stretch::Quality::Standard;
+};
+struct StretchPlan {
+  stretch::Plan plan;
+  std::shared_ptr<const render::SourceData> input;  // immutable snapshot taken at plan time
+  SourceId inputId;                                  // identity check at apply time
+  StretchRequest request;
+};
+
+// ---- output routing (docs/specs/roadmap/F11-multi-output-stems.md) ----
+enum class RoutingMode : std::uint8_t { MainOnly = 0, ByRole = 1, ByChop = 2, Custom = 3 };
+struct OutputRouting {
+  RoutingMode mode = RoutingMode::MainOnly;
+  std::map<std::string, std::uint8_t> roleBus;  // role name -> bus 0..8 (0 = main)
+  std::map<std::uint64_t, std::uint8_t> chopBus;  // explicit per-chop override -> bus 0..8
+  friend bool operator==(const OutputRouting& a, const OutputRouting& b) { return a.mode == b.mode && a.roleBus == b.roleBus && a.chopBus == b.chopBus; }
+};
+
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
@@ -87,6 +182,9 @@ struct KitOptions {
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
 using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(const source::SourceInfo&)>;
+
+// Content hash of decoded audio (the identity a saved project compares against).
+SourceId sourceIdOf(const render::SourceData& data);
 
 class ProjectSession {
  public:
@@ -101,9 +199,16 @@ class ProjectSession {
 
   // ---- source and chops ----
   Status loadSource(std::shared_ptr<const render::SourceData> data, std::string name, std::string path = {});
+  // Audio recorded in memory has no file to reload: it is a source with an empty path.
+  Status loadCapturedSource(std::shared_ptr<const render::SourceData> data, std::string name) {
+    return loadSource(std::move(data), std::move(name), {});
+  }
+  // True when saving without embedding would lose the audio (the source has no file path).
+  bool sourceNeedsEmbed() const { return chopMap_.has_value() && chopMap_->info().path.empty(); }
   void clearSource();
   bool hasSource() const { return chopMap_.has_value(); }
   bool sourceMissing() const { return chopMap_.has_value() && !sourceData_; }
+  std::shared_ptr<const render::SourceData> sourceData() const { return sourceData_; }
   const source::ChopMap* chopMap() const { return chopMap_ ? &*chopMap_ : nullptr; }
   ChopSnapshotPtr chops() const { return chops_; }
 
@@ -122,6 +227,12 @@ class ProjectSession {
   const roles::RoleMap& roleMap() const { return roles_; }
   const roles::RuleSet& rules() const { return rules_; }
 
+  Status clearRole(ChopId chop);  // NotFound for an unknown chop; Ok when it had no role
+  const std::vector<RuleNote>& lastRuleNotes() const { return ruleNotes_; }
+  Result<EventExplanation> explainEvent(EventId id) const;
+  // Counts what `draft` would block when generating with `settings`. Pure: no state, history or notices change.
+  Result<RulePreview> previewRules(const roles::RuleSet& draft, const pattern::Settings& settings) const;
+
   // ---- pattern ----
   const pattern::Pattern* pattern() const { return patterns_.hasPattern() ? &patterns_.current() : nullptr; }
   Status generate(const pattern::Settings& settings, const std::string& label = {});
@@ -136,8 +247,67 @@ class ProjectSession {
   Status commitEdit(const std::string& label = {});  // settled manual edits become one history node
   bool undo();
   bool redo();
-  Status storeSnapshot(std::size_t slot) { return patterns_.storeSnapshot(slot); }
+  Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
+
+  // ---- output routing: per-chop / per-role stems on the aux outputs ----
+  Status setOutputRouting(const OutputRouting& routing);
+  const OutputRouting& outputRouting() const { return routing_; }
+  int autoRouteByRole();  // one output per role in snapshot order (max 8); returns roles routed
+  int autoRouteByChop();  // chop n -> output 1 + (n % 8); returns chops routed
+  void setAuxBusesAvailable(int n) { auxAvailable_ = n < 0 ? 0 : (n > render::kMaxAuxBuses ? render::kMaxAuxBuses : n); }
+  int auxBusesAvailable() const { return auxAvailable_; }
+  std::uint8_t effectiveBus(ChopId chop) const;  // chopBus, else the chop's role route, else main
+
+  // ---- tempo matching ----
+  // Validates the request and snapshots the audio; the heavy stretch::stretch runs elsewhere (a worker thread).
+  Result<StretchPlan> planStretch(const StretchRequest& request) const;
+  // All-or-nothing: replaces the source with `stretched`, scales markers and sub-regions, keeps ids, roles and locks.
+  Status applyStretched(const StretchPlan& plan, std::shared_ptr<const render::SourceData> stretched);
+
+  // ---- live pads ----
+  void attachPadMailbox(render::Mailbox<render::PadBank>* mailbox) {
+    padMailbox_ = mailbox;
+    publishPadBank();
+  }
+  Status setPadSettings(const PadSettings& settings);
+  const PadSettings& padSettings() const { return padSettings_; }
+  Status setChokeGroup(ChopId chop, std::uint8_t group);  // 0 off, 1..4
+  Result<TakeReport> mergeTake(const std::vector<TakeHit>& hits, const TakeOptions& options);
+
+  // ---- Evolve scenes (docs/specs/roadmap/F09-evolve-scenes.md) ----
+  // Scene playback is an override: pattern(), history and undo are never touched while scenes play, and any command
+  // that changes the pattern stops it. Switches are armed in the renderer so they land on the loop-boundary frame.
+  void attachArmMailbox(render::Mailbox<render::ArmedSwitch>* mailbox) { armMailbox_ = mailbox; }
+  const scenes::SceneList& sceneList() const { return sceneList_; }
+  Result<scenes::SceneId> captureScene(const std::string& name = {});
+  Status updateScene(scenes::SceneId id);
+  Status editScene(scenes::SceneId id, const std::function<void(scenes::Scene&)>& edit);
+  Status removeScene(scenes::SceneId id);
+  Status moveScene(scenes::SceneId id, int newIndex);
+  Status clearScenes();
+  Status setSceneWrap(bool wrap);
+  Status setRecordScenes(bool on);
+  bool recordingScenes() const { return recordingScenes_; }
+  Status playScenes(scenes::SceneId first = 0, Quantize when = Quantize::LoopBoundary);
+  Status stopScenes();
+  void onSceneBoundary(std::uint64_t appliedToken);  // call after onLoopBoundary(), same lock
+  void onTransportChanged(bool playing);             // host play/stop edges
+  SceneStatus sceneStatus() const;
+  Status keepScene(scenes::SceneId id, const std::string& label = {});
+  Result<ExportReport> exportScenes(const std::string& directory, const SceneExportOptions& options) const;
+
+  // ---- A/B morph (docs/specs/roadmap/F10-ab-morph.md) ----
+  // A live preview blended from the A and B slots. It changes only the playback: pattern(), history and undo are
+  // untouched until commitMorph(). Any command that changes the pattern or source ends the preview with a notice.
+  Status beginMorph(double t = 0.5);
+  Status setMorph(double t);  // 0..1; a failure keeps the previous preview
+  bool hasMorphSlots() const { return patterns_.hasSnapshot(0) && patterns_.hasSnapshot(1); }
+  bool morphActive() const { return morphActive_; }
+  double morphAmount() const { return morphT_; }
+  Status commitMorph(const std::string& label = {});  // freezes the draws; one history node and one undo step
+  void cancelMorph();                                 // republishes the real pattern; no notice
+  const pattern::Pattern* displayPattern() const;     // the morph preview or the playing scene, else pattern()
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -199,6 +369,17 @@ class ProjectSession {
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
+  void endMorph(bool announce);
+  void publishPadBank();
+  Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p) const;
+  Result<std::shared_ptr<const render::Playback>> buildScenePlayback(const scenes::Scene& scene, pattern::Pattern* out = nullptr) const;
+  void stopScenesForEdit(bool announce, bool republishNow);
+  void cancelArm();
+  bool armScene(scenes::SceneId id);
+  void installScene(scenes::SceneId id, const std::shared_ptr<const render::Playback>& pb);
+  void mirrorArmedScene(scenes::SceneId id);
+  void recordRuleNotes(const pattern::GenerationReport& report);
+  Status refreshMorph();
   bool settleRestoredPattern();
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
@@ -223,6 +404,26 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  OutputRouting routing_;
+  int auxAvailable_ = 0;
+  render::BusRouting makeBusRouting() const;
+  PadSettings padSettings_;
+  render::Mailbox<render::PadBank>* padMailbox_ = nullptr;
+  scenes::SceneList sceneList_;
+  scenes::Sequencer sequencer_;
+  render::Mailbox<render::ArmedSwitch>* armMailbox_ = nullptr;
+  std::uint64_t armToken_ = 0;
+  scenes::SceneId armedScene_ = 0;
+  scenes::SceneId startPending_ = 0;  // first scene armed for the next boundary; the sequencer starts when it lands
+  std::shared_ptr<const render::Playback> armedHold_;
+  std::shared_ptr<const pattern::Pattern> sceneOverride_;
+  bool recordingScenes_ = false;
+  bool transportPlaying_ = false;
+  std::vector<RuleNote> ruleNotes_;
+  bool morphActive_ = false;
+  bool committingMorph_ = false;
+  double morphT_ = 0.5;
+  std::shared_ptr<const pattern::Pattern> morphPreview_;
   std::vector<Notice> notices_;
 };
 

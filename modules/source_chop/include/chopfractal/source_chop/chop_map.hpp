@@ -62,6 +62,12 @@ class ChopMap {
  public:
   static Result<ChopMap> create(SourceInfo info, std::int64_t minRegionFrames = kDefaultMinRegionFrames);
 
+  // Copies `from` onto a source whose timeline was scaled from `inFrames` to `outFrames` (tempo matching): every marker
+  // keeps its id, flags and label; positions, trims and fades are scaled with floor((2*x*out + in) / (2*in)) from the
+  // ORIGINAL value, so nothing drifts. Markers that end up closer than the minimum region return Conflict with the
+  // number of too-short regions in `hint`. The result has a fresh undo history.
+  static Result<ChopMap> rescaled(const ChopMap& from, SourceInfo newInfo, std::int64_t inFrames, std::int64_t outFrames);
+
   const SourceInfo& info() const { return info_; }
   std::int64_t minRegionFrames() const { return minRegion_; }
   const std::vector<Marker>& markers() const { return history_.current().markers; }

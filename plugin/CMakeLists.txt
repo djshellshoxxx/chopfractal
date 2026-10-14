@@ -48,15 +48,31 @@ if(CHOPFRACTAL_BUILD_STANDALONE)
   endif()
 endif()
 
+# Generated BuildInfo.h (version, build number, git sha, release flag).
+execute_process(COMMAND git rev-parse --short=7 HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                OUTPUT_VARIABLE CF_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT CF_GIT_SHA)
+  set(CF_GIT_SHA "unknown")
+endif()
+if(CHOPFRACTAL_RELEASE)
+  set(CF_IS_RELEASE "true")
+else()
+  set(CF_IS_RELEASE "false")
+endif()
+configure_file(src/BuildInfo.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h" @ONLY)
+
 juce_add_plugin(ChopFractal
   COMPANY_NAME "ChopFractal"
   PRODUCT_NAME "ChopFractal"
+  VERSION ${PROJECT_VERSION}
+  BUILD_VERSION ${CHOPFRACTAL_BUILD_NUMBER}
+  BUNDLE_ID com.chopfractal.ChopFractal
   PLUGIN_MANUFACTURER_CODE Cfrc
   PLUGIN_CODE Cfx1
   FORMATS ${CHOPFRACTAL_FORMATS}
   VST3_CATEGORIES Fx
   IS_SYNTH FALSE
-  NEEDS_MIDI_INPUT FALSE
+  NEEDS_MIDI_INPUT TRUE
   NEEDS_MIDI_OUTPUT FALSE
   IS_MIDI_EFFECT FALSE
   EDITOR_WANTS_KEYBOARD_FOCUS TRUE
@@ -77,10 +93,10 @@ if(CHOPFRACTAL_BUILD_CLAP)
   endif()
 endif()
 
-target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
-target_include_directories(ChopFractal PRIVATE src)
+target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp src/RulesPanel.cpp src/PadInput.cpp src/PadPanel.cpp src/StretchController.cpp src/TempoPanel.cpp src/OutputsPanel.cpp src/ScenePanel.cpp src/Log.cpp)
+target_include_directories(ChopFractal PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # Warnings for our own plugin sources only (JUCE's module sources are compiled into the same target and stay untouched).
-set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp tests/test_plugin_shell.cpp)
+set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp src/RulesPanel.cpp src/PadInput.cpp src/PadPanel.cpp src/StretchController.cpp src/TempoPanel.cpp src/OutputsPanel.cpp src/ScenePanel.cpp src/Log.cpp tests/test_plugin_shell.cpp)
 if(MSVC)
   set(_cf_warn /W4 $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:/WX>)
 else()
@@ -92,6 +108,8 @@ target_compile_definitions(ChopFractal PUBLIC
 target_link_libraries(ChopFractal
   PRIVATE
     chopfractal::composition
+    chopfractal::input_capture
+    chopfractal::time_stretch
     chopfractal::plugin_ui_adapter
     chopfractal::preset_store
     chopfractal::plugin_host_adapter
@@ -110,11 +128,11 @@ endif()
 # host-time translation and audio path.
 if(CHOPFRACTAL_BUILD_TESTS)
   juce_add_console_app(ChopFractalShellTests PRODUCT_NAME "ChopFractalShellTests")
-  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
-  target_include_directories(ChopFractalShellTests PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
-  target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp src/RulesPanel.cpp src/PadInput.cpp src/PadPanel.cpp src/StretchController.cpp src/TempoPanel.cpp src/OutputsPanel.cpp src/ScenePanel.cpp src/Log.cpp)
+  target_include_directories(ChopFractalShellTests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated" ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
+  target_compile_definitions(ChopFractalShellTests PUBLIC CHOPFRACTAL_VERSION_FILE="${CMAKE_CURRENT_LIST_DIR}/../VERSION" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
   target_link_libraries(ChopFractalShellTests PRIVATE
-    chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter
+    chopfractal::composition chopfractal::input_capture chopfractal::time_stretch chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter
     juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
   add_test(NAME plugin.shell COMMAND ChopFractalShellTests)
 endif()

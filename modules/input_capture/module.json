@@ -1,0 +1,42 @@
+{
+  "id": "input_capture",
+  "name": "Input capture",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::input_capture",
+  "public_headers": [
+    "include/chopfractal/input_capture/capture.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Result and Status error types"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Message thread: arm, startNow, requestStop, discard, take, status, reap. Audio thread: process only (no allocation, locks or I/O). Lifecycle calls from other threads are lock-free handoffs through atomics.",
+  "platforms": "Any C++17 compiler. No JUCE and no host types.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/input_capture -B build/input_capture && cmake --build build/input_capture && ctest --test-dir build/input_capture",
+  "summary": "Records the track input into a preallocated buffer: Arm, Capture, Stop, Keep. Synced mode starts on the next bar line and ends by host position (bar-exact through tempo changes); Free mode is a ring that keeps the last N seconds. Output is identical for any host block size.",
+  "public_api": [
+    "`CaptureEngine::arm/startNow/requestStop/discard/take/status/reap/onPrepare/process`",
+    "`ArmSettings`, `CaptureTransport`, `CaptureStatus`, `CapturedAudio`, `maxCaptureFrames()`"
+  ],
+  "limits": [
+    "Mono or stereo, 8 kHz to 384 kHz, at most 60 s, 100 MiB and 11,520,000 frames; synced captures of 1 to 8 bars; synced captures that cannot fit are refused, free ring captures are clamped"
+  ],
+  "adapters": [
+    "Call `process()` from the audio callback before anything overwrites the input buffer, passing the host transport; poll `status()` and call `reap()` from a UI timer; call `take()` on a worker thread."
+  ],
+  "adapter_notes": "The captured samples are planar floats at the host rate; wrap them in your own source type.",
+  "removal": "Delete the folder; callers lose live input capture only.",
+  "example": "examples/minimal.cpp"
+}

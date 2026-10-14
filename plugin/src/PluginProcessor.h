@@ -9,8 +9,13 @@
 #include <array>
 #include <atomic>
 #include <chopfractal/composition/project_session.hpp>
+#include <chopfractal/input_capture/capture.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
+
+#include "CaptureController.h"
+#include "PadInput.h"
+#include "StretchController.h"
 
 class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
@@ -26,7 +31,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   using juce::AudioProcessor::processBlock;
   juce::AudioProcessorEditor* createEditor() override;
   bool hasEditor() const override { return true; }
-  bool acceptsMidi() const override { return false; }
+  bool acceptsMidi() const override { return true; }
   bool producesMidi() const override { return false; }
   bool isMidiEffect() const override { return false; }
   double getTailLengthSeconds() const override { return 0.0; }
@@ -55,6 +60,17 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void stopPlayback();
   void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
+  CaptureController& captureController() { return capture_; }
+  // ---- live pads ----
+  StretchController& stretchController() { return stretch_; }
+  int activeAuxBuses() const { return auxBuses_.load(std::memory_order_relaxed); }  // aux stereo outputs the host enabled
+  PadInput& pads() { return pads_; }
+  void padTrigger(int note, int velocity, bool on) { pads_.trigger(note, velocity, on); }
+  void setRecordArmed(bool armed);
+  void discardTake();
+  void flushTake(const char* why = nullptr);  // merges the recorded take into the pattern (one undo step)
+  juce::ThreadPool& workerPool() { return loadPool_; }
+  double currentSampleRate() const { return sampleRate_.load(std::memory_order_relaxed); }
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);
 
@@ -69,10 +85,14 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
   double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }
 
+  static constexpr double kMaxSourceSeconds = 60.0;
+  static constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
+
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
+  static BusesProperties makeBusLayout();
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -80,10 +100,15 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Declaration order matters: the renderer must outlive the session that publishes into its mailbox.
   chopfractal::render::Renderer renderer_;
   chopfractal::composition::ProjectSession session_;
+  CaptureController capture_{*this};
+  PadInput pads_;
+  StretchController stretch_{*this};
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};
+  std::atomic<int> auxBuses_{0};
   std::atomic<double> patternQuarters_{0.0};
+  bool sceneTransportPlaying_ = false;  // message thread: last host play state passed to the scene sequencer
   std::atomic<std::uint32_t> boundaryCount_{0};
   std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};

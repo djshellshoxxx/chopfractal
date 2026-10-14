@@ -732,3 +732,29 @@ CHOP_TEST(rendered_midi_and_wav_bytes_match_the_exported_files_exactly) {
   badw.tailSeconds = 99;
   CHECK(!s.renderWavBytes(badw).ok());
 }
+
+CHOP_TEST(captured_source_loads_chops_and_roundtrips_embedded) {
+  ProjectSession s;
+  CHECK(s.loadCapturedSource(loopAudio(), "Capture 2026-01-01 00:00"));
+  CHECK(s.hasSource());
+  CHECK(s.sourceNeedsEmbed());
+  CHECK(s.smartSetup(120.0).ok());
+  CHECK(s.chopMap()->markers().size() >= 4);
+  auto saved = s.saveState(true);
+  CHECK(saved.ok());
+  ProjectSession t;
+  CHECK(t.loadState(saved.value().data(), saved.value().size(), [](const source::SourceInfo&) { return nullptr; }));
+  CHECK(!t.sourceMissing());
+  CHECK_EQ(t.chopMap()->info().frames, 96000);
+  CHECK(t.sourceNeedsEmbed());
+}
+
+CHOP_TEST(pathless_source_without_embed_reports_missing) {
+  ProjectSession s;
+  CHECK(s.loadCapturedSource(loopAudio(), "Capture"));
+  auto saved = s.saveState(false);
+  CHECK(saved.ok());
+  ProjectSession t;
+  CHECK(t.loadState(saved.value().data(), saved.value().size(), [](const source::SourceInfo&) { return nullptr; }));
+  CHECK(t.sourceMissing());
+}

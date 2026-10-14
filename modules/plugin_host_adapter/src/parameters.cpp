@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace chopfractal::host {
 
@@ -24,6 +25,8 @@ const std::vector<ParamDef>& parameterManifest() {
       {"allow_crunch", "Allow Crunch", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 2, nullptr},
       {"fx_intensity", "Effect Intensity", "%", ParamKind::Float, 0.0, 1.0, 0.5, 0.0, 20.0, 2, nullptr},
       {"chaos", "Chaos", "%", ParamKind::Float, 0.0, 1.0, 0.0, 0.0, 20.0, 3, nullptr},
+      {"perf_mode", "Pad Mode", "", ParamKind::Choice, 0.0, 2.0, 0.0, 1.0, 0.0, 4, "Poly|Mono|Gate"},
+      {"perf_velocity_curve", "Velocity Curve", "", ParamKind::Choice, 0.0, 3.0, 0.0, 1.0, 0.0, 4, "Linear|Soft|Hard|Fixed"},
   };
   return manifest;
 }
@@ -100,8 +103,59 @@ TimeTranslation translateHostTime(const HostTimeInfo& host, double manualBpm, Ti
   return t;
 }
 
+namespace {
+std::string numberText(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%g", v);
+  return buf;
+}
+std::string choiceLabel(const ParamDef& def, int index) {
+  std::string all = def.choices ? def.choices : "";
+  int i = 0;
+  std::size_t start = 0;
+  while (true) {
+    const std::size_t bar = all.find('|', start);
+    const std::string item = all.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+    if (i == index) return item;
+    if (bar == std::string::npos) return {};
+    start = bar + 1;
+    ++i;
+  }
+}
+}  // namespace
+
+std::string describeParam(const ParamDef& def, double plain) {
+  const double v = snapValue(def, plain);
+  const std::string unit = def.unit ? def.unit : "";
+  const std::string name = def.name;
+  if (def.kind == ParamKind::Bool) return name + ": " + (v >= 0.5 ? "on" : "off") + " (default " + (def.defaultValue >= 0.5 ? "on" : "off") + ")";
+  if (def.kind == ParamKind::Choice) {
+    std::string all = def.choices ? def.choices : "";
+    std::string list;
+    for (char c : all) list += c == '|' ? std::string(", ") : std::string(1, c);
+    return name + ": " + choiceLabel(def, static_cast<int>(std::lround(v))) + (unit.empty() ? "" : " " + unit) + " (choices: " + list + "; default " + choiceLabel(def, static_cast<int>(std::lround(def.defaultValue))) + ")";
+  }
+  if (unit == "%") {
+    return name + ": " + numberText(std::round(v * 100.0)) + "% (range " + numberText(def.minValue * 100.0) + "% to " + numberText(def.maxValue * 100.0) + "%, default " +
+           numberText(def.defaultValue * 100.0) + "%)";
+  }
+  char value[48];
+  std::snprintf(value, sizeof value, "%.2f", v);
+  const std::string suffix = unit.empty() ? "" : " " + unit;
+  return name + ": " + value + suffix + " (range " + numberText(def.minValue) + " to " + numberText(def.maxValue) + suffix + ", default " + numberText(def.defaultValue) + suffix + ")";
+}
+
 bool isSupportedBusLayout(int inputChannels, int outputChannels) {
   return (inputChannels == 1 || inputChannels == 2) && inputChannels == outputChannels;
+}
+
+bool isSupportedBusLayout(int inputChannels, int outputChannels, const int* aux, int numAux) {
+  if (!isSupportedBusLayout(inputChannels, outputChannels)) return false;
+  for (int i = 0; aux && i < numAux; ++i) {
+    if (aux[i] == 0) continue;
+    if (aux[i] != 2 || inputChannels != 2) return false;
+  }
+  return true;
 }
 
 }  // namespace chopfractal::host

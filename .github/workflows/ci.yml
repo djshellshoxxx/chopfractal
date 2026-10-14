@@ -21,8 +21,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 tools/check_modules.py
       - run: python3 tools/gen_module_docs.py --check
+      - run: python3 tools/check_version.py && python3 -m unittest tools/tests/test_check_version.py
+      - name: Release license gate refuses an undecided JUCE license
+        run: '! cmake -S . -B build-gate -DCHOPFRACTAL_RELEASE=ON'
       # Standard headers must be included directly, not inherited from one compiler's library internals.
       - run: python3 tools/check_includes.py
+      # Licensing: no GPL/LGPL/commercial stretch engines (docs/specs/roadmap/F14-tempo-match-stretch.md).
+      - run: '! grep -rIliE "rubberband|soundtouch|elastique" --include=CMakeLists.txt --include=*.cmake --include=*.hpp --include=*.cpp --include=module.json modules composition plugin tools'
 
   # Every module and the composition root, on each supported compiler/OS. The golden determinism hashes in
   # pattern_engine make a cross-platform divergence fail loudly here.
@@ -67,6 +72,11 @@ jobs:
           cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
           cmake --build build-tsan --target test_audio_renderer
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
+      - name: ThreadSanitizer on the input capture engine
+        run: |
+          cmake -S modules/input_capture -B build-tsan-capture -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan-capture --target test_input_capture
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan-capture/test_input_capture
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
   transfer-smoke:

@@ -10,12 +10,13 @@
 
 #include <array>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace chopfractal::host {
 
-constexpr int kManifestVersion = 3;
+constexpr int kManifestVersion = 4;
 
 enum class ParamKind { Float, Choice, Bool };
 
@@ -36,6 +37,8 @@ enum ParamIndex : std::size_t {
   kAllowCrunch,
   kFxIntensity,
   kChaos,         // manifest version 3
+  kPerfMode,           // manifest version 4: live pad behavior (Poly, Mono, Gate)
+  kPerfVelocityCurve,  // manifest version 4: Linear, Soft, Hard, Fixed
   kParamCount
 };
 
@@ -55,6 +58,11 @@ struct ParamDef {
 
 const std::vector<ParamDef>& parameterManifest();
 const ParamDef* findParam(std::string_view id);
+
+// One-line tooltip text with the current value, range and default, e.g.
+//   "Density: 50% (range 0% to 100%, default 50%)"   "Output Gain: -6.00 dB (range -60 to 12 dB, default 0 dB)"
+//   "Pattern Length: 4 bars (choices: 1, 2, 4, 8; default 4)"   "Effect Enable: on (default on)"
+std::string describeParam(const ParamDef& def, double plainValue);
 
 double snapValue(const ParamDef& def, double plain);       // clamp to range and round to step/choice
 double normalize(const ParamDef& def, double plain);       // plain -> [0, 1]

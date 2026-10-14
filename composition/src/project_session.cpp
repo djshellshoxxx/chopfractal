@@ -3,8 +3,16 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace chopfractal::composition {
+
+SourceId sourceIdOf(const render::SourceData& d) {
+  std::vector<const float*> ptrs;
+  for (int c = 0; c < d.channels; ++c) ptrs.push_back(d.channel(c));
+  return source::computeSourceId(ptrs.data(), d.channels, d.frames, d.sampleRate);
+}
+
 namespace {
 
 // The dependency-free modules (state_codec, variation_history) own private Error types with the same
@@ -19,6 +27,9 @@ constexpr char kModPattern[] = "pattern_engine";
 constexpr char kModRoles[] = "chop_roles_grammar";
 constexpr char kModHistory[] = "variation_history";
 constexpr char kModAudio[] = "source_audio";
+constexpr char kModScenes[] = "scenes";
+constexpr char kModPads[] = "pads";
+constexpr char kModRouting[] = "routing";
 constexpr char kModSession[] = "composition";
 
 std::vector<const float*> channelPointers(const render::SourceData& d) {
@@ -32,10 +43,7 @@ bool validSource(const std::shared_ptr<const render::SourceData>& d) {
          d->samples.size() == static_cast<std::size_t>(d->channels) * static_cast<std::size_t>(d->frames);
 }
 
-SourceId idOf(const render::SourceData& d) {
-  auto ptrs = channelPointers(d);
-  return source::computeSourceId(ptrs.data(), d.channels, d.frames, d.sampleRate);
-}
+SourceId idOf(const render::SourceData& d) { return sourceIdOf(d); }
 
 Result<source::Proposal> propose(const std::optional<source::ChopMap>& map, const render::SourceData* data, const DetectOptions& o) {
   if (!map) return makeError(ErrorCode::InvalidArgument, "load a source first");
@@ -120,6 +128,7 @@ std::vector<Notice> ProjectSession::takeNotices() {
 }
 
 void ProjectSession::noteReport(const pattern::GenerationReport& report) {
+  recordRuleNotes(report);
   int locked = 0;
   bool limited = false;
   for (const pattern::Note& n : report.notes) {
@@ -143,8 +152,10 @@ void ProjectSession::attachMailbox(render::Mailbox<render::Playback>* mailbox) {
 }
 
 void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
+  if (pb != armedHold_) cancelArm();  // an edit or a loaded project must never be overwritten by a stale armed scene
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
+  publishPadBank();
 }
 
 std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
@@ -158,14 +169,19 @@ std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
 // playback publication
 // ---------------------------------------------------------------------------------------------
 
-Status ProjectSession::installPlayback(const pattern::Pattern& p) {
+Result<std::shared_ptr<const render::Playback>> ProjectSession::buildPlayback(const pattern::Pattern& p) const {
   if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
   auto flat = pattern::flatten(p, *chops_);
   if (!flat.ok()) return flat.error();
-  if (!sourceData_) return {};  // source missing: pattern authoring continues without audio
-  auto pb = render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p));
+  if (!sourceData_) return std::shared_ptr<const render::Playback>();  // source missing: pattern authoring continues without audio
+  const render::BusRouting routing = makeBusRouting();
+  return render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p), &routing);
+}
+
+Status ProjectSession::installPlayback(const pattern::Pattern& p) {
+  auto pb = buildPlayback(p);
   if (!pb.ok()) return pb.error();
-  publish(pb.value());
+  if (pb.value()) publish(pb.value());
   return {};
 }
 
@@ -187,6 +203,8 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   if (!result.ok()) return result.error();
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
+  endMorph(!committingMorph_);
+  stopScenesForEdit(true, false);
   patterns_.adopt(std::move(result.value()));
   pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
@@ -231,6 +249,12 @@ Result<render::PreviewRequest> ProjectSession::auditionRequest(ChopId chop) cons
 // ---------------------------------------------------------------------------------------------
 
 Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data, std::string name, std::string path) {
+  routing_ = OutputRouting{};  // new chops: routes restart on main
+  stopScenesForEdit(false, false);
+  sceneList_ = scenes::SceneList{};
+  recordingScenes_ = false;
+  padSettings_.chokeOverride.clear();  // chop ids belong to the old source
+  endMorph(true);
   if (!validSource(data)) return makeError(ErrorCode::InvalidArgument, "the audio buffer is empty or malformed");
   source::SourceInfo info;
   info.id = idOf(*data);
@@ -257,6 +281,13 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 }
 
 void ProjectSession::clearSource() {
+  routing_ = OutputRouting{};  // new chops: routes restart on main
+  stopScenesForEdit(false, false);
+  sceneList_ = scenes::SceneList{};
+  recordingScenes_ = false;
+  padSettings_.chokeOverride.clear();  // chop ids belong to the old source
+  endMorph(true);
+  ruleNotes_.clear();
   sourceData_.reset();
   chopMap_.reset();
   chops_.reset();
@@ -314,7 +345,9 @@ Status ProjectSession::redoMarkers() {
 }
 
 Status ProjectSession::reconcileAfterMarkerChange() {
+  endMorph(true);
   chops_ = chopMap_->snapshot();
+  for (auto it = routing_.chopBus.begin(); it != routing_.chopBus.end();) it = chops_->find(ChopId{it->first}) ? std::next(it) : routing_.chopBus.erase(it);  // routes of vanished chops
   std::vector<ChopId> ids;  // roles follow the marker, so disabling a chop and enabling it again keeps its role
   for (const source::Marker& m : chopMap_->markers()) ids.push_back(m.id);
   roles_.retainOnly(ids);
@@ -340,7 +373,9 @@ Status ProjectSession::relinkSource(std::shared_ptr<const render::SourceData> da
 
 Status ProjectSession::assignRole(ChopId chop, const std::string& role) {
   if (!chopMap_ || !chopMap_->find(chop)) return makeError(ErrorCode::NotFound, "unknown chop");
-  return roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  Status st = roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  if (st.ok()) publishPadBank();  // a role can change the default choke group
+  return st;
 }
 
 Status ProjectSession::setRules(roles::RuleSet rules) {
@@ -419,6 +454,8 @@ bool ProjectSession::settleRestoredPattern() {
 
 bool ProjectSession::undo() {
   if (!patterns_.undo()) return false;
+  endMorph(true);
+  stopScenesForEdit(true, false);
   if (!settleRestoredPattern()) {
     patterns_.redo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
@@ -430,6 +467,8 @@ bool ProjectSession::undo() {
 
 bool ProjectSession::redo() {
   if (!patterns_.redo()) return false;
+  endMorph(true);
+  stopScenesForEdit(true, false);
   if (!settleRestoredPattern()) {
     patterns_.undo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
@@ -440,6 +479,8 @@ bool ProjectSession::redo() {
 }
 
 Status ProjectSession::recallSnapshot(std::size_t slot) {
+  stopScenesForEdit(true, false);
+  endMorph(true);
   Status s = patterns_.recallSnapshot(slot);
   if (!s.ok()) return s;
   if (!settleRestoredPattern()) {
@@ -560,6 +601,8 @@ Status ProjectSession::activate(history::NodeId node, Quantize when) {
 }
 
 Status ProjectSession::applyActivation(history::NodeId node) {
+  stopScenesForEdit(true, false);
+  endMorph(true);
   auto snap = history_.getSnapshot(node);
   if (!snap.ok()) return convert(snap.error());
   auto p = pattern::deserialize(snap.value().payload->data(), snap.value().payload->size());
@@ -647,6 +690,38 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     for (float f : sourceData_->samples) w.f32(f);
     st.modules[kModAudio] = {1, std::move(payload)};
   }
+  if (!sceneList_.scenes.empty()) st.modules[kModScenes] = {scenes::kSchemaVersion, scenes::serialize(sceneList_)};  // absent when empty
+  if (!(padSettings_ == PadSettings{})) {  // absent for projects that never touched the pads
+    std::vector<std::uint8_t> pads;
+    bytes::Writer pw(pads);
+    pw.u8(padSettings_.baseNote);
+    pw.u8(padSettings_.midiChannel);
+    pw.u8(padSettings_.quantizeDivision);
+    pw.boolean(padSettings_.quantizeTriplet);
+    pw.u8(padSettings_.merge);
+    pw.u32(static_cast<std::uint32_t>(padSettings_.chokeOverride.size()));
+    for (const auto& kv : padSettings_.chokeOverride) {
+      pw.u64(kv.first);
+      pw.u8(kv.second);
+    }
+    st.modules[kModPads] = {1, std::move(pads)};
+  }
+  if (!(routing_ == OutputRouting{})) {  // absent when routing was never used
+    std::vector<std::uint8_t> rt;
+    bytes::Writer rw(rt);
+    rw.u8(static_cast<std::uint8_t>(routing_.mode));
+    rw.u32(static_cast<std::uint32_t>(routing_.roleBus.size()));
+    for (const auto& kv : routing_.roleBus) {
+      rw.str(kv.first);
+      rw.u8(kv.second);
+    }
+    rw.u32(static_cast<std::uint32_t>(routing_.chopBus.size()));
+    for (const auto& kv : routing_.chopBus) {
+      rw.u64(kv.first);
+      rw.u8(kv.second);
+    }
+    st.modules[kModRouting] = {1, std::move(rt)};
+  }
   std::vector<std::uint8_t> meta;
   bytes::Writer mw(meta);
   mw.boolean(embedded);
@@ -667,6 +742,10 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
 }
 
 Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) {
+  stopScenesForEdit(false, false);
+  recordingScenes_ = false;
+  endMorph(true);
+  ruleNotes_.clear();
   auto dec = codec::decode(data, size);
   if (!dec.ok()) return convert(dec.error());
   codec::ProjectState st = std::move(dec.value());
@@ -684,13 +763,13 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 
   std::map<std::string, codec::ModulePayload> foreign;  // anything this build does not know stays attached to the project
   for (const auto& kv : st.modules)
-    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession)
+    if (kv.first != kModSource && kv.first != kModPattern && kv.first != kModRoles && kv.first != kModHistory && kv.first != kModAudio && kv.first != kModSession && kv.first != kModScenes && kv.first != kModPads && kv.first != kModRouting)
       foreign.insert(kv);
-  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes;
-  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false;
+  std::vector<std::uint8_t> srcBytes, patBytes, roleBytes, histBytes, audioBytes, sessionBytes, sceneBytes, padBytes, routeBytes;
+  bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false, hasScenes = false, hasPads = false, hasRouting = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
                    take(kModRoles, roles::kSchemaVersion, roleBytes, hasRoles), take(kModHistory, history::kSchemaVersion, histBytes, hasHist),
-                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession)})
+                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession), take(kModScenes, scenes::kSchemaVersion, sceneBytes, hasScenes), take(kModPads, 1, padBytes, hasPads), take(kModRouting, 1, routeBytes, hasRouting)})
     if (!s.ok()) return s;
 
   // ---- build everything in temporaries; the live session is untouched until all of it validates ----
@@ -791,7 +870,67 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     }
   }
 
+  scenes::SceneList newScenes;
+  if (hasScenes) {
+    auto sl = scenes::deserialize(sceneBytes.data(), sceneBytes.size());
+    if (!sl.ok()) return sl.error();
+    for (const scenes::Scene& sc : sl.value().scenes)
+      if (!pattern::deserialize(sc.pattern.data(), sc.pattern.size()).ok()) return makeError(ErrorCode::Corrupt, "scene \"" + sc.name + "\" holds a damaged pattern");
+    newScenes = std::move(sl.value());
+  }
+
+  PadSettings newPads;
+  if (hasPads) {
+    bytes::Reader pr(padBytes.data(), padBytes.size());
+    newPads.baseNote = pr.u8();
+    newPads.midiChannel = pr.u8();
+    newPads.quantizeDivision = pr.u8();
+    newPads.quantizeTriplet = pr.boolean();
+    newPads.merge = pr.u8();
+    const std::uint32_t n = pr.u32();
+    if (!pr.ok() || n > 256 || newPads.baseNote > 111 || newPads.midiChannel > 16 || newPads.merge > 1 ||
+        !(newPads.quantizeDivision == 0 || newPads.quantizeDivision == 4 || newPads.quantizeDivision == 8 || newPads.quantizeDivision == 16 || newPads.quantizeDivision == 32))
+      return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const std::uint64_t chop = pr.u64();
+      const std::uint8_t group = pr.u8();
+      if (!pr.ok() || group > 4) return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+      newPads.chokeOverride[chop] = group;
+    }
+    if (!pr.ok() || pr.remaining() != 0) return makeError(ErrorCode::Corrupt, "the pad settings are malformed");
+  }
+
+  OutputRouting newRouting;
+  if (hasRouting) {
+    bytes::Reader rr(routeBytes.data(), routeBytes.size());
+    const std::uint8_t mode = rr.u8();
+    const std::uint32_t nRole = rr.u32();
+    if (!rr.ok() || mode > 3 || nRole > 256) return makeError(ErrorCode::Corrupt, "the output routing is malformed");
+    newRouting.mode = static_cast<RoutingMode>(mode);
+    for (std::uint32_t i = 0; i < nRole; ++i) {
+      std::string role = rr.str(64);
+      const std::uint8_t bus = rr.u8();
+      if (!rr.ok() || bus > render::kMaxAuxBuses) return makeError(ErrorCode::Corrupt, "the output routing is malformed");
+      newRouting.roleBus[std::move(role)] = bus;
+    }
+    const std::uint32_t nChop = rr.u32();
+    if (!rr.ok() || nChop > limits::kMaxChops) return makeError(ErrorCode::Corrupt, "the output routing is malformed");
+    for (std::uint32_t i = 0; i < nChop; ++i) {
+      const std::uint64_t chop = rr.u64();
+      const std::uint8_t bus = rr.u8();
+      if (!rr.ok() || bus > render::kMaxAuxBuses) return makeError(ErrorCode::Corrupt, "the output routing is malformed");
+      newRouting.chopBus[chop] = bus;
+    }
+    if (!rr.ok() || rr.remaining() != 0) return makeError(ErrorCode::Corrupt, "the output routing is malformed");
+    if (newChops) {  // routes of chops that no longer exist are pruned
+      for (auto it = newRouting.chopBus.begin(); it != newRouting.chopBus.end();) it = newChops->find(ChopId{it->first}) ? std::next(it) : newRouting.chopBus.erase(it);
+    }
+  }
+
   // ---- commit ----
+  routing_ = std::move(newRouting);
+  padSettings_ = std::move(newPads);
+  sceneList_ = std::move(newScenes);
   loadedEmbedded_ = loadedFlag;
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings
@@ -809,11 +948,16 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   patterns_.reset();
   if (newPattern) patterns_.restore(std::move(*newPattern));
   for (Notice& n : newNotices) notices_.push_back(std::move(n));
-  publish(newPlayback ? newPlayback : std::make_shared<const render::Playback>());
+  if (!(routing_ == OutputRouting{}) && newPattern) {
+    if (!republish().ok()) publish(newPlayback ? newPlayback : std::make_shared<const render::Playback>());  // routed buses are part of the playback
+  } else {
+    publish(newPlayback ? newPlayback : std::make_shared<const render::Playback>());
+  }
   return {};
 }
 
 void ProjectSession::reset() {
+  endMorph(true);
   evolve_.stop();
   clearSource();
   rules_ = roles::RuleSet{};
