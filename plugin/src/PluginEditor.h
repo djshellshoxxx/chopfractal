@@ -121,6 +121,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   int treeCols_ = 0, treeRows_ = 0;
   juce::String lastStatusKey_;
   juce::TooltipWindow tooltip_{this};
+  juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
 
   // Feature controls (not host parameters: they act on the project).
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},

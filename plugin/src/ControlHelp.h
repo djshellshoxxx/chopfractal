@@ -6,6 +6,8 @@ namespace control_help {
 inline juce::String forName(const juce::String& name) {
   struct Entry { const char* name; const char* help; };
   static const Entry entries[] = {
+    {"Options", "Open audio/MIDI device settings, save or load a complete project state, or reset ChopFractal to its defaults."},
+    {"Settings...", "Choose audio input/output devices and sample rate. The input mute option protects against a feedback loop; generated pattern playback still reaches the output."},
     {"Play", "Start the generated pattern from the beginning using the local tempo. Works without a DAW. Load a loop, Detect Chops and Generate first."},
     {"Stop", "Stop local pattern playback. Press Play to restart from the beginning."},
     {"Move / resize hits", "Off: click or drag a rectangle to select pattern sections. On: drag a hit to move it; drag its right edge to resize. Alt-drag copies within the same bar."},
@@ -77,5 +79,16 @@ inline juce::String forName(const juce::String& name) {
   for (const auto& entry : entries)
     if (name == entry.name) return juce::String(entry.help);
   return {};
+}
+inline void applyToTree(juce::Component& component) {
+  if (auto* client = dynamic_cast<juce::SettableTooltipClient*>(&component)) {
+    auto name = component.getTitle();
+    if (auto* button = dynamic_cast<juce::Button*>(&component)) name = button->getButtonText();
+    if (auto* label = dynamic_cast<juce::Label*>(&component)) name = label->getText();
+    const auto help = forName(name);
+    if (help.isNotEmpty()) client->setTooltip(help);
+  }
+  for (int i = 0; i < component.getNumChildComponents(); ++i)
+    applyToTree(*component.getChildComponent(i));
 }
 }

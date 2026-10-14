@@ -283,17 +283,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   exportLoops_.setTitle("Export loops");
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
-  // Each non-obvious control gets guidance from the catalog, including labels.
-  for (int i = 0; i < getNumChildComponents(); ++i) {
-    auto* component = getChildComponent(i);
-    auto* client = dynamic_cast<juce::SettableTooltipClient*>(component);
-    if (!client) continue;
-    auto name = component->getTitle();
-    if (auto* button = dynamic_cast<juce::Button*>(component)) name = button->getButtonText();
-    if (auto* label = dynamic_cast<juce::Label*>(component)) name = label->getText();
-    const auto help = control_help::forName(name);
-    if (help.isNotEmpty()) client->setTooltip(help);
-  }
+  control_help::applyToTree(*this);
   refresh(true);
   startTimerHz(10);
 }
@@ -685,6 +675,11 @@ void ChopFractalEditor::doToggleLock() {
 }
 
 void ChopFractalEditor::refresh(bool force) {
+  if (auto* root = getTopLevelComponent(); root != tooltipRoot_) {
+    tooltipRoot_ = root;
+    // Include the standalone wrapper's Options and feedback-notice Settings controls.
+    control_help::applyToTree(*root);
+  }
   juce::String sig;
   bool rebuilt = false;
   bool havePattern = false, haveSource = false;
