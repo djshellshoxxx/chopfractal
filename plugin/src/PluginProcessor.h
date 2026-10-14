@@ -9,8 +9,11 @@
 #include <array>
 #include <atomic>
 #include <chopfractal/composition/project_session.hpp>
+#include <chopfractal/input_capture/capture.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
+
+#include "CaptureController.h"
 
 class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
@@ -55,6 +58,9 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void stopPlayback();
   void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
+  CaptureController& captureController() { return capture_; }
+  juce::ThreadPool& workerPool() { return loadPool_; }
+  double currentSampleRate() const { return sampleRate_.load(std::memory_order_relaxed); }
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);
 
@@ -69,6 +75,9 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
   double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }
 
+  static constexpr double kMaxSourceSeconds = 60.0;
+  static constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
+
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
@@ -80,6 +89,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Declaration order matters: the renderer must outlive the session that publishes into its mailbox.
   chopfractal::render::Renderer renderer_;
   chopfractal::composition::ProjectSession session_;
+  CaptureController capture_{*this};
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::atomic<double> sampleRate_{48000.0};

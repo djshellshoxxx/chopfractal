@@ -14,8 +14,8 @@ juce::Colour laneColour(int chopIndex) {
 }
 }  // namespace
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor) {
-  setSize(940, 912);
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), capturePanel_(processor) {
+  setSize(940, 944);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
@@ -80,6 +80,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
       if (f.existsAsFile()) proc_.loadFileAsync(f, true);
     });
   };
+  addAndMakeVisible(capturePanel_);
   addAndMakeVisible(locate_);
   locate_.setEnabled(false);
   generate_.onClick = [this] { doGenerate(); };
@@ -393,6 +394,7 @@ void ChopFractalEditor::resized() {
   featD.removeFromLeft(16);
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
+  capturePanel_.setBounds(area.removeFromTop(28));
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);

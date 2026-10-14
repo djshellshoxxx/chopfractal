@@ -15,6 +15,7 @@ branch you can return to.
 - **Smart Setup:** one click detects chops, suggests kick, snare, hat and cymbal roles from the audio, and suggests the loop's bars and tempo. Nothing is applied without your say-so.
 - **Orbit View:** the phrase drawn as concentric rings (one per chop) with a sweeping, pulsing playhead.
 - **Per-hit effects:** state-variable filter, tape glide (tape stop and rise) and bit/sample-rate crunch, generated, editable and lockable like any other hit property.
+- **Input capture:** record the track input synced to the host's bar grid (or free, keeping the last 30 s), then Keep it as the loop; the audio is stored in the project and Undo Keep restores the previous one.
 - **Export:** WAV (16-bit, 24-bit or 32-bit float, up to 192 kHz) and a Producer Kit (every chop as its own WAV plus a MIDI file that replays the pattern on those slices).
 - **Variation family tree:** every Generate, Mutate and Zoom is kept as a branch you can return to.
 
@@ -27,7 +28,7 @@ branch you can return to.
 
 | Path | What it is |
 |---|---|
-| `modules/<id>/` | Fifteen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
+| `modules/<id>/` | Seventeen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
 | `composition/` | The headless composition root (`ProjectSession`) that wires the modules together |
 | `plugin/` | The JUCE VST3 shell: thin glue over the composition root (optional build) |
 | `tools/` | Portability checker, doc generator, module transfer script, clean-consumer smoke test, VST3 validator runner |

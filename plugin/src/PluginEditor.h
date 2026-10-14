@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 
+#include "CapturePanel.h"
 #include "DragOut.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
@@ -124,6 +125,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
 
   // Feature controls (not host parameters: they act on the project).
+  CapturePanel capturePanel_;
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};

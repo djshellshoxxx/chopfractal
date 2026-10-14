@@ -1,5 +1,6 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+#include <string>
 #include <algorithm>
 #include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
@@ -78,7 +79,7 @@ void prepare(ChopFractalProcessor& p, int block = 512) {
 
 void makeSession(ChopFractalProcessor& p, std::uint64_t seed = 42) {
   p.withSession([&](cf::composition::ProjectSession& s) {
-    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
+    CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok());
     cf::composition::DetectOptions d;
     d.analysis.sensitivity = 0.8;
     CHECK(s.applyChops(d).ok());
@@ -1182,4 +1183,90 @@ CHOP_TEST(local_preview_can_return_to_the_daw_transport) {
   host.playing = false;
   const auto stopped = run(p, host, 40);
   CHECK(peak(std::vector<float>(stopped.end() - 4096, stopped.end())) < 1e-6f);
+}
+
+namespace {
+namespace capt = chopfractal::capture;
+
+// Records `blocks` blocks of the test sine in Free mode and leaves the engine in Captured.
+void recordFree(ChopFractalProcessor& p, FakePlayHead& ph, int blocks) {
+  auto& cc = p.captureController();
+  CHECK(cc.arm(capt::CaptureMode::Free, 4, 30.0).isEmpty());
+  CHECK(cc.engine().status().state == capt::CaptureState::Armed);
+  CHECK(cc.start().isEmpty());
+  run(p, ph, blocks, 512, 0.5f);
+  cc.engine().requestStop();
+  run(p, ph, 1, 512, 0.5f);
+  CHECK(cc.engine().status().state == capt::CaptureState::Captured);
+}
+
+bool waitForStatus(ChopFractalProcessor& p, const char* text) {
+  for (int i = 0; i < 100 && !p.statusMessage().contains(text); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+  return p.statusMessage().contains(text);
+}
+}  // namespace
+
+CHOP_TEST(capture_flow_through_the_real_processor_keeps_input_and_embeds_it) {
+  ChopFractalProcessor p;
+  prepare(p);
+  FakePlayHead ph;
+  recordFree(p, ph, 100);
+  CHECK_EQ(p.captureController().engine().status().framesCaptured, 51200);
+  p.captureController().keepAsync(true);
+  CHECK(waitForStatus(p, "Captured audio is saved"));
+  bool has = false, needs = false;
+  std::shared_ptr<const cf::render::SourceData> data;
+  std::string name;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    has = s.hasSource();
+    needs = s.sourceNeedsEmbed();
+    data = s.sourceData();
+    if (has) name = s.chopMap()->info().name;
+  });
+  CHECK(has && needs && data);
+  CHECK(name.rfind("Capture ", 0) == 0);
+  CHECK(p.embedSource.load());
+  CHECK_EQ(data->frames, 51200);
+  CHECK_EQ(data->channels, 2);
+  CHECK_NEAR(data->samples[100], 0.5f * std::sin(0.05f * 100.f), 1e-6);  // the input, not the rendered output
+  juce::MemoryBlock saved;
+  p.getStateInformation(saved);
+  ChopFractalProcessor q;
+  q.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  q.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.hasSource() && !s.sourceMissing());
+    CHECK_EQ(s.chopMap()->info().frames, 51200);
+  });
+}
+
+CHOP_TEST(capture_undo_keep_restores_previous_source) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  FakePlayHead ph;
+  std::size_t markers = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { markers = s.chopMap()->markers().size(); });
+  recordFree(p, ph, 40);
+  p.captureController().keepAsync(false);
+  CHECK(waitForStatus(p, "Captured audio is saved"));
+  CHECK(p.captureController().canUndoKeep());
+  CHECK(p.captureController().undoKeep());
+  CHECK(!p.captureController().canUndoKeep());
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK_EQ(s.chopMap()->info().frames, 96000);
+    CHECK_EQ(s.chopMap()->markers().size(), markers);
+    CHECK(!s.sourceNeedsEmbed() || s.chopMap()->info().path.empty());
+  });
+}
+
+CHOP_TEST(capture_is_refused_offline_and_idle_capture_leaves_audio_untouched) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.setNonRealtime(true);
+  CHECK(p.captureController().arm(capt::CaptureMode::Free, 4, 30.0).contains("offline render"));
+  p.setNonRealtime(false);
+  CHECK(p.captureController().engine().status().state == capt::CaptureState::Idle);
+  ChopFractalProcessor q;
+  prepare(q);
+  CHECK(q.captureController().engine().status().capacityFrames == 0);  // no memory held while idle
 }

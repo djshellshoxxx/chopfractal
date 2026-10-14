@@ -101,9 +101,16 @@ class ProjectSession {
 
   // ---- source and chops ----
   Status loadSource(std::shared_ptr<const render::SourceData> data, std::string name, std::string path = {});
+  // Audio recorded in memory has no file to reload: it is a source with an empty path.
+  Status loadCapturedSource(std::shared_ptr<const render::SourceData> data, std::string name) {
+    return loadSource(std::move(data), std::move(name), {});
+  }
+  // True when saving without embedding would lose the audio (the source has no file path).
+  bool sourceNeedsEmbed() const { return chopMap_.has_value() && chopMap_->info().path.empty(); }
   void clearSource();
   bool hasSource() const { return chopMap_.has_value(); }
   bool sourceMissing() const { return chopMap_.has_value() && !sourceData_; }
+  std::shared_ptr<const render::SourceData> sourceData() const { return sourceData_; }
   const source::ChopMap* chopMap() const { return chopMap_ ? &*chopMap_ : nullptr; }
   ChopSnapshotPtr chops() const { return chops_; }
 

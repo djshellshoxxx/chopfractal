@@ -10,11 +10,12 @@
 
 namespace cf = chopfractal;
 
+static_assert(ChopFractalProcessor::kMaxSourceSeconds == chopfractal::capture::kMaxCaptureSeconds, "capture and import share one length limit");
+static_assert(ChopFractalProcessor::kMaxDecodedBytes == chopfractal::capture::kMaxCaptureBytes, "capture and import share one size limit");
+
 namespace {
 constexpr char kStateMagic[4] = {'C', 'F', 'P', 'L'};
 constexpr int kStateVersion = 1;
-constexpr double kMaxSourceSeconds = 60.0;
-constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
 }  // namespace
 
 ChopFractalProcessor::ChopFractalProcessor()
@@ -70,6 +71,7 @@ void ChopFractalProcessor::prepareToPlay(double sampleRate, int maximumExpectedS
   cfg.maxBlock = maximumExpectedSamplesPerBlock > 0 ? maximumExpectedSamplesPerBlock : 2048;
   renderer_.prepare(cfg);
   sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+  capture_.engine().onPrepare(sampleRate_.load(), juce::jmin(2, getTotalNumInputChannels()));
 }
 
 bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
@@ -116,6 +118,16 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
 
+  // Capture reads the input before the renderer overwrites it (the output buffer aliases the input).
+  if (!isNonRealtime()) {
+    cf::capture::CaptureTransport ct;
+    ct.playing = tt.block.playing;
+    ct.positionValid = tt.block.positionValid;
+    ct.ppq = tt.block.ppq;
+    ct.bpm = tt.block.bpm;
+    capture_.engine().process(buffer.getArrayOfReadPointers(), juce::jmin(channels, getTotalNumInputChannels()), frames, ct);
+  }
+
   renderer_.process(tt.block, cf::host::toRenderParams(pv), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
@@ -143,6 +155,7 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
 }
 
 void ChopFractalProcessor::pollAudioFlags() {
+  capture_.engine().reap();
   // A quantized switch can only complete when a pattern is playing; without one, apply it now.
   if (patternQuarters_.load(std::memory_order_relaxed) <= 0.0)
     withSession([](cf::composition::ProjectSession& s) {
@@ -239,8 +252,8 @@ std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(c
     error = "Only mono and stereo files are supported.";
     return nullptr;
   }
-  if (reader->sampleRate <= 0.0 || static_cast<double>(length) / reader->sampleRate > kMaxSourceSeconds ||
-      length * channels * static_cast<juce::int64>(sizeof(float)) > kMaxDecodedBytes) {
+  if (reader->sampleRate <= 0.0 || static_cast<double>(length) / reader->sampleRate > ChopFractalProcessor::kMaxSourceSeconds ||
+      length * channels * static_cast<juce::int64>(sizeof(float)) > ChopFractalProcessor::kMaxDecodedBytes) {
     error = "The file is longer than the 60 second / 100 MB limit.";
     return nullptr;
   }
@@ -302,8 +315,12 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   std::vector<std::uint8_t> blob;
   {
     const juce::ScopedLock lock(sessionLock_);
-    auto saved = session_.saveState(embedSource.load());
-    if (!saved.ok() && embedSource.load()) {
+    const bool embed = embedSource.load() || session_.sourceNeedsEmbed();  // pathless audio has no file to reload
+    auto saved = session_.saveState(embed);
+    if (!saved.ok() && embed && session_.sourceNeedsEmbed()) {
+      setStatusMessage("The captured audio is too large to embed (" + juce::String(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024))) + " MB). Raise the embed limit or keep a shorter capture.");
+      saved = session_.saveState(false);
+    } else if (!saved.ok() && embed) {
       setStatusMessage("The audio is too large to embed (" + juce::String(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024))) + " MB); the project references the file instead.");
       saved = session_.saveState(false);  // reference it instead
     }

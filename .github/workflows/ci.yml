@@ -67,6 +67,11 @@ jobs:
           cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
           cmake --build build-tsan --target test_audio_renderer
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
+      - name: ThreadSanitizer on the input capture engine
+        run: |
+          cmake -S modules/input_capture -B build-tsan-capture -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan-capture --target test_input_capture
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan-capture/test_input_capture
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
   transfer-smoke:
