@@ -92,7 +92,7 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
     for (int k = 0; k < n; ++k) {
       FlatEvent s = e;
       s.tx.retrigger = 1;
-      s.start = e.start + e.duration * k / n;
+      s.start = (e.start + e.duration * k / n) % lengthTicks;  // a sub-hit past the loop end wraps to the loop start
       s.duration = e.duration * (k + 1) / n - e.duration * k / n;
       s.tx.level = level;
       level *= kRetriggerDecay;
@@ -126,6 +126,7 @@ struct Renderer::Impl {
 
   double outGain = 1.0;
   double dry = 0.0;
+  bool gainsPrimed = false;  // first block after prepare() starts at the targets instead of ramping from defaults
   double smoothCoef = 0.01;
 
   bool wasPlaying = false;
@@ -154,6 +155,7 @@ struct Renderer::Impl {
     smoothCoef = 1.0 - std::exp(-1.0 / (0.01 * cfg.sampleRate));
     outGain = 1.0;
     dry = 0.0;
+    gainsPrimed = false;
     wasPlaying = false;
     haveExpected = false;
     previewHead.store(0);
@@ -324,7 +326,12 @@ struct Renderer::Impl {
       if (toGateEnd < v.release) env = std::min(env, static_cast<float>(toGateEnd) / static_cast<float>(v.release));
       const double curStep = v.step * v.rateScale;
       const double remaining = curStep > 0.0 ? (static_cast<double>(v.regionEnd - 1) - v.pos) / curStep : (v.pos - static_cast<double>(v.regionStart)) / -curStep;
-      if (remaining < static_cast<double>(v.release)) env = std::min(env, static_cast<float>(std::max(0.0, remaining) / static_cast<double>(v.release)));
+      // Fade out at the region end, but never over more than half of a short region (a 1-frame region has no fade).
+      const double regionLen = static_cast<double>(v.regionEnd - v.regionStart);
+      if (regionLen > 1.0) {
+        const double endFade = std::min(static_cast<double>(v.release), std::max(1.0, 0.5 * regionLen));
+        if (remaining < endFade) env = std::min(env, static_cast<float>(std::max(0.0, remaining) / endFade));
+      }
       if (v.fading) {
         env *= static_cast<float>(v.fadeLeft) / static_cast<float>(v.fadeTotal);
         if (--v.fadeLeft <= 0) v.active = false;
@@ -476,6 +483,11 @@ struct Renderer::Impl {
     const double dB = std::isfinite(params.outputGainDb) ? std::min(24.0, std::max(-96.0, static_cast<double>(params.outputGainDb))) : 0.0;
     const double targetGain = std::pow(10.0, dB / 20.0);
     const double targetDry = std::isfinite(params.dryMix) ? std::min(1.0, std::max(0.0, static_cast<double>(params.dryMix))) : 0.0;
+    if (!gainsPrimed) {
+      outGain = targetGain;
+      dry = targetDry;
+      gainsPrimed = true;
+    }
     const float* in0 = (in && in[0]) ? in[0] : nullptr;
     const float* in1 = (nch > 1 && in && in[1]) ? in[1] : in0;
     for (int i = 0; i < frames; ++i) {
@@ -578,7 +590,7 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   r.mailbox().publish(playback);
 
   const double tpf = s.bpm * static_cast<double>(kTicksPerQuarter) / (60.0 * s.sampleRate);
-  const std::int64_t mainFrames = static_cast<std::int64_t>(std::ceil(static_cast<double>(s.cycles) * static_cast<double>(playback->lengthTicks) / tpf));
+  const std::int64_t mainFrames = static_cast<std::int64_t>(std::ceil(static_cast<double>(s.cycles) * static_cast<double>(playback->lengthTicks) / tpf - 1e-6));  // 1e-6: an exact multiple must not gain a frame
   const std::int64_t tailFrames = static_cast<std::int64_t>(std::ceil(s.tailSeconds * s.sampleRate));
   const std::int64_t total = mainFrames + tailFrames;
   if (total > static_cast<std::int64_t>(s.sampleRate) * 3600) return makeError(ErrorCode::LimitExceeded, "render would exceed one hour");

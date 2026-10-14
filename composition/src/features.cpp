@@ -30,13 +30,7 @@ Status ProjectSession::applyFractal(const fractal::Settings& fs, const std::vect
   std::vector<int> targets;
   if (bars.empty()) {
     for (int b = 0; b < barCount; ++b) {
-      const pattern::Bar& bar = p.bars[static_cast<std::size_t>(b)];
-      bool anyLock = p.phraseLocked || bar.locked;
-      for (const pattern::Beat& bt : bar.beats) {
-        anyLock = anyLock || bt.locked;
-        for (const Event& e : bt.events) anyLock = anyLock || e.locked;
-      }
-      if (!anyLock) targets.push_back(b);  // a bar holding any lock is left alone
+      if (!pattern::barHasLock(p, b)) targets.push_back(b);  // a bar holding any lock (including a locked zoom) is left alone
     }
     if (targets.empty()) return makeError(ErrorCode::Blocked, "every bar is locked; unlock a bar first");
   } else {
@@ -115,6 +109,17 @@ Result<bool> ProjectSession::evolveStep(double chaos) {
     next.settings.seed = stepSeed;
     r = std::move(next);
   }
+  // A step that changed nothing (every bar locked or protected) is a failed step: it must not fill the undo stack,
+  // and after three of them Evolve stops, as specified.
+  if (r.ok()) {
+    pattern::Pattern a = r.value(), b = patterns_.current();
+    a.settings.seed = b.settings.seed = 0;
+    if (pattern::serialize(a) == pattern::serialize(b)) {
+      evolve_.reportFailure();
+      if (!evolve_.running()) notice(Notice::Level::Warning, "Evolve stopped: nothing could change (is everything locked?)");
+      return false;
+    }
+  }
   Status st = finalize(std::move(r), nullptr, &report);  // undoable, but not a family-tree node
   if (!st.ok()) {
     evolve_.reportFailure();
@@ -176,7 +181,8 @@ Result<ExportReport> ProjectSession::exportWav(const std::string& path, const Ex
   if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
   if (!(o.tailSeconds >= 0.0 && o.tailSeconds <= 30.0)) return makeError(ErrorCode::OutOfRange, "tail must be 0 to 30 seconds");
   if (!playback_ || playback_->passThrough || !playback_->source) return makeError(ErrorCode::InvalidArgument, "there is no pattern to render");
-  if (!o.overwrite && std::filesystem::exists(path)) return makeError(ErrorCode::Conflict, "a file already exists at " + path);
+  std::error_code existsEc;
+  if (!o.overwrite && std::filesystem::exists(std::filesystem::u8path(path), existsEc)) return makeError(ErrorCode::Conflict, "a file already exists at " + path);
   render::OfflineSettings rs;
   rs.sampleRate = o.wav.sampleRate;
   rs.bpm = o.bpm;

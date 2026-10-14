@@ -233,7 +233,8 @@ std::vector<Requirement> GrammarPolicy::required(const ScopeContext& scope, cons
           target = c;
           break;
         }
-    if (target.valid()) out.push_back({target, r.id});
+    // A rule can name a chop that was disabled or deleted afterwards; requiring it would make generation fail.
+    if (target.valid() && std::find(chops_.begin(), chops_.end(), target) != chops_.end()) out.push_back({target, r.id});
   }
   return out;
 }

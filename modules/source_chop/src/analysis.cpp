@@ -122,10 +122,12 @@ Proposal evenGrid(std::int64_t frames, const GridSpec& spec) {
 
 std::int64_t snapToNearest(std::int64_t position, const std::vector<std::int64_t>& targets, std::int64_t radius) {
   std::int64_t best = position;
-  std::int64_t bestDist = radius + 1;
+  bool found = false;
+  std::int64_t bestDist = 0;
   for (std::int64_t t : targets) {
-    const std::int64_t d = std::llabs(t - position);
-    if (d <= radius && d < bestDist) {
+    const std::int64_t d = t > position ? t - position : position - t;
+    if (d <= radius && (!found || d < bestDist)) {
+      found = true;
       bestDist = d;
       best = t;
     }

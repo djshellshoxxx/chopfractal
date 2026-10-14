@@ -96,6 +96,8 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   usedFallbackTempo.store(tt.usedFallbackTempo, std::memory_order_relaxed);
   usedFallbackMeter.store(tt.usedFallbackMeter, std::memory_order_relaxed);
   activeBpm.store(tt.block.bpm, std::memory_order_relaxed);
+  hostBeatsPerBar.store(tt.timeSignature.numerator, std::memory_order_relaxed);
+  hostBeatUnit.store(tt.timeSignature.denominator, std::memory_order_relaxed);
 
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
@@ -262,9 +264,14 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
 }
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
+  ++loadTicket_;  // a file load still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};
-  if (in.read(magic, 4) != 4 || std::memcmp(magic, kStateMagic, 4) != 0 || in.readInt() != kStateVersion) return;  // foreign or newer: ignore safely
+  if (in.read(magic, 4) != 4 || std::memcmp(magic, kStateMagic, 4) != 0) return;  // not ours: ignore safely
+  if (in.readInt() != kStateVersion) {
+    setStatusMessage("This project was saved by a different version of ChopFractal and could not be loaded.");
+    return;
+  }
   const juce::String xmlText = in.readString();
   const int blobSize = in.readInt();
   if (blobSize < 0 || static_cast<juce::int64>(blobSize) > in.getNumBytesRemaining()) return;

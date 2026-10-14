@@ -84,6 +84,9 @@ Role classify(const ChopFeatures& f, double* confidence, std::string* reason) {
   if (f.lengthMs < 5.0) return set(Role::Other, 0.2, "too short to classify");
   if (f.lowRatio > 0.55 && f.zcr < 0.06)
     return set(Role::Kick, 0.55 + (f.lowRatio - 0.55) + (0.06 - f.zcr) * 3.0, "energy is mostly low, with few zero crossings");
+  // A short, very noisy hit with mid-high energy is a closed hat even when the high band does not dominate.
+  if (f.highRatio < 0.55 && f.zcr > 0.25 && f.decayMs <= 300.0 && f.highRatio >= 0.35)
+    return set(Role::Hat, 0.5 + std::min(0.2, f.zcr - 0.25), "very noisy and short");
   if (f.highRatio >= 0.55) {
     const double c = 0.5 + (f.highRatio - 0.55);
     if (f.decayMs > 300.0) return set(Role::Cymbal, c + std::min(0.3, (f.decayMs - 300.0) / 2000.0), "bright and long decay");

@@ -221,6 +221,8 @@ CHOP_TEST(transform_inheritance_modes) {
   if (!(inherit.ok() && reset.ok() && over.ok())) return;
   for (const Event& e : inherit.value()->events) CHECK(e.tx == makeParent().tx);
   for (const Event& e : reset.value()->events) CHECK(e.tx == EventTransform{});
+  for (const Event& e : reset.value()->events) CHECK(e.fx == EventFx{});             // Reset drops inherited effects too
+  for (const Event& e : inherit.value()->events) CHECK(e.fx == makeParent().fx);
   for (const Event& e : over.value()->events) {
     CHECK(e.tx.level == 0.3f && e.tx.reverse);
     CHECK(e.tx.pan == 0.25f && e.tx.pitchSemitones == 2.f);  // untouched fields still inherit

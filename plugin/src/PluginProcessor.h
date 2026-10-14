@@ -60,6 +60,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> hostPlaying{false};
   std::atomic<bool> usedFallbackTempo{true};
   std::atomic<bool> usedFallbackMeter{true};
+  std::atomic<int> hostBeatsPerBar{4};   // the meter the host last reported (4/4 when it gives none)
+  std::atomic<int> hostBeatUnit{4};
   std::atomic<double> activeBpm{120.0};        // tempo the last block used (host tempo, else the manual fallback)
   // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
   double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }

@@ -125,7 +125,8 @@ const Event* findEvent(const Pattern& p, EventId id);
 bool isLocked(const Pattern& p, EventId id);  // effective: the event or any ancestor scope is locked
 
 Result<Pattern> setLock(const Pattern& p, const ScopeRef& scope, bool locked);
-Pattern clearLocks(const Pattern& p);
+Pattern clearLocks(const Pattern& p);                // clears every nesting level
+bool barHasLock(const Pattern& p, int bar);          // any lock on the phrase, bar, a beat, a hit or a zoomed pattern inside it
 Result<Pattern> addEvent(const Pattern& p, int bar, ChopId chop, Ticks startInBar, Ticks duration, const ChopSnapshot& chops);
 Result<Pattern> deleteEvent(const Pattern& p, EventId id);
 Result<Pattern> moveEvent(const Pattern& p, EventId id, int newBar, Ticks newStartInBar);

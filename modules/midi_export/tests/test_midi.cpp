@@ -26,6 +26,19 @@ CHOP_TEST(round_trip_preserves_notes_tempo_and_meter) {
   CHECK(encode(s).value() == b.value());  // deterministic
 }
 
+CHOP_TEST(the_fastest_tempo_still_decodes_what_was_encoded) {
+  for (double bpm : {999.0, 998.995, 20.0, 20.001}) {
+    FileSpec s;
+    s.bpm = bpm;
+    s.notes = {{36, 100, 0, 480, 0}};
+    auto b = encode(s);
+    CHECK(b.ok());
+    if (!b.ok()) continue;
+    auto d = decode(b.value().data(), b.value().size());
+    CHECK(d.ok());  // 999 BPM used to round to a tempo the decoder then rejected
+  }
+}
+
 CHOP_TEST(same_pitch_overlaps_are_clipped_and_note_off_precedes_note_on) {
   FileSpec s;
   s.notes = {{36, 100, 0, 960, 0}, {36, 100, 480, 480, 0}, {36, 100, 480, 480, 0}};

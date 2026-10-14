@@ -58,7 +58,7 @@ bool findNested(const std::vector<Event>& events, EventId id, int depth, SampleR
       return true;
     }
     if (e.child && findNested(e.child->events, id, depth + 1, resolved, chops, event, outDepth, bounds, lockedPath)) {
-      if (e.child->locked) lockedPath = true;
+      if (e.child->locked || e.locked) lockedPath = true;  // a locked ancestor hit protects everything below it
       return true;
     }
   }
@@ -199,7 +199,7 @@ void ProjectSession::recordHistory(const std::string& label) {
   const pattern::Pattern& p = patterns_.current();
   history::Metadata meta;
   meta.seed = p.settings.seed;
-  meta.label = label;
+  meta.label = label.size() > 256 ? label.substr(0, 256) : label;  // addSnapshot rejects longer labels
   meta.payloadSchema = pattern::kSchemaVersion;
   auto r = history_.addSnapshot(history_.active(), pattern::serialize(p), meta);
   if (!r.ok()) {
@@ -474,7 +474,7 @@ Status ProjectSession::chooseTarget(const pattern::Pattern& p, EventId id, Targe
             out.top = &e;
             out.depth = depth;
             out.bounds = bounds;
-            out.lockedPath = lockedPath || e.child->locked;
+            out.lockedPath = lockedPath || e.child->locked || e.locked;
             return {};
           }
         }
@@ -508,7 +508,7 @@ Status ProjectSession::zoomIn(EventId id, const zoom::Settings& zs, std::uint64_
   Target t;
   Status s = chooseTarget(p, id, t);
   if (!s.ok()) return s;
-  if (t.lockedPath || t.event->locked) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
+  if (t.lockedPath || t.event->locked || (t.event->child && t.event->child->locked)) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
   auto ctx = zoomContext(p, t);
   if (!ctx.ok()) return ctx.error();
   Event parent = *t.event;
@@ -539,7 +539,7 @@ Status ProjectSession::collapse(EventId id) {
   Target t;
   Status s = chooseTarget(p, id, t);
   if (!s.ok()) return s;
-  if (t.lockedPath || t.event->locked) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
+  if (t.lockedPath || t.event->locked || (t.event->child && t.event->child->locked)) return makeError(ErrorCode::Blocked, "this hit (or a parent) is locked; unlock it first");
   return finalize(withChild(p, t, nullptr), nullptr);
 }
 

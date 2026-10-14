@@ -92,7 +92,8 @@ Result<std::vector<std::uint8_t>> encode(const FileSpec& spec) {
     vlq(trk, static_cast<std::uint32_t>(name.size()));
     trk.insert(trk.end(), name.begin(), name.end());
   }
-  const std::uint32_t mpq = static_cast<std::uint32_t>(std::llround(60000000.0 / spec.bpm));
+  // Round down so the decoded tempo never exceeds the 999 BPM limit the decoder enforces.
+  const std::uint32_t mpq = static_cast<std::uint32_t>(std::ceil(60000000.0 / spec.bpm));
   trk.insert(trk.end(), {0x00, 0xFF, 0x51, 0x03, static_cast<std::uint8_t>(mpq >> 16), static_cast<std::uint8_t>(mpq >> 8), static_cast<std::uint8_t>(mpq)});
   trk.insert(trk.end(), {0x00, 0xFF, 0x58, 0x04, static_cast<std::uint8_t>(spec.numerator), static_cast<std::uint8_t>(dd), 24, 8});
   Ticks now = 0;

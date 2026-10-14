@@ -12,13 +12,21 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/chopfractal-transfer.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-if [ "$#" -gt 0 ]; then ids=("$@"); else mapfile -t ids < <(python3 - <<EOF
+if [ "$#" -gt 0 ]; then
+  ids=("$@")
+else
+  # Capture first: a failing python3 inside process substitution would be swallowed and the job would test nothing.
+  listing="$(python3 - <<PYEOF
 import sys
 sys.path.insert(0, "$here/tools")
 import gen_module_docs
 print("\n".join(sorted(gen_module_docs.load_all())))
-EOF
-); fi
+PYEOF
+)"
+  ids=()
+  while IFS= read -r line; do [ -n "$line" ] && ids+=("$line"); done <<<"$listing"  # no mapfile: macOS ships bash 3.2
+  if [ "${#ids[@]}" -eq 0 ]; then echo "no modules found: nothing would be tested" >&2; exit 1; fi
+fi
 
 failed=0
 for id in "${ids[@]}"; do

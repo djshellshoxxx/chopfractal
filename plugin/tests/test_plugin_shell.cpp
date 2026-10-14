@@ -15,6 +15,24 @@
 namespace cf = chopfractal;
 
 namespace {
+// GUI tests need a display. Linux has one only when DISPLAY is set; Windows and macOS always have a desktop session.
+// With CHOPFRACTAL_REQUIRE_DISPLAY=1 (set by the CI job that runs under xvfb) a missing display fails instead of
+// silently skipping every GUI and fuzz test.
+bool haveDisplay() {
+#if JUCE_LINUX || JUCE_BSD
+  const bool has = std::getenv("DISPLAY") != nullptr;
+  if (!has && std::getenv("CHOPFRACTAL_REQUIRE_DISPLAY")) {
+    std::fprintf(stderr, "CHOPFRACTAL_REQUIRE_DISPLAY is set but there is no display; GUI tests cannot run\n");
+    CHECK(false);
+  }
+  return has;
+#else
+  return true;
+#endif
+}
+}  // namespace
+
+namespace {
 
 // A host playhead we control.
 struct FakePlayHead : juce::AudioPlayHead {
@@ -354,7 +372,7 @@ CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
 }
 
 CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists) {
-  if (!std::getenv("DISPLAY")) return;  // CI without a display skips the GUI smoke test
+  if (!haveDisplay()) return;  // CI without a display skips the GUI smoke test
   ChopFractalProcessor p;
   prepare(p);
   makeSession(p);
@@ -391,7 +409,7 @@ std::vector<std::uint8_t> patternBytes(ChopFractalProcessor& p) {
 
 // Drives the real editor's buttons the way a user would and checks the session reacts.
 CHOP_TEST(editor_buttons_drive_the_session) {
-  if (!std::getenv("DISPLAY")) return;
+  if (!haveDisplay()) return;
   ChopFractalProcessor p;
   prepare(p);
   p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "").ok()); });
@@ -483,7 +501,7 @@ juce::Point<int> hitPoint(const ChopFractalEditor& ed, const cf::ui::EventRect& 
 
 // Pass 3: chaos reroll, presets, drag-out files, and direct hit editing through real mouse events.
 CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
-  if (!std::getenv("DISPLAY")) return;
+  if (!haveDisplay()) return;
   const juce::File tmp = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_pass3_" + juce::String(juce::Random::getSystemRandom().nextInt()));
   PresetManager::setFolderOverride(tmp.getChildFile("presets"));
   dragout::setFolderOverride(tmp.getChildFile("drag"));
@@ -746,7 +764,7 @@ int fuzzEvents(int fallback) { return std::getenv("CF_FUZZ_EVENTS") ? std::max(1
 }  // namespace
 
 CHOP_TEST(fuzz_random_editor_and_audio_input_never_breaks_the_plugin) {
-  if (!std::getenv("DISPLAY")) return;
+  if (!haveDisplay()) return;
   std::vector<std::uint64_t> seeds = {1, 2, 3, 4, 5, 6};
   if (const char* s = std::getenv("CF_FUZZ_SEED")) seeds = {static_cast<std::uint64_t>(std::atoll(s))};
   for (std::uint64_t seed : seeds) {
@@ -761,7 +779,7 @@ CHOP_TEST(fuzz_random_editor_and_audio_input_never_breaks_the_plugin) {
 
 // Extra check 3 - the same random session replays to byte-identical results (no hidden time or address dependence).
 CHOP_TEST(fuzz_session_replays_deterministically) {
-  if (!std::getenv("DISPLAY")) return;
+  if (!haveDisplay()) return;
   for (std::uint64_t seed : {11ull, 12ull}) {
     bool okA = true, okB = true;
     const FuzzResult a = fuzzEditor(seed, fuzzEvents(2500), &okA);
@@ -814,7 +832,7 @@ CHOP_TEST(audio_stays_finite_under_hostile_host_timing_and_block_sizes) {
 }
 
 int main() {
-  const bool display = std::getenv("DISPLAY") != nullptr;
+  const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
   juce::MessageManager::getInstance();
