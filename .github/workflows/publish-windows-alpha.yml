@@ -1,0 +1,69 @@
+name: Publish Windows alpha
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-windows-alpha.yml]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-windows-alpha
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: "38508080718"
+      BUILD_SHA: "8dc43bae8574d19632f5c35839fd7938bfd9c56e"
+      RELEASE_TAG: v0.1.0-alpha.1
+    steps:
+      - name: Verify the tested build
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          jq -e --arg sha "$BUILD_SHA" '.head_sha == $sha and .head_branch == "main" and .conclusion == "success"' run.json
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
+          jq -e '.jobs | any(.name == "plugin-windows" and .conclusion == "success")' jobs.json
+      - name: Download and verify Windows packages
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --name chopfractal-alpha-windows --name chopfractal-standalone-windows --dir assets
+          cd assets/chopfractal-alpha-windows
+          sha256sum --check *.sha256
+          unzip -t *.zip
+          cd ../chopfractal-standalone-windows
+          sha256sum --check *.sha256
+          unzip -t *.zip
+      - name: Publish alpha release
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          Windows x64 alpha for preliminary GUI and feature testing, built from commit 8dc43bae8574d19632f5c35839fd7938bfd9c56e after audit round 5 (PR #9).
+
+          Downloads:
+          - Standalone ZIP: extract and run ChopFractal.exe.
+          - Plugin ZIP: includes VST3 and CLAP. Copy ChopFractal.vst3 to your VST3 folder and ChopFractal.clap to your CLAP folder, then rescan your host.
+          - SHA256 files are included for both packages.
+
+          Includes deterministic chopping and variations, recursive Hit Zoom, Fractal Rhythm, Evolve, Smart Setup, Orbit View, per-hit effects, presets, history, WAV and Producer Kit export.
+
+          Verification: all ten CI jobs passed on the source commit, including Windows standalone/VST3/CLAP compilation and shell tests, portable tests on Windows/Linux/macOS, sanitizers, portability checks, transfer smoke and Linux VST3 validation. Package checksums are verified again before upload.
+
+          Known unfinished work: live input capture; GUI polish and missing advanced editing controls; real DAW and CLAP host validation; installers/signing; performance and long-duration soak testing. Known issues include grammar edge cases, family-tree position after undo/redo, timing of loop-boundary swaps, effect-toggle voice cuts, and exports blocking the UI. See docs/BUILD_STATUS.md at the source commit for the full list. This is an alpha, not a production-ready release.
+
+          LICENSE and THIRD_PARTY_NOTICES.md are included in each ZIP.
+          NOTES
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "ChopFractal 0.1.0 Alpha 1 — Windows" --notes-file notes.md --prerelease --draft
+          fi
+          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish | jq -e --arg sha "$BUILD_SHA" '.targetCommitish == $sha'
+          gh release upload "$RELEASE_TAG" assets/chopfractal-alpha-windows/* assets/chopfractal-standalone-windows/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease
