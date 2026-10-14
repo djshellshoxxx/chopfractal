@@ -613,6 +613,205 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   dragout::setFolderOverride(juce::File());
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Randomized QA: a fast, clumsy user (random clicks, drags, modifiers, keys, buttons, knobs) while audio runs.
+// Fixed seeds keep it reproducible; CF_FUZZ_SEED / CF_FUZZ_EVENTS override them for exploratory runs.
+// Right-clicks are left out on purpose: they open native popup menus, which need a window manager.
+// ---------------------------------------------------------------------------------------------------------
+namespace {
+
+struct FuzzResult {
+  std::vector<std::uint8_t> pattern;
+  std::size_t historyNodes = 0;
+  std::size_t audioChecks = 0;
+};
+
+FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
+  FuzzResult out;
+  PresetManager::setFolderOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_fuzz_presets"));
+  dragout::setFolderOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_fuzz_drag"));
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  std::unique_ptr<juce::AudioProcessorEditor> base(p.createEditor());
+  auto* ed = dynamic_cast<ChopFractalEditor*>(base.get());
+  if (!ed) {
+    *ok = false;
+    return out;
+  }
+  ed->setVisible(true);
+  cf::Rng rng(seed);
+  auto pick = [&](int n) { return std::min(n - 1, static_cast<int>(rng.uniform01() * static_cast<double>(n))); };
+  const int w = ed->getWidth(), h = ed->getHeight();
+  // "Reroll" and "New Seed" draw system randomness, so they stay out of the reproducible run.
+  static const char* const kButtons[] = {"Generate", "Mutate", "Undo", "Redo", "Zoom In", "Collapse", "Lock Bar", "Fractal", "Store A", "Recall A", "Store B",
+                                         "Recall B", "Keep", "Smart Setup", "Accept Roles", "Use Tempo", "Detect Chops", "Set Role"};
+  static const char* const kParams[] = {"density", "swing", "variation_amount", "fx_intensity", "chaos", "dry_mix", "pattern_bars", "allow_reverse",
+                                        "allow_pitch", "allow_retrigger", "allow_filter", "allow_glide", "allow_crunch", "effect_enable"};
+  FakePlayHead ph;
+  p.setPlayHead(&ph);
+  for (int i = 0; i < events; ++i) {
+    switch (pick(6)) {
+      case 0:
+      case 1:
+      case 2: {
+        const juce::Point<int> a(pick(w), pick(h));
+        const juce::Point<int> b(juce::jlimit(0, w - 1, a.x + pick(401) - 200), juce::jlimit(0, h - 1, a.y + pick(161) - 80));
+        int m = 0;
+        if (rng.uniform01() < 0.25) m |= juce::ModifierKeys::shiftModifier;
+        if (rng.uniform01() < 0.15) m |= juce::ModifierKeys::altModifier;
+        const bool drag = rng.uniform01() < 0.5;
+        ed->mouseDown(mouseAt(*ed, a, juce::ModifierKeys(m)));
+        if (drag) ed->mouseDrag(mouseAt(*ed, b, juce::ModifierKeys(m)));
+        ed->mouseUp(mouseAt(*ed, drag ? b : a, juce::ModifierKeys(m)));
+        break;
+      }
+      case 3: {
+        const juce::KeyPress keys[] = {juce::KeyPress(juce::KeyPress::deleteKey), juce::KeyPress(juce::KeyPress::leftKey), juce::KeyPress(juce::KeyPress::rightKey),
+                                       juce::KeyPress(juce::KeyPress::leftKey, juce::ModifierKeys(juce::ModifierKeys::shiftModifier), 0),
+                                       juce::KeyPress(juce::KeyPress::rightKey, juce::ModifierKeys(juce::ModifierKeys::shiftModifier), 0),
+                                       juce::KeyPress('m', juce::ModifierKeys(), 'm'), juce::KeyPress('d', juce::ModifierKeys(), 'd'), juce::KeyPress(juce::KeyPress::backspaceKey)};
+        ed->keyPressed(keys[pick(8)]);
+        break;
+      }
+      case 4:
+        if (auto* b = findButton(*ed, kButtons[pick(18)]))
+          if (b->isEnabled()) b->triggerClick();
+        break;
+      default:
+        setParam(p, kParams[pick(14)], static_cast<float>(rng.uniform01()));
+        break;
+    }
+    if (i % 25 == 0) {
+      juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+      ph.playing = rng.uniform01() < 0.8;
+      ph.hasPpq = rng.uniform01() < 0.8;
+      ph.hasBpm = rng.uniform01() < 0.9;
+      const auto audio = run(p, ph, 4, 512, 0.1f);
+      if (!(peak(audio) < 20.f)) {  // finite and sane
+        *ok = false;
+        std::fprintf(stderr, "  audio not finite/sane at event %d (peak %g)\n", i, static_cast<double>(peak(audio)));
+      }
+      ++out.audioChecks;
+    }
+    if (i % 100 == 0) {
+      cf::Status st;
+      p.withSession([&](cf::composition::ProjectSession& s) { st = s.pattern() ? cf::pattern::validate(*s.pattern()) : cf::Status{}; });
+      if (!st.ok()) {
+        *ok = false;
+        std::fprintf(stderr, "  pattern invalid at event %d: %s\n", i, st.error().message.c_str());
+      }
+    }
+  }
+  p.setPlayHead(nullptr);
+  juce::MessageManager::getInstance()->runDispatchLoopUntil(250);
+  out.pattern = patternBytes(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { out.historyNodes = s.history().size(); });
+
+  // Extra check 1 - saving after abuse still works and restores the identical project.
+  juce::MemoryBlock mb;
+  p.getStateInformation(mb);
+  ChopFractalProcessor q;
+  prepare(q);
+  q.setStateInformation(mb.getData(), static_cast<int>(mb.getSize()));
+  if (patternBytes(q) != out.pattern) {
+    *ok = false;
+    std::fprintf(stderr, "  state round trip changed the pattern\n");
+  }
+
+  // Extra check 2 - the undo stack is intact: from the newest version, unwinding everything and replaying it lands
+  // on the same pattern (the random user may have ended mid-stack, so first move to the tip).
+  int undone = 0, redone = 0;
+  std::vector<std::uint8_t> tip;
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    for (int n = 0; n < 500 && s.redo(); ++n) {
+    }
+    tip = s.pattern() ? cf::pattern::serialize(*s.pattern()) : std::vector<std::uint8_t>();
+    while (undone < 500 && s.undo()) ++undone;
+    while (redone < 500 && s.redo()) ++redone;
+  });
+  if (undone != redone || patternBytes(p) != tip) {
+    *ok = false;
+    std::fprintf(stderr, "  undo/redo unwind mismatch: undone %d redone %d same=%d\n", undone, redone, patternBytes(p) == tip);
+  }
+
+  PresetManager::setFolderOverride(juce::File());
+  dragout::setFolderOverride(juce::File());
+  return out;
+}
+
+int fuzzEvents(int fallback) { return std::getenv("CF_FUZZ_EVENTS") ? std::max(100, std::atoi(std::getenv("CF_FUZZ_EVENTS"))) : fallback; }
+
+}  // namespace
+
+CHOP_TEST(fuzz_random_editor_and_audio_input_never_breaks_the_plugin) {
+  if (!std::getenv("DISPLAY")) return;
+  std::vector<std::uint64_t> seeds = {1, 2, 3, 4, 5, 6};
+  if (const char* s = std::getenv("CF_FUZZ_SEED")) seeds = {static_cast<std::uint64_t>(std::atoll(s))};
+  for (std::uint64_t seed : seeds) {
+    bool ok = true;
+    const FuzzResult r = fuzzEditor(seed, fuzzEvents(5000), &ok);
+    if (!ok) std::fprintf(stderr, "fuzz seed %llu failed\n", static_cast<unsigned long long>(seed));
+    CHECK(ok);
+    CHECK(r.audioChecks > 50);
+    CHECK(r.historyNodes <= 64);  // the family tree respects its cap however much the user abuses it
+  }
+}
+
+// Extra check 3 - the same random session replays to byte-identical results (no hidden time or address dependence).
+CHOP_TEST(fuzz_session_replays_deterministically) {
+  if (!std::getenv("DISPLAY")) return;
+  for (std::uint64_t seed : {11ull, 12ull}) {
+    bool okA = true, okB = true;
+    const FuzzResult a = fuzzEditor(seed, fuzzEvents(2500), &okA);
+    const FuzzResult b = fuzzEditor(seed, fuzzEvents(2500), &okB);
+    CHECK(okA && okB);
+    CHECK(a.pattern == b.pattern);
+    CHECK(a.historyNodes == b.historyNodes);
+  }
+}
+
+// Extra check 4 - hostile host timing: odd block sizes, absurd or missing tempo, non-monotonic or NaN positions.
+CHOP_TEST(audio_stays_finite_under_hostile_host_timing_and_block_sizes) {
+  ChopFractalProcessor p;
+  prepare(p, 512);
+  makeSession(p, 77);
+  setParam(p, "allow_reverse", 1.f);
+  setParam(p, "allow_glide", 1.f);
+  setParam(p, "allow_crunch", 1.f);
+  setParam(p, "allow_filter", 1.f);
+  cf::Rng rng(99);
+  FakePlayHead ph;
+  p.setPlayHead(&ph);
+  const double bpms[] = {120.0, 0.0, -5.0, 1e-9, 20.0, 999.0, 5000.0, 1e12, std::nan("")};
+  const double ppqs[] = {0.0, -100.0, 1e9, 3.5, std::nan(""), 7.0, 0.0001};
+  const int blocks[] = {1, 2, 7, 64, 511, 512, 1000, 4096, 9000};
+  bool finite = true;
+  for (int i = 0; i < 400; ++i) {
+    ph.playing = rng.uniform01() < 0.85;
+    ph.hasBpm = rng.uniform01() < 0.8;
+    ph.hasPpq = rng.uniform01() < 0.8;
+    ph.bpm = bpms[std::min(8, static_cast<int>(rng.uniform01() * 9.0))];
+    ph.ppq = ppqs[std::min(6, static_cast<int>(rng.uniform01() * 7.0))];
+    const int block = blocks[std::min(8, static_cast<int>(rng.uniform01() * 9.0))];
+    if (i % 40 == 0) setParam(p, "pattern_bars", static_cast<float>(i % 4));
+    juce::AudioBuffer<float> buf(2, block);
+    for (int c = 0; c < 2; ++c)
+      for (int n = 0; n < block; ++n) buf.setSample(c, n, 0.2f * std::sin(0.03f * static_cast<float>(n)));
+    juce::MidiBuffer midi;
+    p.setPlayHead(&ph);
+    p.processBlock(buf, midi);
+    for (int c = 0; c < 2; ++c)
+      for (int n = 0; n < block; ++n) {
+        const float v = buf.getSample(c, n);
+        if (!std::isfinite(v) || std::fabs(v) > 20.f) finite = false;
+      }
+    if (i % 50 == 0) p.pollAudioFlags();  // loop/midpoint bookkeeping must cope with the same garbage
+  }
+  p.setPlayHead(nullptr);
+  CHECK(finite);
+}
+
 int main() {
   const bool display = std::getenv("DISPLAY") != nullptr;
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
