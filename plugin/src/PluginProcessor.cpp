@@ -2,6 +2,7 @@
 
 #include <chopfractal/plugin_host_adapter/loop_position.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
