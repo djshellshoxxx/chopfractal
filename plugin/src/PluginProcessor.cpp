@@ -117,8 +117,9 @@ void ChopFractalProcessor::pollAudioFlags() {
   if (boundaryFlag_.exchange(false)) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
   if (midpointFlag_.exchange(false)) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins.
-    withSession([this](cf::composition::ProjectSession& s) {
-      auto r = s.evolveStep();
+    const double chaos = currentParams().get(cf::host::kChaos);
+    withSession([this, chaos](cf::composition::ProjectSession& s) {
+      auto r = s.evolveStep(chaos);
       if (!r.ok()) setStatusMessage("Evolve: " + juce::String(r.error().message));
       else if (r.value()) setStatusMessage("Evolve stepped");
     });

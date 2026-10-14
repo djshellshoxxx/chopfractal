@@ -27,7 +27,7 @@ juce_add_plugin(ChopFractal
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT FALSE
   IS_MIDI_EFFECT FALSE
-  EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+  EDITOR_WANTS_KEYBOARD_FOCUS TRUE
   COPY_PLUGIN_AFTER_BUILD FALSE)
 
 # Optional CLAP format via clap-juce-extensions (MIT; wraps the same JUCE processor, no source changes).

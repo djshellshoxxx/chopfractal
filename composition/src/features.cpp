@@ -94,7 +94,7 @@ Status ProjectSession::setEvolve(const evolve::Settings& settings) {
   return {};
 }
 
-Result<bool> ProjectSession::evolveStep() {
+Result<bool> ProjectSession::evolveStep(double chaos) {
   if (!evolve_.running() || !patterns_.hasPattern() || hasPendingActivation()) return false;
   auto step = evolve_.onLoopMidpoint();
   if (!step) return false;
@@ -103,7 +103,16 @@ Result<bool> ProjectSession::evolveStep() {
   mo.amount = step->amount;
   auto policy = makePolicy();
   pattern::GenerationReport report;
-  auto r = pattern::mutate(patterns_.current(), *chops_, mo, policy.get(), &report);
+  // Chaos widens what this step may change; the stored settings are restored afterwards so they never drift.
+  pattern::Pattern base = patterns_.current();
+  const pattern::Settings stored = base.settings;
+  if (chaos > 0.0) base.settings = applyChaos(stored, chaos);
+  auto r = pattern::mutate(base, *chops_, mo, policy.get(), &report);
+  if (r.ok()) {
+    pattern::Pattern next = std::move(r.value());
+    next.settings = stored;
+    r = std::move(next);
+  }
   Status st = finalize(std::move(r), nullptr, &report);  // undoable, but not a family-tree node
   if (!st.ok()) {
     evolve_.reportFailure();

@@ -211,6 +211,23 @@ CHOP_TEST(evolve_steps_in_place_keeps_locks_and_does_not_flood_history) {
   }
   CHECK(pattern::serialize(*a.pattern()) == pattern::serialize(*b.pattern()));
 
+  // Chaos widens the steps but never rewrites the stored settings; chaos 0 is exactly the plain step.
+  {
+    ProjectSession c0, c1, c2;
+    for (ProjectSession* p : {&c0, &c1, &c2}) {
+      CHECK(ready(*p));
+      CHECK(p->generate(settings(7, 4)).ok());
+      CHECK(p->setEvolve(es).ok());
+    }
+    for (int loop = 0; loop < 4; ++loop) {
+      CHECK(c0.evolveStep().ok() && c1.evolveStep(0.0).ok() && c2.evolveStep(1.0).ok());
+    }
+    CHECK(pattern::serialize(*c0.pattern()) == pattern::serialize(*c1.pattern()));  // zero chaos == no chaos
+    CHECK(pattern::serialize(*c2.pattern()) != pattern::serialize(*c0.pattern()));  // full chaos behaves differently
+    CHECK(c2.pattern()->settings.density == c0.pattern()->settings.density);        // stored settings do not drift
+    CHECK(c2.pattern()->settings.allowCrunch == c0.pattern()->settings.allowCrunch);
+  }
+
   // Settings persist; a loaded project never starts evolving by itself.
   auto saved = a.saveState(true);
   CHECK(saved.ok());

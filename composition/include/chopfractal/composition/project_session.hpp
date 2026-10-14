@@ -159,7 +159,7 @@ class ProjectSession {
   const evolve::Settings& evolveSettings() const { return evolve_.settings(); }
   bool evolveRunning() const { return evolve_.running(); }
   // Call once per loop at the loop midpoint, from the message thread. Returns true when a step was applied.
-  Result<bool> evolveStep();
+  Result<bool> evolveStep(double chaos = 0.0);  // chaos in [0,1] is the live Chaos control (0 = off)
   Status keepEvolved(const std::string& label = {});  // records the current pattern as a family-tree branch
 
   // ---- Smart Setup ----
