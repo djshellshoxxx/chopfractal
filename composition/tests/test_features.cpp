@@ -226,6 +226,7 @@ CHOP_TEST(evolve_steps_in_place_keeps_locks_and_does_not_flood_history) {
     CHECK(pattern::serialize(*c2.pattern()) != pattern::serialize(*c0.pattern()));  // full chaos behaves differently
     CHECK(c2.pattern()->settings.density == c0.pattern()->settings.density);        // stored settings do not drift
     CHECK(c2.pattern()->settings.allowCrunch == c0.pattern()->settings.allowCrunch);
+    CHECK(c0.pattern()->settings.seed != 7);  // each step records its own mutation seed
   }
 
   // Settings persist; a loaded project never starts evolving by itself.

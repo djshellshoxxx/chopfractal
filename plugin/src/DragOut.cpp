@@ -1,5 +1,7 @@
 #include "DragOut.h"
 
+#include "AppPaths.h"
+
 namespace dragout {
 namespace {
 juce::File& override_() {
@@ -10,14 +12,15 @@ juce::File& override_() {
 
 juce::File folder() {
   if (override_() != juce::File()) return override_();
-  return juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("ChopFractal").getChildFile("drag");
+  // A persistent per-user folder: DAWs often link dropped media in place, so it must not live in a purged temp folder.
+  return apppaths::dataRoot().getChildFile("Dropped");
 }
 void setFolderOverride(const juce::File& f) { override_() = f; }
 
 juce::File writeTemp(const juce::String& stem, const juce::String& ext, const std::vector<std::uint8_t>& bytes) {
   const juce::File dir = folder();
   if (!dir.createDirectory().wasOk()) return {};
-  const juce::File f = dir.getNonexistentChildFile(stem, "." + ext, false);
+  const juce::File f = dir.getNonexistentChildFile(stem + "-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S"), "." + ext, true);
   if (!f.replaceWithData(bytes.data(), bytes.size())) return {};
   return f;
 }

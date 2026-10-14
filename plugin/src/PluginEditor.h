@@ -70,6 +70,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   void doExportKit();
   int selectedBar() const;
   void askSavePreset();
+  juce::Point<int> treePos(const chopfractal::ui::TreeNodeView& n) const;
+  void nudgeSelected(int cells, bool resize);
   void editSelected(const std::function<chopfractal::Result<chopfractal::pattern::Pattern>(const chopfractal::pattern::Pattern&, const chopfractal::ChopSnapshot&)>& fn);
 
   ChopFractalProcessor& proc_;
@@ -101,6 +103,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, private juce::Timer
   bool dragCopy_ = false;
   std::int64_t barTicks_ = 0, gridTicks_ = 0;
   int barCount_ = 0;
+  int treeCols_ = 0, treeRows_ = 0;
+  juce::TooltipWindow tooltip_{this};
 
   // Feature controls (not host parameters: they act on the project).
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},

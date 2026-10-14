@@ -110,7 +110,9 @@ Result<bool> ProjectSession::evolveStep(double chaos) {
   auto r = pattern::mutate(base, *chops_, mo, policy.get(), &report);
   if (r.ok()) {
     pattern::Pattern next = std::move(r.value());
+    const std::uint64_t stepSeed = next.settings.seed;  // the mutation's own seed stays on the result
     next.settings = stored;
+    next.settings.seed = stepSeed;
     r = std::move(next);
   }
   Status st = finalize(std::move(r), nullptr, &report);  // undoable, but not a family-tree node
@@ -201,7 +203,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderMidi(const KitOptions& o
   if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
   const std::size_t n = chops_->chops.size();
   if (n > 256) return makeError(ErrorCode::LimitExceeded, "too many chops for a kit", 256);
-  if (o.baseNote < 0 || o.baseNote + static_cast<int>(n) - 1 > 127)
+  if (o.baseNote < 0 || o.baseNote > 128 - static_cast<int>(n))
     return makeError(ErrorCode::OutOfRange, "the chops do not fit into MIDI notes 0 to 127 from this base note", 127 - static_cast<int>(n) + 1);
   midi::FileSpec spec;
   spec.bpm = o.bpm;
@@ -246,7 +248,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
   if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
   const std::size_t n = chops_->chops.size();
   if (n > 256) return makeError(ErrorCode::LimitExceeded, "too many chops for a kit", 256);
-  if (o.baseNote < 0 || o.baseNote + static_cast<int>(n) - 1 > 127)
+  if (o.baseNote < 0 || o.baseNote > 128 - static_cast<int>(n))
     return makeError(ErrorCode::OutOfRange, "the chops do not fit into MIDI notes 0 to 127 from this base note", 127 - static_cast<int>(n) + 1);
   const std::string stem = wav::sanitizeFileName(o.name);
 
@@ -256,7 +258,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
     std::string role = roles_.roleOf(chops_->chops[i].id);
     sliceNames.push_back("slice_" + twoDigits(i + 1) + "_" + (role.empty() ? std::string("chop") : wav::sanitizeFileName(role)) + ".wav");
   }
-  const fs::path dir(directory);
+  const fs::path dir = fs::u8path(directory);
   std::vector<fs::path> targets;
   for (const std::string& s : sliceNames) targets.push_back(dir / s);
   targets.push_back(dir / (stem + ".mid"));
@@ -264,7 +266,7 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
   std::error_code ec;
   if (!o.overwrite)
     for (const fs::path& t : targets)
-      if (fs::exists(t, ec)) return makeError(ErrorCode::Conflict, "a file already exists at " + t.string());
+      if (fs::exists(t, ec)) return makeError(ErrorCode::Conflict, "a file already exists at " + t.u8string());
 
   // MIDI first (it can fail on limits) so that nothing is written for a request that cannot complete.
   auto mid = renderMidi(o);
@@ -309,18 +311,18 @@ Result<ExportReport> ProjectSession::exportKit(const std::string& directory, con
     return e;
   };
   for (std::size_t i = 0; i < n; ++i) {
-    Status w = wav::writeFileAtomic(targets[i].string(), sliceBytes[i], o.overwrite);
+    Status w = wav::writeFileAtomic(targets[i].u8string(), sliceBytes[i], o.overwrite);
     if (!w.ok()) return fail(w.error());
     written.push_back(targets[i]);
-    rep.files.push_back(targets[i].string());
+    rep.files.push_back(targets[i].u8string());
   }
-  Status wm = wav::writeFileAtomic(targets[n].string(), mid.value(), o.overwrite);
+  Status wm = wav::writeFileAtomic(targets[n].u8string(), mid.value(), o.overwrite);
   if (!wm.ok()) return fail(wm.error());
   written.push_back(targets[n]);
-  rep.files.push_back(targets[n].string());
-  Status wk = wav::writeFileAtomic(targets[n + 1].string(), std::vector<std::uint8_t>(map.begin(), map.end()), o.overwrite);
+  rep.files.push_back(targets[n].u8string());
+  Status wk = wav::writeFileAtomic(targets[n + 1].u8string(), std::vector<std::uint8_t>(map.begin(), map.end()), o.overwrite);
   if (!wk.ok()) return fail(wk.error());
-  rep.files.push_back(targets[n + 1].string());
+  rep.files.push_back(targets[n + 1].u8string());
   if (auto dec = midi::decode(mid.value().data(), mid.value().size()); dec.ok()) rep.notes = dec.value().notes.size();
   return rep;
 }

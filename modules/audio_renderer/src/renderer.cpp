@@ -65,7 +65,10 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
     return makeError(ErrorCode::InvalidArgument, "the source buffer is missing or has an unsupported format");
   if (source->samples.size() != static_cast<std::size_t>(source->channels) * static_cast<std::size_t>(source->frames))
     return makeError(ErrorCode::Corrupt, "the source buffer size does not match its channel and frame counts");
-  if (lengthTicks <= 0) return makeError(ErrorCode::InvalidArgument, "the pattern length must be positive");
+  // Bounds keep corrupt state from making the scheduler loop thousands of cycles per block or overflow tick math.
+  constexpr Ticks kMinLength = 60;
+  constexpr Ticks kMaxLength = static_cast<Ticks>(limits::kMaxBars) * 32 * kTicksPerWhole;
+  if (lengthTicks < kMinLength || lengthTicks > kMaxLength) return makeError(ErrorCode::OutOfRange, "the pattern length is outside the supported range");
   if (events.size() > limits::kMaxEventsPerPattern) return makeError(ErrorCode::LimitExceeded, "too many events", static_cast<std::int64_t>(limits::kMaxEventsPerPattern));
 
   auto pb = std::make_shared<Playback>();
@@ -129,6 +132,7 @@ struct Renderer::Impl {
   bool haveExpected = false;
   double expectedTicks = 0.0;
   double freeRunTicks = 0.0;
+  const SourceData* currentSource = nullptr;  // source of `current`, kept so the old Playback is never read after a switch
   std::uint64_t serialCounter = 0;
   std::uint64_t dropped = 0;
 
@@ -395,10 +399,12 @@ struct Renderer::Impl {
   void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
     const Playback* pb = mailbox.acquire();
     if (pb != current) {
-      const SourceData* oldSrc = current ? current->source.get() : nullptr;
+      // Compare the cached source pointer: once acquire() acknowledged the new Playback, the publisher may free
+      // the old one, so `current` must not be dereferenced here.
       const SourceData* newSrc = pb ? pb->source.get() : nullptr;
-      if (oldSrc != newSrc) hardKillAll();  // voices point into the old source buffer, which may now be freed
+      if (currentSource != newSrc) hardKillAll();  // voices point into the old source buffer, which may now be freed
       current = pb;
+      currentSource = newSrc;
     }
     const bool sourceReady = pb && pb->source && pb->lengthTicks > 0;
     drainPreview(pb, params.enabled && sourceReady);

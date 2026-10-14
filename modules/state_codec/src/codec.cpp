@@ -9,12 +9,24 @@ constexpr std::size_t kHeaderBytes = 4 + 4 + 4;  // magic + container version + 
 constexpr std::size_t kTrailerBytes = 4;         // crc32
 }  // namespace
 
-std::uint32_t crc32(const std::uint8_t* data, std::size_t size) {
-  std::uint32_t crc = 0xFFFFFFFFu;
-  for (std::size_t i = 0; i < size; ++i) {
-    crc ^= data[i];
-    for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+namespace {
+// Standard reflected CRC-32 (polynomial 0xEDB88320), table driven: embedded projects can be 100+ MB.
+struct CrcTable {
+  std::uint32_t t[256];
+  CrcTable() {
+    for (std::uint32_t i = 0; i < 256; ++i) {
+      std::uint32_t c = i;
+      for (int b = 0; b < 8; ++b) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+      t[i] = c;
+    }
   }
+};
+}  // namespace
+
+std::uint32_t crc32(const std::uint8_t* data, std::size_t size) {
+  static const CrcTable table;
+  std::uint32_t crc = 0xFFFFFFFFu;
+  for (std::size_t i = 0; i < size; ++i) crc = table.t[(crc ^ data[i]) & 0xFFu] ^ (crc >> 8);
   return ~crc;
 }
 

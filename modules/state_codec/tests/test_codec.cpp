@@ -94,3 +94,9 @@ CHOP_TEST(migrations_chain_in_order_and_reject_newer_or_missing) {
   });
   CHECK(!reg.migrate("bad", {1, {}}, 2).ok());
 }
+
+CHOP_TEST(crc32_matches_the_standard_check_value) {
+  const char* s = "123456789";
+  CHECK_EQ(crc32(reinterpret_cast<const std::uint8_t*>(s), 9), 0xCBF43926u);
+  CHECK_EQ(crc32(nullptr, 0), 0u);
+}

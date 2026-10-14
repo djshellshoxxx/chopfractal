@@ -918,3 +918,21 @@ CHOP_TEST(resize_duplicate_and_mute_edit_one_hit_and_respect_locks_and_limits) {
   auto barLocked = setLock(p, ScopeRef{ScopeLevel::Bar, 0, 0, EventId{}}, true);
   CHECK(barLocked.ok() && !duplicateEvent(barLocked.value(), id, 0).ok());
 }
+
+CHOP_TEST(a_changed_effect_intensity_survives_a_round_trip_even_with_all_effects_off) {
+  const ChopSnapshot chops = makeChops(4);
+  Settings s;
+  s.seed = 5;
+  s.fxIntensity = 0.9;
+  auto p = generate(chops, s);
+  CHECK(p.ok());
+  if (!p.ok()) return;
+  const auto bytes = serialize(p.value());
+  auto back = deserialize(bytes.data(), bytes.size());
+  CHECK(back.ok() && back.value().settings.fxIntensity == 0.9);
+  Settings d;
+  d.seed = 5;  // default intensity: encoding is unchanged from earlier versions (no trailer)
+  auto q = generate(chops, d);
+  CHECK(q.ok());
+  if (q.ok()) CHECK(serialize(q.value()).size() + 9 == bytes.size());
+}

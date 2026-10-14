@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(ChopFractal VERSION 0.1.0 LANGUAGES CXX)
 
+# The portable modules need 3.20; the JUCE plugin (juce_add_plugin, FetchContent options) needs 3.22.
+if(CHOPFRACTAL_BUILD_PLUGIN AND CMAKE_VERSION VERSION_LESS 3.22)
+  message(FATAL_ERROR "Building the plugin requires CMake 3.22 or newer (found ${CMAKE_VERSION}).")
+endif()
+
 option(CHOPFRACTAL_BUILD_TESTS "Build module and integration tests" ON)
 option(CHOPFRACTAL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CHOPFRACTAL_SANITIZE "Build with AddressSanitizer + UBSan (GCC/Clang)" OFF)
@@ -9,6 +14,12 @@ option(CHOPFRACTAL_BUILD_PLUGIN "Build the JUCE VST3 shell (requires JUCE)" OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Bit-exact results across compilers and CPUs: forbid fused multiply-add contraction (clang on arm64 enables it by
+# default), which would change the last bit of generation math and the saved doubles. MSVC does not contract by default.
+if(NOT MSVC)
+  add_compile_options(-ffp-contract=off)
+endif()
 
 if(CHOPFRACTAL_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)

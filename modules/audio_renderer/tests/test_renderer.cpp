@@ -178,6 +178,8 @@ CHOP_TEST(playback_validation_rejects_bad_input) {
   auto src = makeSource(1, 48000, 1000, dc);
   CHECK(!makePlayback(nullptr, {}, 3840).ok());
   CHECK(!makePlayback(src, {}, 0).ok());
+  CHECK(!makePlayback(src, {}, 1).ok());                          // shorter than the minimum loop
+  CHECK(!makePlayback(src, {}, std::numeric_limits<Ticks>::max()).ok());  // would overflow the tick math
   CHECK(makePlayback(src, {}, 3840).ok());  // an empty pattern is valid
   CHECK(!makePlayback(src, {ev(1, 2000, 0, 100)}, 3840).ok());   // reads past the source
   CHECK(!makePlayback(src, {ev(1, 500, 3840, 100)}, 3840).ok()); // starts at the loop end

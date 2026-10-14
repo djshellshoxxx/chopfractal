@@ -28,7 +28,10 @@ ChopFractalProcessor::ChopFractalProcessor()
   startTimerHz(30);
 }
 
-ChopFractalProcessor::~ChopFractalProcessor() { stopTimer(); }
+ChopFractalProcessor::~ChopFractalProcessor() {
+  stopTimer();
+  loadPool_.removeAllJobs(true, 15000);  // a decode in flight must not outlive the plugin's code
+}
 
 juce::AudioProcessorValueTreeState::ParameterLayout ChopFractalProcessor::createLayout() {
   using namespace cf::host;
@@ -95,14 +98,28 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   activeBpm.store(tt.block.bpm, std::memory_order_relaxed);
 
   cf::host::ParamValues pv;
-  for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed));
+  for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
 
   renderer_.process(tt.block, cf::host::toRenderParams(pv), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
-  const cf::host::LoopPosition lp = cf::host::computeLoopPosition(tt.block, frames, sampleRate_.load(std::memory_order_relaxed),
-                                                                   patternQuarters_.load(std::memory_order_relaxed));
+  // Hosts that give no position still run the renderer free-run, so the loop/midpoint events (variation
+  // switches, Evolve) follow a local clock that stays aligned with the host position while there is one.
+  cf::render::TransportBlock lpBlock = tt.block;
+  const double sr = sampleRate_.load(std::memory_order_relaxed);
+  const double bpmSafe = (std::isfinite(tt.block.bpm) && tt.block.bpm > 0.0) ? tt.block.bpm : 120.0;
+  if (tt.block.playing && !tt.block.positionValid) {
+    lpBlock.positionValid = true;
+    lpBlock.ppq = freeRunQuarters_;
+  }
+  if (tt.block.playing) {
+    const double start = lpBlock.positionValid ? lpBlock.ppq : freeRunQuarters_;
+    freeRunQuarters_ = start + static_cast<double>(frames) * bpmSafe / (60.0 * sr);
+  } else {
+    freeRunQuarters_ = 0.0;
+  }
+  const cf::host::LoopPosition lp = cf::host::computeLoopPosition(lpBlock, frames, sr, patternQuarters_.load(std::memory_order_relaxed));
   if (lp.boundary) boundaryFlag_.store(true, std::memory_order_relaxed);
   if (lp.midpoint) midpointFlag_.store(true, std::memory_order_relaxed);
   playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
@@ -185,22 +202,23 @@ std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(c
   data->sampleRate = static_cast<int>(std::lround(reader->sampleRate));
   data->frames = length;
   data->samples.resize(static_cast<std::size_t>(channels) * static_cast<std::size_t>(length));
-  for (int c = 0; c < channels; ++c)
-    for (juce::int64 i = 0; i < length; ++i) {
-      const float v = buffer.getSample(c, static_cast<int>(i));
-      data->samples[static_cast<std::size_t>(c) * static_cast<std::size_t>(length) + static_cast<std::size_t>(i)] = std::isfinite(v) ? v : 0.f;
-    }
+  for (int c = 0; c < channels; ++c) {
+    const float* src = buffer.getReadPointer(c);
+    float* dst = data->samples.data() + static_cast<std::size_t>(c) * static_cast<std::size_t>(length);
+    for (juce::int64 i = 0; i < length; ++i) dst[i] = std::isfinite(src[i]) ? src[i] : 0.f;
+  }
   return data;
 }
 
 void ChopFractalProcessor::loadFileAsync(const juce::File& file, bool relink) {
   setStatusMessage("Loading " + file.getFileName() + "...");
   juce::WeakReference<ChopFractalProcessor> self(this);
-  juce::Thread::launch([self, file, relink] {
+  const std::uint64_t ticket = ++loadTicket_;
+  loadPool_.addJob([self, file, relink, ticket] {
     juce::String error;
     auto data = decodeFile(file, error);
-    juce::MessageManager::callAsync([self, file, data, error, relink] {
-      if (self == nullptr) return;
+    juce::MessageManager::callAsync([self, file, data, error, relink, ticket] {
+      if (self == nullptr || ticket != self->loadTicket_.load()) return;  // a newer request superseded this one
       if (!data) {
         self->setStatusMessage(error);
         return;
@@ -223,9 +241,10 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::MemoryOutputStream out(destData, false);
   out.write(kStateMagic, 4);
   out.writeInt(kStateVersion);
-  apvts.state.setProperty("manualBpm", manualBpm.load(), nullptr);
-  apvts.state.setProperty("embedSource", embedSource.load(), nullptr);
-  std::unique_ptr<juce::XmlElement> xml(apvts.copyState().createXml());
+  juce::ValueTree stateCopy = apvts.copyState();  // never mutate the live tree: hosts may call this off the message thread
+  stateCopy.setProperty("manualBpm", manualBpm.load(), nullptr);
+  stateCopy.setProperty("embedSource", embedSource.load(), nullptr);
+  std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
   out.writeString(xml ? xml->toString() : juce::String());
 
   std::vector<std::uint8_t> blob;
@@ -266,6 +285,7 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
     // Reference-only projects re-decode their file here, on the calling thread; embedded audio needs no file access.
     status = session_.loadState(blob.data(), blob.size(), [](const cf::source::SourceInfo& info) -> std::shared_ptr<const cf::render::SourceData> {
       if (info.path.empty()) return nullptr;
+      if (info.path.rfind("\\\\", 0) == 0 || info.path.rfind("//", 0) == 0) return nullptr;  // never fetch a project's network path unprompted (Locate Source relinks)
       juce::File f(juce::String::fromUTF8(info.path.c_str()));
       if (!f.existsAsFile()) return nullptr;
       juce::String ignored;

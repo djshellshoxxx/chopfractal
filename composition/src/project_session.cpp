@@ -188,6 +188,7 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
   patterns_.adopt(std::move(result.value()));
+  pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
   if (historyLabel) recordHistory(historyLabel);
   return {};
@@ -233,6 +234,8 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   if (!validSource(data)) return makeError(ErrorCode::InvalidArgument, "the audio buffer is empty or malformed");
   source::SourceInfo info;
   info.id = idOf(*data);
+  if (name.size() > 256) name.resize(256);   // informational only; ChopMap::create rejects longer values
+  if (path.size() > 1024) path.clear();
   info.name = std::move(name);
   info.channels = data->channels;
   info.sampleRate = data->sampleRate;
@@ -245,6 +248,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
   roles_ = roles::RoleMap{};
+  rules_ = roles::RuleSet{};  // rules can name chop ids, which restart at 1 for a new source
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -256,6 +260,7 @@ void ProjectSession::clearSource() {
   chopMap_.reset();
   chops_.reset();
   roles_ = roles::RoleMap{};
+  rules_ = roles::RuleSet{};
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
   pendingActivation_ = history::kNoNode;
@@ -417,6 +422,7 @@ bool ProjectSession::undo() {
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
     return false;
   }
+  pendingActivation_ = history::kNoNode;
   return true;
 }
 
@@ -427,6 +433,7 @@ bool ProjectSession::redo() {
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
     return false;
   }
+  pendingActivation_ = history::kNoNode;
   return true;
 }
 
@@ -437,6 +444,7 @@ Status ProjectSession::recallSnapshot(std::size_t slot) {
     patterns_.undo();
     return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
   }
+  pendingActivation_ = history::kNoNode;
   return {};
 }
 
@@ -726,8 +734,9 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     newRoles = std::move(r.value());
   }
   if (newChops) {
-    std::vector<ChopId> ids;
-    for (const ChopInfo& c : newChops->chops) ids.push_back(c.id);
+    std::vector<ChopId> ids;  // roles follow the marker (as in reconcileAfterMarkerChange), so disabled chops keep theirs
+    if (newMap)
+      for (const source::Marker& m : newMap->markers()) ids.push_back(m.id);
     newRoles.roles.retainOnly(ids);
   }
 
