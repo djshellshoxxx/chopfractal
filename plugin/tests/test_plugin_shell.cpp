@@ -1,5 +1,6 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+#include <functional>
 #include <string>
 #include <algorithm>
 #include <memory>
@@ -1367,4 +1368,172 @@ CHOP_TEST(morph_controls_enable_with_both_slots_and_commit_adds_a_node) {
   CHECK(!active());
   CHECK(patternBytes(p) == pre);
   CHECK(p.statusMessage().contains("Morph cancelled; your pattern is unchanged."));
+}
+
+namespace {
+template <class T>
+T* findByTitle(juce::Component& root, const juce::String& title) {
+  if (auto* c = dynamic_cast<T*>(&root))
+    if (c->getTitle() == title) return c;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findByTitle<T>(*root.getChildComponent(i), title)) return f;
+  return nullptr;
+}
+
+struct RulesRig {
+  ChopFractalProcessor p;
+  std::unique_ptr<juce::AudioProcessorEditor> ed;
+  RulesPanel* panel = nullptr;
+  RulesRig() {
+    prepare(p);
+    p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok()); });
+    ed.reset(p.createEditor());
+    if (!ed) return;
+    ed->setVisible(true);
+    for (int i = 0; i < ed->getNumChildComponents(); ++i)
+      if (auto* r = dynamic_cast<RulesPanel*>(ed->getChildComponent(i))) panel = r;
+    pump();
+  }
+  static void pump(int ms = 100) { juce::MessageManager::getInstance()->runDispatchLoopUntil(ms); }
+  void click(const char* text, bool deep = false) {
+    juce::Button* b = deep ? findButtonDeep(*ed, text) : findButton(*ed, text);
+    CHECK(b != nullptr);
+    if (b && b->isEnabled()) b->triggerClick();
+    pump();
+  }
+  void detectAndRoles() {
+    click("Detect Chops");
+    p.withSession([&](cf::composition::ProjectSession& s) {
+      const auto& c = s.chops()->chops;
+      for (std::size_t i = 0; i < c.size(); ++i) s.assignRole(c[i].id, i == 0 ? "kick" : (i == 1 ? "hat" : "snare"));
+    });
+  }
+};
+}  // namespace
+
+CHOP_TEST(rules_panel_template_apply_and_generate) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Rules");
+  CHECK(r.panel->isVisible());
+  findByTitle<juce::ComboBox>(*r.panel, "Template role")->setText("hat", juce::sendNotificationSync);
+  findByTitle<juce::TextEditor>(*r.panel, "Template bar from")->setText("1", true);
+  findByTitle<juce::TextEditor>(*r.panel, "Template bar to")->setText("2", true);
+  r.click("Exclude from bars", true);
+  CHECK_EQ(r.panel->model().rows().size(), 1u);
+  CHECK(r.panel->hasUnapplied());
+  r.click("Apply", true);
+  cf::roles::RuleSet rs;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { rs = s.rules(); });
+  CHECK_EQ(rs.rules.size(), 1u);
+  if (rs.rules.size() == 1) {
+    CHECK(rs.rules[0].action.kind == cf::roles::ActionKind::Forbid);
+    CHECK(rs.rules[0].when.role == "hat");
+    CHECK_EQ(rs.rules[0].when.barMin, 0);
+    CHECK_EQ(rs.rules[0].when.barMax, 1);
+  }
+  CHECK(r.p.statusMessage().contains("Rules applied."));
+  CHECK(!r.panel->hasUnapplied());
+  r.click("Generate");
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    const cf::ChopId hat = s.chops()->chops[1].id;
+    for (std::size_t b = 0; b < 2 && b < s.pattern()->bars.size(); ++b)
+      for (const auto& bt : s.pattern()->bars[b].beats)
+        for (const auto& e : bt.events) CHECK(e.chop != hat);
+  });
+  r.click("Test Rules", true);
+  CHECK(r.p.statusMessage().startsWith("Test"));
+  r.click("Close", true);
+  CHECK(!r.panel->isVisible());
+}
+
+CHOP_TEST(rules_panel_invalid_rule_blocks_apply_and_revert_restores) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Rules");
+  r.click("Add Rule", true);
+  CHECK_EQ(r.panel->model().rows().size(), 1u);
+  findByTitle<juce::ComboBox>(*r.panel, "Action")->setSelectedId(5, juce::sendNotificationSync);  // Limit count per bar
+  findByTitle<juce::TextEditor>(*r.panel, "Count")->setText("0", true);
+  RulesRig::pump();
+  bool error = false;
+  for (const auto& i : r.panel->model().issues()) error |= i.error;
+  CHECK(error);
+  CHECK(!findButtonDeep(*r.ed, "Apply")->isEnabled());
+  CHECK(findButtonDeep(*r.ed, "Apply")->getTooltip().isNotEmpty());
+  r.click("Revert", true);
+  CHECK_EQ(r.panel->model().rows().size(), 0u);
+  bool empty = false;
+  r.p.withSession([&](cf::composition::ProjectSession& s) { empty = s.rules().rules.empty(); });
+  CHECK(empty);
+}
+
+CHOP_TEST(rules_panel_why_explains_the_selected_hit) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.detectAndRoles();
+  r.click("Generate");
+  r.click("Rules");
+  r.click("Why?", true);
+  CHECK(r.p.statusMessage().contains("Select a hit first; Why? explains that hit."));
+  auto* editor = dynamic_cast<ChopFractalEditor*>(r.ed.get());
+  CHECK(editor != nullptr);
+  cf::EventId first;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& bt : s.pattern()->bars[0].beats)
+      if (!bt.events.empty() && !first.valid()) first = bt.events.front().id;
+  });
+  CHECK(first.valid());
+  editor->setSelectedHits({first});
+  r.click("Why?", true);
+  CHECK(r.p.statusMessage().contains("rule") || r.p.statusMessage().contains("nothing constrains"));
+}
+
+CHOP_TEST(rules_panel_roles_tab_assigns_and_clears_and_controls_are_titled) {
+  if (!haveDisplay()) return;
+  RulesRig r;
+  CHECK(r.ed && r.panel);
+  if (!r.ed || !r.panel) return;
+  r.click("Detect Chops");
+  r.click("Rules");
+  r.click("Roles", true);
+  auto* list = findByTitle<juce::ListBox>(*r.panel, "Chop roles");
+  CHECK(list != nullptr);
+  if (!list) return;
+  list->selectRow(1);
+  RulesRig::pump();
+  auto* combo = findByTitle<juce::ComboBox>(*r.panel, "Role for the selected chop");
+  CHECK(combo != nullptr);
+  if (!combo) return;
+  combo->setText("snare", juce::sendNotificationSync);
+  RulesRig::pump();
+  cf::ChopId chop;
+  std::string role;
+  r.p.withSession([&](cf::composition::ProjectSession& s) {
+    chop = s.chops()->chops[1].id;
+    role = s.roleMap().roleOf(chop);
+  });
+  CHECK(role == "snare");
+  list->selectRow(1);
+  combo->setText("(none)", juce::sendNotificationSync);
+  RulesRig::pump();
+  r.p.withSession([&](cf::composition::ProjectSession& s) { role = s.roleMap().roleOf(chop); });
+  CHECK(role.empty());
+  // every interactive control in the panel has an accessible name
+  std::function<void(juce::Component&)> check = [&](juce::Component& c) {
+    if (auto* b = dynamic_cast<juce::Button*>(&c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
+    if (dynamic_cast<juce::ComboBox*>(&c) || dynamic_cast<juce::Slider*>(&c) || dynamic_cast<juce::TextEditor*>(&c)) {
+      if (c.getParentComponent() == r.panel) CHECK(c.getTitle().isNotEmpty());
+    }
+    for (int i = 0; i < c.getNumChildComponents(); ++i) check(*c.getChildComponent(i));
+  };
+  check(*r.panel);
 }

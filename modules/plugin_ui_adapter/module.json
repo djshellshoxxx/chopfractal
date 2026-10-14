@@ -31,6 +31,11 @@
       "id": "variation_history",
       "version": "^0.1",
       "reason": "the tree layout reads node summaries"
+    },
+    {
+      "id": "chop_roles_grammar",
+      "version": "^0.1",
+      "reason": "the rule editor model drafts, validates and describes rules"
     }
   ],
   "license": "LicenseRef-ChopFractal-Proprietary",
@@ -48,6 +53,7 @@
     "`buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`",
     "`layoutHistoryTree()`",
     "`buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)",
+    "`RuleEditorModel` (draft rules: add, templates, duplicate, remove, update, rows in engine order, issues)",
     "`xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)"
   ],
   "limits": [

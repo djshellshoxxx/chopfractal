@@ -9,6 +9,10 @@ namespace chopfractal::pattern::detail {
 
 inline Ticks beatTicksOf(const Settings& s) { return ticksPerBeat(s.timeSignature); }
 
+// Policy query for an event placed (or about to be placed) at `startInBar` of `bar`; shared by generation and
+// candidateQueryFor so explanations always agree with what the engine evaluated.
+CandidateQuery buildQuery(const Pattern& p, const Settings& s, int bar, Ticks startInBar, ChopId chop);
+
 // Metric strength of a position inside a bar: downbeat > beat > half-beat > off-grid.
 inline double metricWeight(Ticks startInBar, Ticks beatT) {
   if (startInBar == 0) return 1.0;

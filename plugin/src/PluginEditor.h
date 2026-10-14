@@ -11,6 +11,7 @@
 #include "CapturePanel.h"
 #include "DragOut.h"
 #include "MorphPanel.h"
+#include "RulesPanel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -45,6 +46,10 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   int laneCount() const { return static_cast<int>(chops_.size()); }
   chopfractal::EventId selectedHit() const { return selected_; }
   const std::vector<chopfractal::EventId>& selectedHits() const { return selectedHits_; }
+  void setSelectedHits(std::vector<chopfractal::EventId> ids) {  // used by tests and the rules panel
+    selectedHits_ = std::move(ids);
+    repaint();
+  }
   const std::vector<chopfractal::ChopId>& selectedChops() const { return selectedChops_; }
   juce::Rectangle<int> waveformBounds() const { return waveArea_; }
 
@@ -69,7 +74,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   std::uint64_t currentSeed() const;
   void setSeed(std::uint64_t seed);
   void doGenerate();
-  void doMutate();
+  void doMutate(bool rulesPass = false);
   void doToggleLock();
   void doSmartSetup();
   void doFractal();
@@ -128,6 +133,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   // Feature controls (not host parameters: they act on the project).
   CapturePanel capturePanel_;
   MorphPanel morphPanel_;
+  std::unique_ptr<RulesPanel> rulesPanel_;
+  juce::ToggleButton rulesToggle_{"Rules"};
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};

@@ -42,6 +42,27 @@ constexpr std::uint32_t kSessionSchemaVersion = 1;
 constexpr std::size_t kMaxEmbeddedSourceBytes = 128u * 1024u * 1024u;
 constexpr std::size_t kCodecCeilingBytes = 256u * 1024u * 1024u;
 
+// One BlockedByRule note of the last Generate / Mutate / Evolve step, with display text.
+struct RuleNote {
+  int bar = 0;
+  int beat = 0;
+  std::uint32_t rule = 0;
+  std::string text;
+};
+struct EventExplanation {
+  bool allowed = true;
+  bool preserved = false;
+  bool handPlaced = false;
+  double weight = 1.0;
+  std::vector<std::uint32_t> rules;  // ascending, deduplicated
+  std::string text;
+};
+struct RulePreview {
+  int events = 0;
+  int blocked = 0;
+  std::vector<std::pair<std::uint32_t, int>> blockedByRule;  // sorted by rule id; id 0 = unnamed rule
+};
+
 struct Notice {
   enum class Level : std::uint8_t { Info, Warning, Error };
   Level level = Level::Info;
@@ -128,6 +149,12 @@ class ProjectSession {
   Status setRules(roles::RuleSet rules);
   const roles::RoleMap& roleMap() const { return roles_; }
   const roles::RuleSet& rules() const { return rules_; }
+
+  Status clearRole(ChopId chop);  // NotFound for an unknown chop; Ok when it had no role
+  const std::vector<RuleNote>& lastRuleNotes() const { return ruleNotes_; }
+  Result<EventExplanation> explainEvent(EventId id) const;
+  // Counts what `draft` would block when generating with `settings`. Pure: no state, history or notices change.
+  Result<RulePreview> previewRules(const roles::RuleSet& draft, const pattern::Settings& settings) const;
 
   // ---- pattern ----
   const pattern::Pattern* pattern() const { return patterns_.hasPattern() ? &patterns_.current() : nullptr; }
@@ -219,6 +246,7 @@ class ProjectSession {
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
   void endMorph(bool announce);
+  void recordRuleNotes(const pattern::GenerationReport& report);
   Status refreshMorph();
   bool settleRestoredPattern();
   void recordHistory(const std::string& label);
@@ -244,6 +272,7 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  std::vector<RuleNote> ruleNotes_;
   bool morphActive_ = false;
   bool committingMorph_ = false;
   double morphT_ = 0.5;

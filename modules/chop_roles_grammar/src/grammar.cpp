@@ -3,6 +3,7 @@
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <set>
 
@@ -206,13 +207,15 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
   return d;
 }
 
-bool GrammarPolicy::isPreserved(const CandidateQuery& q) const {
+std::uint32_t GrammarPolicy::preservingRule(const CandidateQuery& q) const {
   for (const Rule& r : rules_.rules)
     if (r.enabled && r.action.kind == ActionKind::Preserve && matchesChop(r.when, q.chop) && inRange(r.when, q.scope) &&
         matchesPosition(r.when, q.scope, q.firstInBar))
-      return true;
-  return false;
+      return r.id;
+  return 0;
 }
+
+bool GrammarPolicy::isPreserved(const CandidateQuery& q) const { return preservingRule(q) != 0; }
 
 std::vector<Requirement> GrammarPolicy::required(const ScopeContext& scope, const std::vector<ChopId>& placedInScope) const {
   std::vector<Requirement> out;
@@ -258,6 +261,57 @@ std::string GrammarPolicy::explain(const Decision& d) const {
     text += "; rule " + std::to_string(t.rule) + " (" + labelOf(t.rule) + ") " + effect;
   }
   return text;
+}
+
+namespace {
+std::string range(int lo, int hi, const char* one, const char* many) {
+  if (lo <= 0 && hi < 0) return {};
+  const std::string name1 = one, nameN = many;
+  if (hi < 0) return " from " + name1 + " " + std::to_string(lo + 1);
+  if (lo == hi) return " in " + name1 + " " + std::to_string(lo + 1);
+  return " in " + nameN + " " + std::to_string(lo + 1) + "-" + std::to_string(hi + 1);
+}
+std::string beatRange(int lo, int hi) {
+  if (lo <= 0 && hi < 0) return {};
+  if (hi < 0) return " from beat " + std::to_string(lo + 1);
+  if (lo == hi) return " on beat " + std::to_string(lo + 1);
+  return " on beats " + std::to_string(lo + 1) + "-" + std::to_string(hi + 1);
+}
+std::string number(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.2g", v);
+  return buf;
+}
+}  // namespace
+
+std::string describe(const Rule& r) {
+  std::string target;
+  if (!r.when.role.empty() && r.when.chop.valid()) target = r.when.role + " chop #" + std::to_string(r.when.chop.value);
+  else if (!r.when.role.empty()) target = r.when.role;
+  else if (r.when.chop.valid()) target = "chop #" + std::to_string(r.when.chop.value);
+  const std::string where = range(r.when.barMin, r.when.barMax, "bar", "bars") + beatRange(r.when.beatMin, r.when.beatMax);
+  std::string position;
+  switch (r.when.position) {
+    case Position::FirstInBar: position = " first in each bar"; break;
+    case Position::FinalBeat: position = " in the final beat"; break;
+    case Position::PhraseBoundary: position = " at phrase boundaries"; break;
+    case Position::Any: break;
+  }
+  const std::string who = target.empty() ? "any chop" : target;
+  switch (r.action.kind) {
+    case ActionKind::Preserve: return "Keep " + who + position + where;
+    case ActionKind::Require: return "Require " + who + position + where;
+    case ActionKind::Forbid: return "Forbid " + who + position + where;
+    case ActionKind::Prefer:
+      return std::string(r.weight < 1.0 ? "Avoid " : "Prefer ") + who + position + where + " (x" + number(r.weight) + ")";
+    case ActionKind::MaxConsecutiveRepeats: {
+      const std::string by = r.action.repeatBy == RepeatBy::SameRole ? "role" : "chop";
+      return "Allow at most " + std::to_string(r.action.count) + (target.empty() ? "" : " " + target) + " of the same " + by + " in a row" + where;
+    }
+    case ActionKind::MaxCount:
+      return "Allow at most " + std::to_string(r.action.count) + (target.empty() ? "" : " " + target) + " per bar" + where;
+  }
+  return {};
 }
 
 namespace templates {

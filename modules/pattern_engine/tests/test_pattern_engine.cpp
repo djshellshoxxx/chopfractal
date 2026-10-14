@@ -951,3 +951,42 @@ CHOP_TEST(a_changed_effect_intensity_survives_a_round_trip_even_with_all_effects
   CHECK(q.ok());
   if (q.ok()) CHECK(serialize(q.value()).size() + 9 == bytes.size());
 }
+
+namespace {
+// Records the query the engine evaluates for each candidate it places.
+struct SpyPolicy : ICandidatePolicy {
+  mutable std::vector<CandidateQuery> seen;
+  Decision evaluate(const CandidateQuery& q) const override {
+    seen.push_back(q);
+    return Decision{};
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext&, const std::vector<ChopId>&) const override { return {}; }
+};
+}  // namespace
+
+CHOP_TEST(candidate_query_for_matches_the_query_used_during_generation) {
+  const auto chops = makeChops();
+  SpyPolicy spy;
+  const Pattern p = gen(chops, baseSettings(), &spy);
+  int checked = 0;
+  for (std::size_t b = 0; b < p.bars.size(); ++b)
+    for (const Beat& bt : p.bars[b].beats)
+      for (const Event& e : bt.events) {
+        const CandidateQuery q = candidateQueryFor(p, e.id);
+        CHECK(q.chop == e.chop);
+        bool found = false;
+        for (const CandidateQuery& s : spy.seen)
+          if (s.chop == e.chop && s.startInBar == e.start && s.scope.bar == static_cast<int>(b) && s.recent == q.recent && s.barSoFar == q.barSoFar &&
+              s.firstInBar == q.firstInBar && s.scope.beat == q.scope.beat && s.scope.beatsPerBar == q.scope.beatsPerBar)
+            found = true;
+        CHECK(found);
+        ++checked;
+      }
+  CHECK(checked > 8);
+}
+
+CHOP_TEST(candidate_query_for_unknown_id_returns_invalid_chop) {
+  const Pattern p = gen(makeChops(), baseSettings());
+  CHECK(!candidateQueryFor(p, EventId{999999}).chop.valid());
+}

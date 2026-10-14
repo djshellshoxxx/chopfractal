@@ -120,6 +120,7 @@ std::vector<Notice> ProjectSession::takeNotices() {
 }
 
 void ProjectSession::noteReport(const pattern::GenerationReport& report) {
+  recordRuleNotes(report);
   int locked = 0;
   bool limited = false;
   for (const pattern::Note& n : report.notes) {
@@ -260,6 +261,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 
 void ProjectSession::clearSource() {
   endMorph(true);
+  ruleNotes_.clear();
   sourceData_.reset();
   chopMap_.reset();
   chops_.reset();
@@ -676,6 +678,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
 
 Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) {
   endMorph(true);
+  ruleNotes_.clear();
   auto dec = codec::decode(data, size);
   if (!dec.ok()) return convert(dec.error());
   codec::ProjectState st = std::move(dec.value());

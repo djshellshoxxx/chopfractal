@@ -82,6 +82,28 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   };
   addAndMakeVisible(capturePanel_);
   addAndMakeVisible(morphPanel_);
+  rulesToggle_.setTitle("Open the rules and roles editor");
+  addAndMakeVisible(rulesToggle_);
+  RulesPanel::Hooks hooks;
+  hooks.applyAndMutate = [this] { doMutate(true); };
+  hooks.primarySelection = [this] { return selectedHits_.empty() ? cf::EventId{} : selectedHits_.front(); };
+  hooks.densityHint = [this] { return proc_.currentParams().get(cf::host::kDensity); };
+  hooks.selectBeat = [this](int bar, int beat) {
+    selectedHits_.clear();
+    proc_.withSession([&](cf::composition::ProjectSession& s) {
+      if (!s.pattern() || bar < 0 || bar >= static_cast<int>(s.pattern()->bars.size())) return;
+      const auto& beats = s.pattern()->bars[static_cast<std::size_t>(bar)].beats;
+      if (beat >= 0 && beat < static_cast<int>(beats.size()))
+        for (const auto& e : beats[static_cast<std::size_t>(beat)].events) selectedHits_.push_back(e.id);
+    });
+    repaint();
+  };
+  rulesPanel_ = std::make_unique<RulesPanel>(proc_, hooks);
+  addChildComponent(*rulesPanel_);
+  rulesToggle_.onClick = [this] {
+    if (rulesToggle_.getToggleState()) rulesPanel_->open();
+    else rulesPanel_->close();
+  };
   addAndMakeVisible(locate_);
   locate_.setEnabled(false);
   generate_.onClick = [this] { doGenerate(); };
@@ -396,13 +418,18 @@ void ChopFractalEditor::resized() {
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
   capturePanel_.setBounds(area.removeFromTop(46));
-  morphPanel_.setBounds(area.removeFromTop(28));
+  {
+    auto row = area.removeFromTop(28);
+    morphPanel_.setBounds(row.removeFromLeft(row.getWidth() - 90));
+    rulesToggle_.setBounds(row);
+  }
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
   patternArea_ = area.removeFromTop(230);
   area.removeFromTop(6);
   statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
+  if (rulesPanel_) rulesPanel_->setBounds(waveArea_.getX(), waveArea_.getY(), waveArea_.getWidth(), area.getBottom() - waveArea_.getY());
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
   historyArea_ = bottom.withTrimmedRight(6);
@@ -475,7 +502,7 @@ void ChopFractalEditor::doGenerate() {
   run([=](cf::composition::ProjectSession& session) { return session.generate(s); });
 }
 
-void ChopFractalEditor::doMutate() {
+void ChopFractalEditor::doMutate(bool rulesPass) {
   const cf::host::ParamValues params = proc_.currentParams();
   const std::uint64_t seed = currentSeed() + 1;
   bool hasPattern = false;
@@ -497,9 +524,9 @@ void ChopFractalEditor::doMutate() {
     live.variation = {v, v, v, v};
     cf::pattern::MutateOptions opt;
     opt.seed = seed;
-    opt.amount = cf::composition::mutateAmountFromParams(params);
+    opt.amount = rulesPass ? 1.0 : cf::composition::mutateAmountFromParams(params);  // Apply and Mutate re-evaluates every beat
     live = cf::composition::applyChaos(live, params.get(cf::host::kChaos));
-    return session.mutate(opt, &live);
+    return session.mutate(opt, &live, rulesPass ? std::string("Mutate (rules)") : std::string());
   });
 }
 
