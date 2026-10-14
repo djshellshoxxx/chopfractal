@@ -77,10 +77,10 @@ if(CHOPFRACTAL_BUILD_CLAP)
   endif()
 endif()
 
-target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp)
+target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp)
 target_include_directories(ChopFractal PRIVATE src)
 # Warnings for our own plugin sources only (JUCE's module sources are compiled into the same target and stay untouched).
-set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp tests/test_plugin_shell.cpp)
+set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp tests/test_plugin_shell.cpp)
 if(MSVC)
   set(_cf_warn /W4 $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:/WX>)
 else()
@@ -111,7 +111,7 @@ endif()
 # host-time translation and audio path.
 if(CHOPFRACTAL_BUILD_TESTS)
   juce_add_console_app(ChopFractalShellTests PRODUCT_NAME "ChopFractalShellTests")
-  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp)
+  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp src/CaptureController.cpp src/CapturePanel.cpp src/MorphPanel.cpp)
   target_include_directories(ChopFractalShellTests PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
   target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
   target_link_libraries(ChopFractalShellTests PRIVATE

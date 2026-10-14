@@ -1288,3 +1288,83 @@ CHOP_TEST(capture_panel_meter_shows_level_and_latches_clipping) {
   juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
   CHECK(editor.getTooltip().isNotEmpty());
 }
+
+namespace {
+juce::Button* findButtonDeep(juce::Component& root, const juce::String& text) {
+  if (auto* b = dynamic_cast<juce::Button*>(&root))
+    if (b->getButtonText() == text) return b;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findButtonDeep(*root.getChildComponent(i), text)) return f;
+  return nullptr;
+}
+juce::Slider* findSliderByTitle(juce::Component& root, const juce::String& title) {
+  if (auto* s = dynamic_cast<juce::Slider*>(&root))
+    if (s->getTitle() == title) return s;
+  for (int i = 0; i < root.getNumChildComponents(); ++i)
+    if (auto* f = findSliderByTitle(*root.getChildComponent(i), title)) return f;
+  return nullptr;
+}
+}  // namespace
+
+CHOP_TEST(morph_controls_enable_with_both_slots_and_commit_adds_a_node) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "loop.wav").ok()); });
+  std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  ed->setVisible(true);
+  auto pump = [](int ms = 120) { juce::MessageManager::getInstance()->runDispatchLoopUntil(ms); };
+  auto click = [&](const char* text) {
+    juce::Button* b = findButtonDeep(*ed, text);
+    CHECK(b != nullptr);
+    if (b && b->isEnabled()) b->triggerClick();
+    pump();
+  };
+  auto nodes = [&] {
+    std::size_t n = 0;
+    p.withSession([&](cf::composition::ProjectSession& s) { n = s.history().size(); });
+    return n;
+  };
+  auto active = [&] {
+    bool a = false;
+    p.withSession([&](cf::composition::ProjectSession& s) { a = s.morphActive(); });
+    return a;
+  };
+  click("Detect Chops");
+  click("Generate");
+  click("Store A");
+  click("Mutate");
+  click("Store B");
+  pump(200);
+  auto* toggle = dynamic_cast<juce::ToggleButton*>(findButtonDeep(*ed, "Morph"));
+  auto* slider = findSliderByTitle(*ed, "Morph amount");
+  CHECK(toggle != nullptr && slider != nullptr);
+  if (!toggle || !slider) return;
+  CHECK(toggle->isEnabled());
+  CHECK(!slider->isEnabled());
+  toggle->setToggleState(true, juce::sendNotificationSync);
+  pump();
+  CHECK(active());
+  CHECK(p.statusMessage().contains("Morphing 50% toward B"));
+  slider->setValue(0.25, juce::sendNotificationSync);
+  pump(250);
+  double amount = 0;
+  p.withSession([&](cf::composition::ProjectSession& s) { amount = s.morphAmount(); });
+  CHECK_NEAR(amount, 0.25, 0.005);
+  const std::size_t before = nodes();
+  const auto pre = patternBytes(p);
+  click("Commit Morph");
+  CHECK(!active());
+  CHECK_EQ(nodes(), before + 1);
+  click("Undo");
+  CHECK(patternBytes(p) == pre);
+  toggle->setToggleState(true, juce::sendNotificationSync);
+  pump();
+  CHECK(active());
+  click("Cancel Morph");
+  CHECK(!active());
+  CHECK(patternBytes(p) == pre);
+  CHECK(p.statusMessage().contains("Morph cancelled; your pattern is unchanged."));
+}

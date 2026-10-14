@@ -187,6 +187,7 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   if (!result.ok()) return result.error();
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
+  endMorph(!committingMorph_);
   patterns_.adopt(std::move(result.value()));
   pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
@@ -231,6 +232,7 @@ Result<render::PreviewRequest> ProjectSession::auditionRequest(ChopId chop) cons
 // ---------------------------------------------------------------------------------------------
 
 Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data, std::string name, std::string path) {
+  endMorph(true);
   if (!validSource(data)) return makeError(ErrorCode::InvalidArgument, "the audio buffer is empty or malformed");
   source::SourceInfo info;
   info.id = idOf(*data);
@@ -257,6 +259,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 }
 
 void ProjectSession::clearSource() {
+  endMorph(true);
   sourceData_.reset();
   chopMap_.reset();
   chops_.reset();
@@ -314,6 +317,7 @@ Status ProjectSession::redoMarkers() {
 }
 
 Status ProjectSession::reconcileAfterMarkerChange() {
+  endMorph(true);
   chops_ = chopMap_->snapshot();
   std::vector<ChopId> ids;  // roles follow the marker, so disabling a chop and enabling it again keeps its role
   for (const source::Marker& m : chopMap_->markers()) ids.push_back(m.id);
@@ -419,6 +423,7 @@ bool ProjectSession::settleRestoredPattern() {
 
 bool ProjectSession::undo() {
   if (!patterns_.undo()) return false;
+  endMorph(true);
   if (!settleRestoredPattern()) {
     patterns_.redo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
@@ -430,6 +435,7 @@ bool ProjectSession::undo() {
 
 bool ProjectSession::redo() {
   if (!patterns_.redo()) return false;
+  endMorph(true);
   if (!settleRestoredPattern()) {
     patterns_.undo();
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
@@ -440,6 +446,7 @@ bool ProjectSession::redo() {
 }
 
 Status ProjectSession::recallSnapshot(std::size_t slot) {
+  endMorph(true);
   Status s = patterns_.recallSnapshot(slot);
   if (!s.ok()) return s;
   if (!settleRestoredPattern()) {
@@ -560,6 +567,7 @@ Status ProjectSession::activate(history::NodeId node, Quantize when) {
 }
 
 Status ProjectSession::applyActivation(history::NodeId node) {
+  endMorph(true);
   auto snap = history_.getSnapshot(node);
   if (!snap.ok()) return convert(snap.error());
   auto p = pattern::deserialize(snap.value().payload->data(), snap.value().payload->size());
@@ -667,6 +675,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
 }
 
 Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) {
+  endMorph(true);
   auto dec = codec::decode(data, size);
   if (!dec.ok()) return convert(dec.error());
   codec::ProjectState st = std::move(dec.value());
@@ -814,6 +823,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 }
 
 void ProjectSession::reset() {
+  endMorph(true);
   evolve_.stop();
   clearSource();
   rules_ = roles::RuleSet{};

@@ -14,8 +14,8 @@ juce::Colour laneColour(int chopIndex) {
 }
 }  // namespace
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), capturePanel_(processor) {
-  setSize(940, 962);
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), capturePanel_(processor), morphPanel_(processor) {
+  setSize(940, 992);
   setResizable(false, false);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_, &dice_}) {
@@ -81,6 +81,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
     });
   };
   addAndMakeVisible(capturePanel_);
+  addAndMakeVisible(morphPanel_);
   addAndMakeVisible(locate_);
   locate_.setEnabled(false);
   generate_.onClick = [this] { doGenerate(); };
@@ -395,6 +396,7 @@ void ChopFractalEditor::resized() {
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
   capturePanel_.setBounds(area.removeFromTop(46));
+  morphPanel_.setBounds(area.removeFromTop(28));
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
@@ -724,8 +726,9 @@ void ChopFractalEditor::refresh(bool force) {
       markers_ = cf::ui::buildMarkerViews(*s.chopMap(), cf::ui::ViewWindow{0, std::max<std::int64_t>(1, sourceFrames_), static_cast<double>(waveArea_.getWidth())});
       if (s.chops()) chops_ = s.chops()->chops;
       if (s.pattern() && s.chops()) {
-        pattern_ = cf::ui::buildPatternView(*s.pattern(), *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
-        orbit_ = cf::ui::buildOrbitView(*s.pattern(), *s.chops());
+        const cf::pattern::Pattern& shown = *s.displayPattern();  // the morph preview while morphing
+        pattern_ = cf::ui::buildPatternView(shown, *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
+        orbit_ = cf::ui::buildOrbitView(shown, *s.chops());
         barTicks_ = cf::pattern::barTicks(s.pattern()->settings);
         gridTicks_ = cf::gridTicks(s.pattern()->settings.grid);
         barCount_ = static_cast<int>(s.pattern()->bars.size());
@@ -955,6 +958,11 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     g.fillRect(rectangle);
     g.setColour(juce::Colour(0xff6fb1ff));
     g.drawRect(rectangle, 1);
+  }
+  if (morphPanel_.previewing()) {
+    g.setColour(juce::Colour(0xffffc857));
+    g.setFont(juce::FontOptions(12.0f));
+    g.drawText("Morph preview", patternArea_.withHeight(16).reduced(6, 0), juce::Justification::centredRight);
   }
 }
 

@@ -97,6 +97,10 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
                    SampleRange ancestor, const ChopSnapshot& chops, const FlattenLimits& limits,
                    std::uint64_t probabilitySeed, int depth = 0);
 
+// Probability resolution shared by flatten and any preview that must agree with it (A/B morph).
+std::uint64_t probabilitySeedFor(std::uint64_t patternSeed);
+bool probabilityPasses(std::uint64_t probabilitySeed, EventId id, float probability);  // probability >= 1 || draw < probability
+
 void sortFlat(FlatEventList& list);  // by (start, id)
 
 // Range/shape validation of one event and its subtree (no source lookups).

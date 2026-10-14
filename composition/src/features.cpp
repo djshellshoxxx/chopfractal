@@ -80,6 +80,7 @@ Status ProjectSession::applyFractal(const fractal::Settings& fs, const std::vect
 Status ProjectSession::setEvolve(const evolve::Settings& settings) {
   if (!evolve::valid(settings)) return makeError(ErrorCode::OutOfRange, "invalid Evolve settings");
   if (settings.enabled) {
+    if (morphActive_) return makeError(ErrorCode::Conflict, "Cancel the morph before switching Evolve on.");
     if (!patterns_.hasPattern()) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
     evolve_.start(settings);
   } else {

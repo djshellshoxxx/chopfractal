@@ -13,6 +13,15 @@ double probabilityDraw(std::uint64_t seed, EventId id) {
   return static_cast<double>(hashCombine(seed, id.value) >> 11) * (1.0 / 9007199254740992.0);
 }
 
+}  // namespace
+
+std::uint64_t probabilitySeedFor(std::uint64_t patternSeed) { return hashCombine(patternSeed, 0x50524F42ull); }
+
+bool probabilityPasses(std::uint64_t probabilitySeed, EventId id, float probability) {
+  return probability >= 1.f || probabilityDraw(probabilitySeed, id) < static_cast<double>(probability);
+}
+
+namespace {
 std::string idText(EventId id) { return std::to_string(id.value); }
 
 // id 8 + chop 8 + region 16 + start 8 + duration 8 + level/pan/pitch 12 + reverse/retrigger 2 +
@@ -34,7 +43,7 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
     const SampleRange bound = (e.sourceOverride || ancestor.empty()) ? chop->range : ancestor;
     if (requested.empty() || !bound.contains(requested))
       return makeError(ErrorCode::OutOfRange, "event " + idText(e.id) + " reads outside its ancestor source range");
-    if (e.probability < 1.f && !(probabilityDraw(probabilitySeed, e.id) < static_cast<double>(e.probability))) continue;
+    if (!probabilityPasses(probabilitySeed, e.id, e.probability)) continue;
 
     if (e.child && e.childActive) {
       if (depth + 1 > lim.maxDepth) return makeError(ErrorCode::LimitExceeded, "nesting depth limit exceeded", lim.maxDepth);

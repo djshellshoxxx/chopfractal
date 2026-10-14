@@ -143,8 +143,20 @@ class ProjectSession {
   Status commitEdit(const std::string& label = {});  // settled manual edits become one history node
   bool undo();
   bool redo();
-  Status storeSnapshot(std::size_t slot) { return patterns_.storeSnapshot(slot); }
+  Status storeSnapshot(std::size_t slot);  // refreshes a running morph from the new slot content
   Status recallSnapshot(std::size_t slot);
+
+  // ---- A/B morph (docs/specs/roadmap/F10-ab-morph.md) ----
+  // A live preview blended from the A and B slots. It changes only the playback: pattern(), history and undo are
+  // untouched until commitMorph(). Any command that changes the pattern or source ends the preview with a notice.
+  Status beginMorph(double t = 0.5);
+  Status setMorph(double t);  // 0..1; a failure keeps the previous preview
+  bool hasMorphSlots() const { return patterns_.hasSnapshot(0) && patterns_.hasSnapshot(1); }
+  bool morphActive() const { return morphActive_; }
+  double morphAmount() const { return morphT_; }
+  Status commitMorph(const std::string& label = {});  // freezes the draws; one history node and one undo step
+  void cancelMorph();                                 // republishes the real pattern; no notice
+  const pattern::Pattern* displayPattern() const;     // the preview while morphing, else pattern()
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -206,6 +218,8 @@ class ProjectSession {
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
+  void endMorph(bool announce);
+  Status refreshMorph();
   bool settleRestoredPattern();
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
@@ -230,6 +244,10 @@ class ProjectSession {
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
+  bool morphActive_ = false;
+  bool committingMorph_ = false;
+  double morphT_ = 0.5;
+  std::shared_ptr<const pattern::Pattern> morphPreview_;
   std::vector<Notice> notices_;
 };
 

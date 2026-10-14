@@ -10,6 +10,7 @@
 
 #include "CapturePanel.h"
 #include "DragOut.h"
+#include "MorphPanel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -126,6 +127,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
 
   // Feature controls (not host parameters: they act on the project).
   CapturePanel capturePanel_;
+  MorphPanel morphPanel_;
   juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};

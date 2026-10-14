@@ -83,6 +83,11 @@ inline juce::String forName(const juce::String& name) {
     {"Chop after Keep", "Detect chops and suggest roles automatically after keeping a capture. Nothing is applied without your say-so."},
     {"Capture mode", "Synced records an exact number of bars from the next bar line. Free records until you press End Capture."},
     {"Capture bars", "Number of bars to record in Synced mode, at the host tempo and meter."},
+    {"Morph", "Blend continuously between the stored patterns A and B. Store A and B first. Locks are not enforced inside the blend."},
+    {"Morph between A and B", "Blend continuously between the stored patterns A and B. Store A and B first. Locks are not enforced inside the blend."},
+    {"Morph amount", "Position between A (left) and B (right). Double-click to return to 50%. Hits present in only one pattern fade in or out."},
+    {"Commit Morph", "Keep the current blend as a new variation in the family tree. One Undo returns to the previous pattern."},
+    {"Cancel Morph", "Stop the preview and return to your real pattern. Nothing is changed."},
     {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},
     {"Load Loop > Detect Chops > Generate > Play", "Start by loading or dropping a loop, detecting chops, generating a pattern, and pressing Play."},
   };
