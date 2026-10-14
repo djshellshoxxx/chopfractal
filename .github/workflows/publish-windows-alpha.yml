@@ -16,14 +16,14 @@ concurrency:
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == '194f48f5e4a98c40f9593de0d6a32557c8ea659a' && github.event.workflow_run.conclusion == 'success')
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == '3b0b48f974c50ac0753082957d626bd3f2f28455' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: "38510771672"
-      BUILD_SHA: "194f48f5e4a98c40f9593de0d6a32557c8ea659a"
+      BUILD_RUN: "38511799240"
+      BUILD_SHA: "3b0b48f974c50ac0753082957d626bd3f2f28455"
       RELEASE_TAG: v0.1.0-alpha.2
     steps:
       - name: Verify the tested build
@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Windows x64 alpha 2, built from commit 194f48f5e4a98c40f9593de0d6a32557c8ea659a.
+          Windows x64 alpha 2, built from commit 3b0b48f974c50ac0753082957d626bd3f2f28455.
 
           Fixes and usability changes:
           - Green Play and red Stop: local pattern playback works in the standalone app without a DAW and restarts from the beginning.
