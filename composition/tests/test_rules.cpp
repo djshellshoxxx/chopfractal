@@ -1,4 +1,5 @@
 // Integration tests for the rule editor support (docs/specs/roadmap/F06-rule-editor.md).
+#include <algorithm>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <chopfractal/state_codec/codec.hpp>

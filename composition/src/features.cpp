@@ -14,9 +14,8 @@ namespace chopfractal::composition {
 namespace {
 
 std::string twoDigits(std::size_t n) {
-  char buf[16];
-  std::snprintf(buf, sizeof buf, "%02zu", n);
-  return buf;
+  std::string s = std::to_string(n);
+  return s.size() < 2 ? "0" + s : s;
 }
 
 }  // namespace
