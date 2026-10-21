@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #include "chop_test.hpp"
 
@@ -92,7 +93,7 @@ CHOP_TEST(events_without_hints_render_exactly_as_before) {
   for (float v : out) {
     std::uint32_t b;
     static_assert(sizeof b == sizeof v);
-    __builtin_memcpy(&b, &v, sizeof b);
+    std::memcpy(&b, &v, sizeof b);
     h = (h ^ b) * 0x100000001B3ull;
   }
   CHECK_EQ(h, 9673844696356860708ull);  // recorded with the renderer before the v2 hints existed
