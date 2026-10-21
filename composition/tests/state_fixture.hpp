@@ -11,6 +11,9 @@
 
 namespace statefix {
 
+inline float dsin(float x) { return static_cast<float>(std::sin(static_cast<double>(x))); }
+inline float dexp(float x) { return static_cast<float>(std::exp(static_cast<double>(x))); }
+
 // Eight drum-like hits over two seconds (same signal as the integration tests).
 inline std::shared_ptr<const chopfractal::render::SourceData> drumLoop() {
   auto d = std::make_shared<chopfractal::render::SourceData>();
@@ -24,9 +27,12 @@ inline std::shared_ptr<const chopfractal::render::SourceData> drumLoop() {
     for (int i = 0; i < 5000; ++i) {
       const float t = static_cast<float>(i);
       float v = 0.f;
-      if (kind == 0) v = std::sin(t * 0.0105f) * std::exp(-t / 1500.f);
-      if (kind == 1) v = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * std::exp(-t / 900.f);
-      if (kind == 2) v = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * std::exp(-t / 250.f) * 0.6f;
+      // Transcendentals go through double and round once to float: the float overloads (sinf/expf) differ in the last
+      // bit between libm implementations (glibc, Apple, UCRT), which changes the source hash and the analysis features.
+      const float arg = t * 0.0105f;
+      if (kind == 0) v = dsin(arg) * dexp(-t / 1500.f);
+      if (kind == 1) v = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * dexp(-t / 900.f);
+      if (kind == 2) v = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * dexp(-t / 250.f) * 0.6f;
       d->samples[static_cast<std::size_t>(k * 12000 + i)] = v * 0.8f;
     }
   }
