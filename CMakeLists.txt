@@ -41,7 +41,7 @@ endif()
 
 # Dependency order: contracts first, generic modules, domain modules, features, renderer, adapters.
 foreach(m chop_contracts state_codec variation_history source_chop break_engine groove pattern_engine
-          recursive_hit_zoom chop_roles_grammar wav_export midi_export evolve fractal_rhythm chop_insight preset_store time_stretch level_match
+          recursive_hit_zoom chop_roles_grammar wav_export midi_export evolve fractal_rhythm chop_insight preset_store time_stretch level_match scenes
           audio_renderer plugin_host_adapter plugin_ui_adapter)
   add_subdirectory(modules/${m})
 endforeach()

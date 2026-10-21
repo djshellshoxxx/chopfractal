@@ -141,6 +141,7 @@ ProjectSession::ProjectSession() : history_(history::Config{}) {
   // future bump: raise the module's schema constant, register one step per version, add a fixture test.
   migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
   registerSectionDecoder(kTagGroove, "Groove", [this](const StateSection& sec) { return decodeGroove(sec); });
+  registerSectionDecoder(kTagScenes, "scene", [this](const StateSection& sec) { return decodeScenes(sec); });
 }
 
 void ProjectSession::notice(Notice::Level level, std::string text) { notices_.push_back({level, std::move(text)}); }
@@ -178,6 +179,7 @@ void ProjectSession::attachMailbox(render::Mailbox<render::Playback>* mailbox) {
 }
 
 void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
+  if (armedToken_ != 0 && pb != armedBuilt_.playback) cancelArm();  // an edit or a loaded project must never be overwritten by a stale scene
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
 }
@@ -210,6 +212,10 @@ Status ProjectSession::republish() {
     if (refreshMorph().ok()) return {};
     endMorph(true);
   }
+  if (scenePhase_ != ScenePhase::Off) {  // likewise the scene that plays
+    if (refreshScenes().ok()) return {};
+    endScenes("Scene playback stopped because the chops changed.", false);
+  }
   if (!sourceData_) {
     publish(std::make_shared<const render::Playback>());  // no source: the renderer passes input through
     return {};
@@ -229,6 +235,7 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
   endMorph(true);
+  stopScenesForEdit();
   patterns_.adopt(std::move(result.value()));
   pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
@@ -287,6 +294,9 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   if (!map.ok()) return map.error();  // nothing has changed yet
   evolve_.stop();  // there is no pattern for a new source
   endMorph(true);
+  stopScenesForEdit();
+  clearSceneState();
+  storeScenesSection();
   sourceData_ = std::move(data);
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
@@ -301,6 +311,9 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 
 void ProjectSession::clearSource() {
   endMorph(true);
+  stopScenesForEdit();
+  clearSceneState();
+  storeScenesSection();
   sourceData_.reset();
   chopMap_.reset();
   chops_.reset();
@@ -484,6 +497,7 @@ bool ProjectSession::undo() {
     return false;
   }
   endMorph(true);
+  stopScenesForEdit();
   pendingActivation_ = history::kNoNode;
   return true;
 }
@@ -496,6 +510,7 @@ bool ProjectSession::redo() {
     return false;
   }
   endMorph(true);
+  stopScenesForEdit();
   pendingActivation_ = history::kNoNode;
   return true;
 }
@@ -508,6 +523,7 @@ Status ProjectSession::recallSnapshot(std::size_t slot) {
     return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
   }
   endMorph(true);
+  stopScenesForEdit();
   pendingActivation_ = history::kNoNode;
   return {};
 }
@@ -644,6 +660,7 @@ Status ProjectSession::applyActivation(history::NodeId node) {
   Status v = installPlayback(restored);
   if (!v.ok()) return v;
   endMorph(true);
+  stopScenesForEdit();
   patterns_.adopt(std::move(restored));
   history_.setActive(node);
   pendingActivation_ = history::kNoNode;
@@ -939,6 +956,8 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   // ---- commit ----
   loadedEmbedded_ = loadedFlag;
   endMorph(true);  // a loaded project never starts in a morph
+  stopScenesForEdit();
+  clearSceneState();
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings
   } else {

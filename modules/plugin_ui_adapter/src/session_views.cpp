@@ -145,4 +145,69 @@ bool MorphCoalescer::take(long long nowMs, double& value) {
   return true;
 }
 
+// ---- Evolve scenes (F09) ----
+
+std::string sceneEmptyText() { return "No scenes yet. Press Capture Scene, or turn on Rec Scenes and start Evolve."; }
+std::string sceneStopFirstText() { return "Stop scene playback first."; }
+std::string sceneCapturedMessage(int number) { return "Captured Scene " + std::to_string(number) + "."; }
+std::string sceneFullMessage() { return "The scene list is full (32). Delete a scene to capture more."; }
+std::string sceneRecordingFullMessage() { return "Scene recording stopped: the list is full (32)."; }
+std::string sceneKeptMessage(int number) { return "Kept Scene " + std::to_string(number) + " as a new variation."; }
+std::string sceneExportedMessage(int count, const std::string& folder) {
+  return "Exported " + std::to_string(count) + (count == 1 ? " scene to " : " scenes to ") + folder + ".";
+}
+std::string sceneClearPromptTitle() { return "Delete all scenes?"; }
+std::string sceneClearPromptBody() { return "This cannot be undone."; }
+
+std::string sceneRowText(const SceneRowInput& r) {
+  static const char* const kNext[] = {"next", "repeat", "stop"};
+  std::string after;
+  if (r.next == 3) after = "jump to " + std::to_string(r.jumpNumber);
+  else after = kNext[r.next >= 0 && r.next <= 2 ? r.next : 0];
+  std::string text = std::to_string(r.number) + "  " + r.name + "   " + std::to_string(r.loops) + (r.loops == 1 ? " loop" : " loops") + "   > " + after;
+  if (r.playing) text += "  [Playing, loop " + std::to_string(std::min(r.loopIndex + 1, r.loops)) + " of " + std::to_string(r.loops) + "]";
+  else if (r.armed) text += "  [Next]";
+  if (!r.fits) text += " (does not fit the chops)";
+  return text;
+}
+
+std::string sceneStatusText(const SceneStatusInput& st, bool evolveRunning, int sceneCount) {
+  const std::string of = " of " + std::to_string(sceneCount);
+  if (st.running && st.waitingForTransport) return "Waiting for the host to play";
+  if (st.running && st.playingNumber > 0)
+    return "Scene " + std::to_string(st.playingNumber) + of + ", loop " + std::to_string(std::min(st.loopIndex + 1, std::max(1, st.loops))) + " of " + std::to_string(std::max(1, st.loops));
+  if (st.running && st.armedNumber > 0) return "Scene " + std::to_string(st.armedNumber) + of + " starts at the next loop";
+  if (st.holding) return "Sequence finished: Scene " + std::to_string(st.playingNumber) + " keeps looping";
+  if (st.recording) return evolveRunning ? "Recording scenes: " + std::to_string(sceneCount) + " captured" : "Recording scenes: waiting for Evolve";
+  return "Scenes stopped";
+}
+
+SceneView buildSceneView(const SceneViewInput& in) {
+  SceneView v;
+  const bool active = in.status.running;
+  const bool anything = active || in.status.holding;
+  const int count = static_cast<int>(in.rows.size());
+  const bool selected = in.selected >= 0 && in.selected < count;
+  for (const SceneRowInput& r : in.rows) v.rows.push_back(sceneRowText(r));
+  v.emptyText = count == 0 ? sceneEmptyText() : std::string();
+  v.statusText = sceneStatusText(in.status, in.evolveRunning, count);
+  v.captureEnabled = in.hasPattern;
+  v.recEnabled = in.hasPattern || in.status.recording;
+  v.recOn = in.status.recording;
+  v.updateEnabled = selected && in.hasPattern;   // allowed while playing: the session stops playback first
+  v.keepEnabled = selected;
+  v.moveUpEnabled = selected && in.selected > 0 && !active;
+  v.moveDownEnabled = selected && in.selected + 1 < count && !active;
+  v.deleteEnabled = selected && !active;
+  v.clearEnabled = count > 0 && !active;
+  v.exportEnabled = count > 0;
+  v.playEnabled = count > 0 && in.hasPattern && in.hasSource && !active;
+  v.playOn = active;
+  v.stopEnabled = anything;
+  v.wrapOn = in.wrap;
+  if (active && (selected || count > 0)) v.editTooltip = sceneStopFirstText();
+  v.exportTooltip = "The exported WAV places each scene end to end with its tail overlapping the next. It matches live playback except where a ringing voice would have been stolen.";
+  return v;
+}
+
 }  // namespace chopfractal::ui

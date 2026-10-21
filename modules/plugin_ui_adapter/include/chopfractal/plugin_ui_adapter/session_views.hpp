@@ -128,4 +128,57 @@ class MorphCoalescer {
   long long lastMs_ = -1000000;
 };
 
+// ---- Evolve scenes (F09) ----
+// Pure functions of plain values: the GUI copies session facts into these structs (docs/specs/roadmap/F09-evolve-scenes.md
+// section 12 lists the session call behind every control).
+struct SceneRowInput {
+  int number = 1;                // position + 1
+  std::string name;
+  int loops = 4;
+  int next = 0;                  // 0 next, 1 repeat, 2 stop, 3 jump
+  int jumpNumber = 0;            // display number of the jump target
+  bool playing = false;
+  int loopIndex = 0;             // loops of the playing scene completed
+  bool armed = false;
+  bool fits = true;
+};
+std::string sceneRowText(const SceneRowInput& row);
+struct SceneStatusInput {
+  bool running = false, holding = false, recording = false, waitingForTransport = false;
+  int playingNumber = 0;         // 0 while the first scene waits for its boundary
+  int armedNumber = 0;
+  int loopIndex = 0, loops = 0;
+};
+struct SceneViewInput {
+  std::vector<SceneRowInput> rows;
+  SceneStatusInput status;
+  int selected = -1;             // row index or -1
+  bool hasPattern = false, hasSource = false;
+  bool evolveRunning = false;
+  bool wrap = true;
+  int capturedCount = 0;         // rows.size(), repeated so a caller may pass trimmed rows
+};
+struct SceneView {
+  std::vector<std::string> rows;
+  std::string emptyText;         // shown while there are no rows
+  std::string statusText;        // 10 Hz status label
+  bool captureEnabled = false, updateEnabled = false, keepEnabled = false;
+  bool moveUpEnabled = false, moveDownEnabled = false, deleteEnabled = false, clearEnabled = false;
+  bool exportEnabled = false, playEnabled = false, stopEnabled = false, recEnabled = false;
+  bool recOn = false, playOn = false, wrapOn = true;
+  std::string editTooltip;       // "Stop scene playback first." while Delete / Clear All / Move are disabled by playback, else empty
+  std::string exportTooltip;     // the WAV caveat
+};
+SceneView buildSceneView(const SceneViewInput& in);
+std::string sceneStatusText(const SceneStatusInput& st, bool evolveRunning, int sceneCount);
+std::string sceneCapturedMessage(int number);                // "Captured Scene 3."
+std::string sceneFullMessage();                              // "The scene list is full (32). Delete a scene to capture more."
+std::string sceneRecordingFullMessage();                     // "Scene recording stopped: the list is full (32)."
+std::string sceneKeptMessage(int number);                    // "Kept Scene 3 as a new variation."
+std::string sceneExportedMessage(int count, const std::string& folder);  // "Exported 7 scenes to <folder>."
+std::string sceneClearPromptTitle();                         // "Delete all scenes?"
+std::string sceneClearPromptBody();                          // "This cannot be undone."
+std::string sceneEmptyText();                                // the empty-state line of the list
+std::string sceneStopFirstText();                            // "Stop scene playback first."
+
 }  // namespace chopfractal::ui

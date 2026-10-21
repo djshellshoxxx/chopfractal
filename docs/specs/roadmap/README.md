@@ -104,7 +104,7 @@ Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove`
 | `plugin/src/PluginEditor.cpp` (shell) | F00, then F04 | none |
 | `plugin/src/PluginProcessor.cpp` | F01 (state), F07/F12/F11 (audio I/O) | sequential in Wave 3 |
 | `composition/src/project_session.cpp` | F01 | new logic in `composition/src/<feature>.cpp` |
-| `modules/audio_renderer` | F08 (hook), F11 (buses) | sequential |
+| `modules/audio_renderer` | F08 (hook), F11 (buses), F09 (armed switch, isolated in `src/armed_switch.hpp` plus a small hook in `renderer.cpp`) | sequential |
 | new modules | the feature that creates them | n/a |
 | `.github/workflows/ci.yml`, installers | F15 | feature PRs may add a test step only |
 | `modules/audio_renderer/src/renderer.cpp` output stage and `Playback::build` | F16 (limiter, match gain), F17 (groove), E01/E02 (expansion, LFO) | sequential: F16, then F17, then E01, then E02 |

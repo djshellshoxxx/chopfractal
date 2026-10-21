@@ -82,6 +82,7 @@ Status ProjectSession::setEvolve(const evolve::Settings& settings) {
   if (settings.enabled) {
     if (morphActive_) return makeError(ErrorCode::Blocked, "Cancel the morph before switching Evolve on.");
     if (!patterns_.hasPattern()) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
+    endScenes("Scene playback stopped: Evolve was switched on.", true);  // scenes and Evolve exclude each other
     evolve_.start(settings);
   } else {
     evolve_.start(settings);  // stores the settings, stays stopped
@@ -129,6 +130,7 @@ Result<bool> ProjectSession::evolveStep(double chaos) {
     return st.error();
   }
   evolve_.reportSuccess();
+  recordEvolveScene(step->index);  // no-op unless Rec Scenes is on
   return true;
 }
 

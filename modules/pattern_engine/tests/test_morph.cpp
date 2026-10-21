@@ -1,4 +1,5 @@
 // F10 A/B morph: matching, interpolation table, probability crossfade, freeze equality and the refusal cases.
+#include <memory>
 #include <algorithm>
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <chopfractal/pattern_engine/morph.hpp>
@@ -66,9 +67,10 @@ Pattern morphOk(const Pattern& a, const Pattern& b, double t, const ChopSnapshot
   return m.ok() ? m.value() : Pattern{};
 }
 
-const Event* find(const std::vector<Event>& v, EventId id) {
+// A copy, so the result stays valid when `v` is a temporary (find(all(...), id)).
+std::shared_ptr<const Event> find(const std::vector<Event>& v, EventId id) {
   for (const Event& e : v)
-    if (e.id == id) return &e;
+    if (e.id == id) return std::make_shared<const Event>(e);
   return nullptr;
 }
 
@@ -133,7 +135,7 @@ CHOP_TEST(matched_events_interpolate_numeric_fields) {
   MorphReport r;
   const Pattern m = morphOk(a, b, 0.25, c, false, &r);
   CHECK(r.matched == 1 && r.onlyA == 0 && r.onlyB == 0);
-  const Event* e = find(all(m), id);
+  auto e = find(all(m), id);
   CHECK(e != nullptr);
   if (!e) return;
   CHECK_NEAR(e->tx.level, 0.875, 1e-6);
@@ -157,11 +159,11 @@ CHOP_TEST(discrete_fields_switch_at_half) {
   eb->enabled = false;
   eb->echo = EchoFx{2, 1, 50};
   for (double t : {0.1, 0.49}) {
-    const Event* e = find(all(morphOk(a, b, t, c)), id);
+    auto e = find(all(morphOk(a, b, t, c)), id);
     CHECK(e && !e->tx.reverse && e->enabled && !e->echo);
   }
   for (double t : {0.5, 0.9}) {
-    const Event* e = find(all(morphOk(a, b, t, c)), id);
+    auto e = find(all(morphOk(a, b, t, c)), id);
     CHECK(e && e->tx.reverse && !e->enabled && e->echo && e->echo->repeats == 2);
   }
   // a different chop at identical start still matches and switches at half
@@ -194,7 +196,7 @@ CHOP_TEST(filter_type_follows_the_non_off_side_with_neutral_cutoff) {
   Pattern b = a;
   mut(b, id)->fx.filter = FilterType::HighPass;
   mut(b, id)->fx.cutoff = 0.6f;
-  const Event* e = find(all(morphOk(a, b, 0.5, c)), id);
+  auto e = find(all(morphOk(a, b, 0.5, c)), id);
   CHECK(e && e->fx.filter == FilterType::HighPass);
   if (e) CHECK_NEAR(e->fx.cutoff, 0.3, 1e-6);
   // B off, A low-pass 0.4: low-pass, neutral 1.0 on the B side
@@ -219,7 +221,7 @@ CHOP_TEST(start_and_duration_interpolate_and_stay_inside_the_bar) {
   Pattern b = a;
   mut(b, id)->start = 240;  // a matched hit moves at most one grid cell
   mut(b, id)->duration = 840;
-  const Event* e = find(all(morphOk(a, b, 0.5, c)), id);
+  auto e = find(all(morphOk(a, b, 0.5, c)), id);
   CHECK(e && e->start == 120 && e->duration == 660);
   const Pattern m = morphOk(a, b, 0.99, c);
   CHECK(validate(m).ok());
@@ -233,7 +235,7 @@ CHOP_TEST(region_interpolates_only_for_the_same_chop_and_stays_in_range) {
   Pattern b = a;
   mut(a, id)->region = {0, 6000};
   mut(b, id)->region = {2000, 12000};
-  const Event* e = find(all(morphOk(a, b, 0.5, c)), id);
+  auto e = find(all(morphOk(a, b, 0.5, c)), id);
   CHECK(e && e->region.start == 1000 && e->region.end == 9000);
   mut(b, id)->region = {};  // only one side set: the chosen side's region
   CHECK(find(all(morphOk(a, b, 0.25, c)), id)->region == (SampleRange{0, 6000}));
@@ -271,7 +273,7 @@ CHOP_TEST(matching_prefers_identical_id_then_nearest_start_and_never_crosses_bar
   MorphReport r;
   const Pattern m = morphOk(a, b, 0.5, c, false, &r);
   CHECK(r.matched == 1 && r.onlyA == 1 && r.onlyB == 1);
-  const Event* e = find(all(m), x);
+  auto e = find(all(m), x);
   CHECK(e && e->start == 50);
   CHECK(find(all(m), y) != nullptr);
   // proximity pass: no shared ids, one grid cell apart
@@ -425,7 +427,7 @@ CHOP_TEST(child_events_take_the_chosen_sides_timing_and_child) {
   mut(b, id)->start = 240;
   mut(b, id)->duration = 960;
   const Pattern withChild = setChild(b, id, twoChildren(*mut(b, id), 1), c).value();
-  const Event* e = find(all(morphOk(a, withChild, 0.25, c)), id);
+  auto e = find(all(morphOk(a, withChild, 0.25, c)), id);
   CHECK(e && e->child == nullptr && e->start == 60 && e->duration == 600);
   e = find(all(morphOk(a, withChild, 0.5, c)), id);
   CHECK(e && e->child != nullptr && e->start == 240 && e->duration == 960);

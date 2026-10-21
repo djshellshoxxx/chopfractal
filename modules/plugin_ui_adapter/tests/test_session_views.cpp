@@ -161,3 +161,100 @@ CHOP_TEST(slider_coalesces_rapid_changes) {
   f.release();
   CHECK(!f.take(5000, v));
 }
+
+CHOP_TEST(scene_row_text_matches_the_spec_examples) {
+  SceneRowInput r;
+  r.number = 3;
+  r.name = "Evolve step 2";
+  r.loops = 4;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   4 loops   > next");
+  r.next = 1;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   4 loops   > repeat");
+  r.next = 2;
+  r.loops = 1;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   1 loop   > stop");
+  r.next = 3;
+  r.jumpNumber = 5;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   1 loop   > jump to 5");
+  r.loops = 4;
+  r.playing = true;
+  r.loopIndex = 1;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   4 loops   > jump to 5  [Playing, loop 2 of 4]");
+  r.playing = false;
+  r.armed = true;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   4 loops   > jump to 5  [Next]");
+  r.armed = false;
+  r.fits = false;
+  CHECK(sceneRowText(r) == "3  Evolve step 2   4 loops   > jump to 5 (does not fit the chops)");
+}
+
+CHOP_TEST(scene_status_text_covers_every_state) {
+  SceneStatusInput st;
+  CHECK(sceneStatusText(st, false, 7) == "Scenes stopped");
+  st.recording = true;
+  CHECK(sceneStatusText(st, false, 7) == "Recording scenes: waiting for Evolve");
+  CHECK(sceneStatusText(st, true, 7) == "Recording scenes: 7 captured");
+  st = SceneStatusInput{};
+  st.running = true;
+  st.playingNumber = 3;
+  st.loopIndex = 1;
+  st.loops = 4;
+  CHECK(sceneStatusText(st, false, 7) == "Scene 3 of 7, loop 2 of 4");
+  st.waitingForTransport = true;
+  CHECK(sceneStatusText(st, false, 7) == "Waiting for the host to play");
+  st = SceneStatusInput{};
+  st.running = true;
+  st.armedNumber = 2;
+  CHECK(sceneStatusText(st, false, 7) == "Scene 2 of 7 starts at the next loop");
+  st = SceneStatusInput{};
+  st.holding = true;
+  st.playingNumber = 7;
+  CHECK(sceneStatusText(st, false, 7) == "Sequence finished: Scene 7 keeps looping");
+}
+
+CHOP_TEST(scene_view_enable_rules) {
+  SceneViewInput in;
+  CHECK(buildSceneView(in).emptyText == "No scenes yet. Press Capture Scene, or turn on Rec Scenes and start Evolve.");
+  auto v = buildSceneView(in);
+  CHECK(!v.captureEnabled && !v.recEnabled && !v.playEnabled && !v.clearEnabled && !v.exportEnabled && !v.stopEnabled);
+  in.hasPattern = in.hasSource = true;
+  v = buildSceneView(in);
+  CHECK(v.captureEnabled && v.recEnabled && !v.playEnabled);
+  for (int i = 0; i < 3; ++i) {
+    SceneRowInput r;
+    r.number = i + 1;
+    r.name = "S" + std::to_string(i + 1);
+    in.rows.push_back(r);
+  }
+  in.selected = 1;
+  v = buildSceneView(in);
+  CHECK(v.rows.size() == 3 && v.emptyText.empty());
+  CHECK(v.playEnabled && v.moveUpEnabled && v.moveDownEnabled && v.deleteEnabled && v.clearEnabled && v.exportEnabled && v.updateEnabled && v.keepEnabled);
+  in.selected = 0;
+  CHECK(!buildSceneView(in).moveUpEnabled);
+  in.selected = 2;
+  CHECK(!buildSceneView(in).moveDownEnabled);
+  in.selected = -1;
+  v = buildSceneView(in);
+  CHECK(!v.deleteEnabled && !v.updateEnabled && !v.keepEnabled && v.clearEnabled);
+  // While scenes play: Delete, Clear All and Move are off with the tooltip; Update and Keep stay on (they stop playback first).
+  in.selected = 1;
+  in.status.running = true;
+  v = buildSceneView(in);
+  CHECK(!v.deleteEnabled && !v.clearEnabled && !v.moveUpEnabled && !v.moveDownEnabled && !v.playEnabled);
+  CHECK(v.updateEnabled && v.keepEnabled && v.stopEnabled && v.playOn);
+  CHECK(v.editTooltip == "Stop scene playback first.");
+  in.status.running = false;
+  in.status.holding = true;
+  CHECK(buildSceneView(in).stopEnabled && buildSceneView(in).deleteEnabled);
+}
+
+CHOP_TEST(scene_messages_are_exact) {
+  CHECK(sceneCapturedMessage(3) == "Captured Scene 3.");
+  CHECK(sceneFullMessage() == "The scene list is full (32). Delete a scene to capture more.");
+  CHECK(sceneRecordingFullMessage() == "Scene recording stopped: the list is full (32).");
+  CHECK(sceneKeptMessage(3) == "Kept Scene 3 as a new variation.");
+  CHECK(sceneExportedMessage(7, "/tmp/x") == "Exported 7 scenes to /tmp/x.");
+  CHECK(sceneExportedMessage(1, "/tmp/x") == "Exported 1 scene to /tmp/x.");
+  CHECK(sceneClearPromptTitle() == "Delete all scenes?" && sceneClearPromptBody() == "This cannot be undone.");
+}

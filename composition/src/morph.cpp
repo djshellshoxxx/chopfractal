@@ -63,6 +63,7 @@ Status ProjectSession::beginMorph(double t) {
   if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
   if (!patterns_.hasSnapshot(0) || !patterns_.hasSnapshot(1)) return makeError(ErrorCode::NotFound, "Store A and B first.");
   if (evolveRunning()) return makeError(ErrorCode::Blocked, "Switch Evolve off before morphing.");
+  if (scenePhase_ != ScenePhase::Off) return makeError(ErrorCode::Blocked, "Stop scene playback before morphing.");
   const bool wasActive = morphActive_;
   const double previousT = morphT_;
   morphActive_ = true;
@@ -87,6 +88,7 @@ Status ProjectSession::setMorph(double t) {
 }
 
 const pattern::Pattern* ProjectSession::displayPattern() const {
+  if (sceneOverride_) return sceneOverride_.get();
   if (morphActive_ && morphPreview_) return morphPreview_.get();
   return pattern();
 }

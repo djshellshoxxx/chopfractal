@@ -1,6 +1,8 @@
 #include <chopfractal/audio_renderer/renderer.hpp>
 #include <chopfractal/audio_renderer/slice_quality.hpp>
 
+#include "armed_switch.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -100,6 +102,8 @@ struct Renderer::Impl {
   bool prepared = false;
   Mailbox<Playback> mailbox;
   const Playback* current = nullptr;
+  const Playback* mainSeen = nullptr;  // last pointer delivered by `mailbox` (never dereferenced)
+  armed::State arm;                     // F09 armed loop-boundary switch
 
   std::vector<Voice> voices;
   std::array<Voice, 2> previews;
@@ -157,6 +161,7 @@ struct Renderer::Impl {
     haveExpected = false;
     previewHead.store(0);
     previewTail.store(0);
+    arm.reset();
     prepared = true;
   }
 
@@ -566,16 +571,10 @@ struct Renderer::Impl {
     });
   }
 
-  void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
-    const Playback* pb = mailbox.acquire();
-    if (pb != current) {
-      // Compare the cached source pointer: once acquire() acknowledged the new Playback, the publisher may free
-      // the old one, so `current` must not be dereferenced here.
-      const SourceData* newSrc = pb ? pb->source.get() : nullptr;
-      if (currentSource != newSrc) hardKillAll();  // voices point into the old source buffer, which may now be freed
-      current = pb;
-      currentSource = newSrc;
-    }
+  // One span of a host block: everything below runs against `current`. A block is one span, or two when an armed
+  // switch lands inside it (processChunk).
+  void renderSpan(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+    const Playback* pb = current;
     const bool sourceReady = pb && pb->source && pb->lengthTicks > 0;
     polish = params.slicePolish;
     fxMask = params.fxMask;
@@ -734,6 +733,44 @@ struct Renderer::Impl {
     }
   }
 
+  void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+    const Playback* pb = mailbox.acquire();
+    if (pb != mainSeen) {
+      // Adopt only a pointer the main mailbox has not delivered before: a scene switch made on the audio thread (armed
+      // switch) must not be reverted when the session later publishes that same Playback. Compare cached pointers only:
+      // once acquire() acknowledged a newer Playback the publisher may free the old one.
+      mainSeen = pb;
+      const SourceData* newSrc = pb ? pb->source.get() : nullptr;
+      if (currentSource != newSrc) hardKillAll();  // voices point into the old source buffer, which may now be freed
+      current = pb;
+      currentSource = newSrc;
+    }
+    arm.poll(current);
+    if (arm.pending() && params.enabled && tb.playing && tb.scheduleEvents) {
+      double bpm = tb.bpm;
+      if (!std::isfinite(bpm) || bpm <= 0.0) bpm = 120.0;
+      bpm = std::min(kMaxBpm, std::max(kMinBpm, bpm));
+      const double tpf = bpm * static_cast<double>(kTicksPerQuarter) / (60.0 * cfg.sampleRate);
+      const double pos0 = (tb.positionValid && std::isfinite(tb.ppq)) ? tb.ppq * static_cast<double>(kTicksPerQuarter) : freeRunTicks;
+      const armed::Split sp = arm.locate(current, currentSource, tb.playing, wasPlaying, pos0, tpf, frames);
+      if (sp.offset >= 0) {
+        if (sp.offset > 0) renderSpan(tb, params, in, out, nch, sp.offset);
+        current = arm.apply();  // same source buffer: sounding voices keep ringing across the switch
+        TransportBlock t2 = tb;
+        if (tb.positionValid && std::isfinite(tb.ppq)) t2.ppq = tb.ppq + sp.ppqAdvance;
+        const float* inp[2] = {nullptr, nullptr};
+        float* outp[2] = {nullptr, nullptr};
+        for (int c = 0; c < nch; ++c) {
+          inp[c] = (in && in[c]) ? in[c] + sp.offset : nullptr;
+          outp[c] = out[c] + sp.offset;
+        }
+        renderSpan(t2, params, inp, outp, nch, frames - sp.offset);
+        return;
+      }
+    }
+    renderSpan(tb, params, in, out, nch, frames);
+  }
+
   void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
     if (frames <= 0 || nch < 1 || nch > 2 || !out || !out[0] || (nch == 2 && !out[1])) return;
     if (!prepared) {
@@ -766,6 +803,8 @@ Renderer::~Renderer() = default;
 
 void Renderer::prepare(const Config& config) { impl_->prepare(config); }
 Mailbox<Playback>& Renderer::mailbox() { return impl_->mailbox; }
+Mailbox<ArmedSwitch>& Renderer::armMailbox() { return impl_->arm.mailbox; }
+std::uint64_t Renderer::appliedSwitchToken() const { return impl_->arm.applied(); }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames) {

@@ -248,6 +248,7 @@ Status ProjectSession::applyStretched(const StretchPlan& sp, std::shared_ptr<con
   const std::string bpm = fmt1(sp.request.targetBpm);
   evolve_.stop();
   endMorph(true);
+  stopScenesForEdit();
   sourceData_ = std::move(stretched);
   chopMap_ = std::move(newMap.value());
   chops_ = std::move(newChops);

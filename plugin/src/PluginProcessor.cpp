@@ -34,6 +34,7 @@ ChopFractalProcessor::ChopFractalProcessor()
   }
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
+  session_.attachArmMailbox(&renderer_.armMailbox());  // F09: sample-accurate scene switches
   startTimerHz(30);
 }
 
@@ -205,7 +206,17 @@ void ChopFractalProcessor::pollAudioFlags() {
     withSession([](cf::composition::ProjectSession& s) {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
-  if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
+  if (const std::uint32_t crossings = boundaryCount_.exchange(0)) {
+    withSession([this, crossings](cf::composition::ProjectSession& s) {
+      s.onLoopBoundary();
+      const std::uint64_t applied = renderer_.appliedSwitchToken();  // read after the flag: a switch applied at this boundary is visible
+      for (std::uint32_t i = 0, n = std::min<std::uint32_t>(crossings, 16); i < n; ++i) s.onSceneBoundary(applied);
+    });
+  }
+  if (const bool playing = hostPlaying.load(std::memory_order_relaxed); playing != lastHostPlaying_) {  // F09: the sequencer follows play/stop edges
+    lastHostPlaying_ = playing;
+    withSession([this, playing](cf::composition::ProjectSession& s) { s.onTransportChanged(playing, renderer_.appliedSwitchToken()); });
+  }
   if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
     // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).

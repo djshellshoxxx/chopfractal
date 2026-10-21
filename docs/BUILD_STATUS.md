@@ -146,7 +146,9 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
 | F06, F07 | Rule editor, performance pads | Not started |
 | F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
-| F09, F10, F11, F12, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
-| F13 | MIDI drag-out | Partly built in pass 3: Drag MIDI and Drag WAV of the current pattern; variations and kit not built |
+| F09 | Evolve scenes | **Done** (logic and session API; GUI wiring pending): `scenes` module, armed loop-boundary switch in the renderer (`armed_switch.hpp`), state tag 11, export; commands in spec section 12 |
+| F10 | A/B morph | **Done** (logic and session API; GUI wiring pending) |
+| F11, F12, F14 | Stems, input capture, tempo match | Not started |
+| F13 | MIDI drag-out | **Done** (logic and session API; GUI wiring pending): settings, per-variation export, Producer Kit |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
 | F16 to F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Arrangement Export, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |

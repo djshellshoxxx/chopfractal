@@ -28,6 +28,7 @@
 #include <chopfractal/composition/stretch.hpp>
 #include <chopfractal/chop_insight/insight.hpp>
 #include <chopfractal/evolve/evolve.hpp>
+#include <chopfractal/scenes/scenes.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
 #include <chopfractal/groove/groove.hpp>
 #include <chopfractal/wav_export/wav.hpp>
@@ -190,6 +191,7 @@ struct StateSection {
 // the warning "Some <feature> settings could not be restored.".
 using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
+constexpr std::uint8_t kTagScenes = 11;       // owned by F09 Evolve scenes (composition/src/scenes.cpp)
 constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
@@ -202,6 +204,27 @@ struct LoadOptions {
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
 using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(const source::SourceInfo&)>;
+
+// ---- Evolve scenes (F09; composition/src/scenes.cpp) ----
+struct SceneExportOptions {
+  bool list = true;      // scenes.tsv
+  bool midi = true;      // scene_NN_<name>.mid per scene (repeats capped at 16)
+  bool wav = false;      // scenes.wav: every scene rendered and laid end to end, tails overlapping the next scene
+  double bpm = 120.0;    // 20..999
+  int baseNote = 36;     // 0..127
+  wav::Options wavOptions;
+  bool overwrite = false;
+};
+struct SceneStatus {
+  bool running = false;              // scenes are being sequenced (including "waiting for the first loop boundary")
+  bool holding = false;              // the sequence finished; the last scene keeps looping until stopScenes()
+  scenes::SceneId playing = 0;       // 0 while the first scene waits for its boundary
+  scenes::SceneId armed = 0;         // the scene that starts at the next loop boundary
+  int loopIndex = 0;                 // loops of `playing` completed so far
+  int loops = 0;                     // loops `playing` lasts
+  bool recording = false;
+  bool waitingForTransport = false;  // running, but the host transport is stopped
+};
 
 class ProjectSession {
  public:
@@ -292,11 +315,35 @@ class ProjectSession {
   Status setMorph(double t);          // 0..1, NaN is InvalidArgument; no history, no undo entry
   bool morphActive() const { return morphActive_; }
   double morphAmount() const { return morphT_; }
-  // The pattern the panels draw: the morph preview while it is active, else pattern().
+  // The pattern the panels draw: the scene that plays, or the morph preview while it is active, else pattern().
   const pattern::Pattern* displayPattern() const;
   // Freezes the blend (unmatched hits resolved), records it as a family-tree node "Morph A>B NN%" and one undo step.
   Status commitMorph(const std::string& label = {});
   void cancelMorph();  // back to the real pattern; no notice
+
+  // ---- Evolve scenes (F09; composition/src/scenes.cpp) ----
+  // A scene is a stored pattern plus loops and what follows it. Playback is an OVERRIDE: pattern(), history, undo, A/B
+  // slots and the saved pattern never change while scenes play; any command that changes the pattern stops the scenes.
+  // The processor calls onSceneBoundary after onLoopBoundary and onTransportChanged on host play/stop edges.
+  void attachArmMailbox(render::Mailbox<render::ArmedSwitch>* mailbox);
+  const scenes::SceneList& sceneList() const { return scenes_; }
+  bool sceneFits(scenes::SceneId id) const;  // the stored pattern still flattens against today's chops
+  Result<scenes::SceneId> captureScene(const std::string& name = {});  // the real pattern (never the Chaos / morph / scene overlay)
+  Status updateScene(scenes::SceneId id);    // replaces the scene's pattern with the current one; stops playback first
+  Status editScene(scenes::SceneId id, const std::function<void(scenes::Scene&)>& edit);  // name, loops, next, jumpTo only
+  Status removeScene(scenes::SceneId id);
+  Status moveScene(scenes::SceneId id, int newIndex);
+  Status clearScenes();
+  Status setSceneWrap(bool wrap);
+  Status setRecordScenes(bool on);
+  bool recordingScenes() const { return recordScenes_; }
+  Status playScenes(scenes::SceneId first = 0, Quantize when = Quantize::LoopBoundary);
+  Status stopScenes();  // back to the real pattern; no notice
+  void onSceneBoundary(std::uint64_t appliedToken);  // once per observed pattern-loop boundary, same lock as onLoopBoundary
+  void onTransportChanged(bool playing, std::uint64_t appliedToken = 0);  // host play/stop edges
+  SceneStatus sceneStatus() const;
+  Status keepScene(scenes::SceneId id, const std::string& label = {});  // stops playback, finalize(scene pattern)
+  Result<ExportReport> exportScenes(const std::string& directory, const SceneExportOptions& options) const;
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -442,6 +489,43 @@ class ProjectSession {
   mutable std::uint64_t annotatedKey_ = 0;
   groove::Groove groove_;
   SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
+  // scenes (F09)
+  enum class ScenePhase : std::uint8_t { Off, Pending, Running, Held };
+  struct BuiltScene {
+    std::shared_ptr<const pattern::Pattern> pattern;
+    std::shared_ptr<const render::Playback> playback;
+  };
+  void stopScenesForEdit();  // pattern-changing entry points; the caller publishes the real playback itself
+  bool endScenes(const char* noticeText, bool restore);
+  void cancelArm();
+  Status armScene(scenes::SceneId id);
+  bool adoptArmed(std::uint64_t appliedToken);
+  void installScene(scenes::SceneId id, const BuiltScene& built);
+  Result<BuiltScene> buildScene(const scenes::Scene& scene) const;
+  void rebuildPlaylist(bool warn);
+  Status refreshScenes();
+  Status storeScenesSection();
+  Status decodeScenes(const StateSection& s);
+  void clearSceneState();
+  Result<scenes::SceneId> captureImpl(const std::string& name, std::uint64_t evolveStep, int loops);
+  void recordEvolveScene(std::uint64_t stepIndex);
+  Result<std::vector<std::uint8_t>> midiFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& options) const;
+  scenes::SceneList scenes_;
+  scenes::SceneList playlist_;  // the scenes that fit today's chops, patterns left out (the sequencer needs only the metadata)
+  scenes::Sequencer sequencer_;
+  ScenePhase scenePhase_ = ScenePhase::Off;
+  render::Mailbox<render::ArmedSwitch>* armMailbox_ = nullptr;
+  std::uint64_t armCounter_ = 0;  // last token issued (arms and cancels share one increasing sequence)
+  std::uint64_t armedToken_ = 0;  // token of the pending arm, 0 = none
+  scenes::SceneId armedScene_ = 0;
+  BuiltScene armedBuilt_;         // keeps the armed Playback alive until it is in the main mailbox
+  std::shared_ptr<const pattern::Pattern> sceneOverride_;
+  scenes::SceneId playingScene_ = 0;
+  bool recordScenes_ = false;
+  bool hostPlaying_ = false;
+  mutable ChopSnapshotPtr fitChops_;
+  mutable std::map<scenes::SceneId, bool> fitCache_;
+
   // morph (F10)
   bool endMorph(bool withNotice);  // drops the preview state only; callers that change the pattern republish themselves
   Status refreshMorph();           // rebuilds and republishes the preview from the current slots and amount

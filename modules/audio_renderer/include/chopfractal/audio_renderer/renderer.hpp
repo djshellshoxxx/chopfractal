@@ -95,6 +95,14 @@ Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source
 // 0 = no wrap), sorted by start, without needing a decoded source. Gesture-effect repeats are not included. Non-real-time.
 FlatEventList expandRetriggers(const FlatEventList& events, Ticks lengthTicks = 0);
 
+// A Playback to switch to exactly on the first frame of the next loop of the playing pattern (same source buffer only).
+// A null `playback` cancels the pending switch. Tokens must increase; the audio thread publishes the token it applied
+// through Renderer::appliedSwitchToken().
+struct ArmedSwitch {
+  std::shared_ptr<const Playback> playback;
+  std::uint64_t token = 0;
+};
+
 struct Config {
   double sampleRate = 48000.0;
   int maxBlock = 2048;
@@ -139,6 +147,9 @@ class Renderer {
 
   void prepare(const Config& config);  // non-RT; allocates all voice and scratch memory
   Mailbox<Playback>& mailbox();
+  Mailbox<ArmedSwitch>& armMailbox();
+  // Token of the last armed switch the audio thread applied (0 = none); written with release, safe to read anywhere.
+  std::uint64_t appliedSwitchToken() const;
 
   // `in` may alias `out`. numChannels is 1 or 2. frames may be 0.
   void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,

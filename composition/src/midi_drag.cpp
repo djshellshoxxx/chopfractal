@@ -182,18 +182,25 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderVariationMidi(history::N
   if (!history_.contains(node)) return makeError(ErrorCode::NotFound, "there is no variation " + std::to_string(node), static_cast<std::int64_t>(node));
   auto p = nodePattern(history_, patterns_, *chops_, node, skipped);
   if (!p.ok()) return p.error();
+  return midiFromPattern(p.value(), o);
+}
+
+// One pattern (already repaired against today's chops) as MIDI: the playback's expansion (gesture effects, groove per its bake flag)
+// when audio exists, the chop map alone otherwise. Shared by variation export and scene export.
+Result<std::vector<std::uint8_t>> ProjectSession::midiFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& o) const {
+  if (!chops_ || chops_->chops.empty()) return makeError(ErrorCode::InvalidArgument, "load a source with chops first");
   FlatEventList events;
-  const Ticks length = pattern::lengthTicks(p.value());
+  const Ticks length = pattern::lengthTicks(fixed);
   if (sourceData_) {
-    auto pb = buildPlayback(p.value(), groove_.bakeIntoMidi);  // the same expansion (gesture effects, groove) as playback
+    auto pb = buildPlayback(fixed, groove_.bakeIntoMidi);  // the same expansion (gesture effects, groove) as playback
     if (!pb.ok()) return pb.error();
     events = pb.value()->events;
   } else {
-    auto flat = pattern::flatten(p.value(), *chops_);
+    auto flat = pattern::flatten(fixed, *chops_);
     if (!flat.ok()) return flat.error();
     events = render::expandRetriggers(flat.value(), length);
   }
-  auto spec = midibuild::buildSpec(events, length, p.value().settings.timeSignature, *chops_, o);
+  auto spec = midibuild::buildSpec(events, length, fixed.settings.timeSignature, *chops_, o);
   if (!spec.ok()) return spec.error();
   return midi::encode(spec.value());
 }
