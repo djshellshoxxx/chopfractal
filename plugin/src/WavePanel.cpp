@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "CdlLookAndFeel.h"
 #include "EditorTheme.h"
 
 namespace cf = chopfractal;
@@ -15,9 +16,21 @@ void WavePanel::modelChanged(Change c) {
 void WavePanel::paint(juce::Graphics& g) {
   const auto& v = model_.view();
   const auto area = getLocalBounds();
-  g.setFont(13.0f);
-  g.setColour(editor_theme::canvas());
+  g.setFont(cdl::font(cdl::FontRole::Body));
+  g.setColour(editor_theme::background());
   g.fillRect(area);
+  // Chop lanes: each chop's range tinted in its lane colour with a top bar, so waveform, chop strip and pattern lanes read as one.
+  if (v.sourceFrames > 0)
+    for (std::size_t i = 0; i < v.chops.size(); ++i) {
+      const auto& chop = v.chops[i];
+      const float x = static_cast<float>(chop.range.start) / static_cast<float>(v.sourceFrames) * static_cast<float>(area.getWidth());
+      const float width = static_cast<float>(chop.range.length()) / static_cast<float>(v.sourceFrames) * static_cast<float>(area.getWidth());
+      const auto lane = editor_theme::laneColour(static_cast<int>(i));
+      g.setColour(lane.withAlpha(0.14f));
+      g.fillRect(x, 0.0f, width, static_cast<float>(area.getHeight()));
+      g.setColour(lane);
+      g.fillRect(x, 0.0f, width, 2.0f);
+    }
   if (!v.peaks.min.empty()) {
     g.setColour(editor_theme::accentBlue());
     const int n = static_cast<int>(v.peaks.min.size());
@@ -26,7 +39,7 @@ void WavePanel::paint(juce::Graphics& g) {
     for (int i = 0; i < n; ++i)
       g.drawVerticalLine(i, cy - v.peaks.max[static_cast<std::size_t>(i)] * h, cy - v.peaks.min[static_cast<std::size_t>(i)] * h);
   } else {
-    g.setColour(juce::Colours::grey);
+    g.setColour(cdl::pal().inkMuted);
     g.drawText(model_.sourceMissing() ? "The project's audio file was not found. Press Locate Source (your markers, pattern and history are kept)."
                                       : "Drop an audio sample here, or press Load Loop. Then Detect Chops, Generate and Play.",
                area, juce::Justification::centred);
@@ -37,16 +50,17 @@ void WavePanel::paint(juce::Graphics& g) {
     if (std::find(selectedChops.begin(), selectedChops.end(), chop.id) != selectedChops.end() && v.sourceFrames > 0) {
       const float x = static_cast<float>(chop.range.start) / static_cast<float>(v.sourceFrames) * area.getWidth();
       const float width = static_cast<float>(chop.range.length()) / static_cast<float>(v.sourceFrames) * area.getWidth();
-      g.setColour(editor_theme::accentBlue().withAlpha(0.3f));
+      g.setColour(cdl::pal().spray.withAlpha(0.28f));
       g.fillRect(x, 0.0f, width, static_cast<float>(area.getHeight()));
     }
   int markerNumber = 0;
   for (const auto& m : v.markers) {
     ++markerNumber;
-    g.setColour(m.enabled ? editor_theme::accentAmber() : juce::Colours::grey);
+    g.setColour(m.enabled ? editor_theme::accentAmber() : cdl::pal().inkMuted);
     const int x = static_cast<int>(m.x);
     g.drawVerticalLine(x, 0.0f, static_cast<float>(area.getBottom()));
-    g.drawText(juce::String(markerNumber), x + 2, 0, 28, 14, juce::Justification::left);
+    g.setFont(cdl::font(cdl::FontRole::Value, 0.9f));
+    g.drawText(juce::String(markerNumber), x + 2, 2, 28, 14, juce::Justification::left);
   }
   if (selecting_) {
     const auto rectangle = juce::Rectangle<int>(start_, end_);

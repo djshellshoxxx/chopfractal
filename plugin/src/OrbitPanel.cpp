@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "CdlTheme.h"
 #include "EditorTheme.h"
 
 namespace cf = chopfractal;
@@ -30,9 +31,9 @@ void OrbitPanel::paint(juce::Graphics& g) {
     const double ph = model_.playheadQuarters();
     const double posTicks = ph >= 0.0 ? ph * cf::kTicksPerQuarter : -1.0;
     auto pt = [&](double r, double a) { return juce::Point<float>(c.x + static_cast<float>(r * std::sin(a)), c.y - static_cast<float>(r * std::cos(a))); };
-    g.setColour(juce::Colours::white.withAlpha(0.18f));
+    g.setColour(cdl::pal().ink.withAlpha(0.18f));
     for (double a : orbit.beatAngles) g.drawLine(juce::Line<float>(pt(R * 0.25, a), pt(R, a)), 0.5f);
-    g.setColour(juce::Colours::white.withAlpha(0.45f));
+    g.setColour(cdl::pal().ink.withAlpha(0.45f));
     for (double a : orbit.barAngles) g.drawLine(juce::Line<float>(pt(R * 0.25, a), pt(R + 3.0, a)), 1.2f);
     for (const auto& a : orbit.arcs) {
       const auto rr = cf::ui::arcRadii(orbit, a, R);
@@ -47,11 +48,11 @@ void OrbitPanel::paint(juce::Graphics& g) {
         g.strokePath(path, juce::PathStrokeType(1.0f));
       }
       if (a.id == model_.selected()) {
-        g.setColour(juce::Colours::white);
+        g.setColour(cdl::pal().ink);
         g.strokePath(path, juce::PathStrokeType(2.0f));
       }
     }
-    g.setColour(juce::Colours::white.withAlpha(0.9f));
+    g.setColour(cdl::pal().ink.withAlpha(0.9f));
     g.setFont(10.0f);
     const double ringW = (R - 0.25 * R) / std::max(1, orbit.rings);
     for (int ring = 0; ring < orbit.rings; ++ring) g.drawText(juce::String(ring + 1), static_cast<int>(c.x) - 8, static_cast<int>(c.y - R + ring * ringW), 16, 10, juce::Justification::centred);
@@ -61,7 +62,7 @@ void OrbitPanel::paint(juce::Graphics& g) {
       g.drawLine(juce::Line<float>(pt(0.0, a), pt(R + 3.0, a)), 1.5f);
     }
   } else {
-    g.setColour(juce::Colours::grey);
+    g.setColour(cdl::pal().inkMuted);
     g.drawText("Orbit view", area, juce::Justification::centred);
   }
 }

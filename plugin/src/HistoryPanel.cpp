@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "CdlTheme.h"
 #include "EditorTheme.h"
 
 namespace cf = chopfractal;
@@ -30,17 +31,17 @@ void HistoryPanel::paint(juce::Graphics& g) {
     const int x = np.x, y = np.y;
     for (const auto& p : tree)
       if (p.id == n.parent) {
-        g.setColour(juce::Colours::grey);
+        g.setColour(cdl::pal().inkMuted);
         const auto pp = treePos(p);
         g.drawLine(static_cast<float>(pp.x), static_cast<float>(pp.y), static_cast<float>(x), static_cast<float>(y));
       }
     g.setColour(n.active ? editor_theme::accentGreen() : (n.favorite ? editor_theme::accentAmber() : editor_theme::neutralGrey()));
     g.fillEllipse(static_cast<float>(x - 8), static_cast<float>(y - 8), 16.0f, 16.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.85f));
+    g.setColour(cdl::pal().ink.withAlpha(0.85f));
     g.drawText(n.label.empty() ? juce::String(static_cast<juce::int64>(n.id)) : juce::String(n.label), x + 10, y - 7, 90, 14, juce::Justification::left);
   }
   if (tree.empty()) {
-    g.setColour(juce::Colours::grey);
+    g.setColour(cdl::pal().inkMuted);
     g.drawText("Each Generate, Mutate and Zoom is saved here as a branch you can return to.", getLocalBounds(), juce::Justification::centred);
   }
 }

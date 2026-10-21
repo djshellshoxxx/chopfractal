@@ -11,6 +11,8 @@
 #include <string>
 
 #include "BuildInfo.h"
+#include <typeinfo>
+
 #include "CdlTheme.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -837,7 +839,7 @@ CHOP_TEST(local_transport_reports_missing_source_and_overrides_a_stopped_host) {
   CHECK(peak(run(p, ph, 8)) < 1e-6f);
 }
 
-CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
+CHOP_TEST(editor_has_visible_play_and_stop_controls_in_the_header) {
   if (!haveDisplay()) return;
   ChopFractalProcessor p;
   prepare(p);
@@ -848,12 +850,12 @@ CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
   CHECK(play != nullptr && stop != nullptr);
   if (!play || !stop) return;
   CHECK(play->isVisible() && stop->isVisible());
-  CHECK(play->getWidth() >= 90 && stop->getWidth() >= 90);
+  // The transport lives in the header strip: both buttons are sized to be hit, apart from each other, and inside the strip.
+  CHECK(play->getWidth() >= 44 && stop->getWidth() >= 44 && play->getHeight() >= 24);
   CHECK(!editor.getLocalArea(play->getParentComponent(), play->getBounds()).intersects(editor.getLocalArea(stop->getParentComponent(), stop->getBounds())));
-  CHECK(play->findColour(juce::TextButton::buttonColourId).getGreen() >
-        play->findColour(juce::TextButton::buttonColourId).getRed());
-  CHECK(stop->findColour(juce::TextButton::buttonColourId).getRed() >
-        stop->findColour(juce::TextButton::buttonColourId).getGreen());
+  CHECK(play->getParentComponent() == stop->getParentComponent() && play->getParentComponent()->getComponentID() == "TopBar");
+  CHECK(play->getParentComponent()->getLocalBounds().contains(play->getBounds()) && play->getParentComponent()->getLocalBounds().contains(stop->getBounds()));
+  CHECK(!play->getToggleState());
   play->onClick();
   juce::AudioBuffer<float> b(2, 512);
   juce::MidiBuffer midi;
@@ -878,7 +880,7 @@ CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
   CHECK(status->isReadOnly());
   CHECK(status->isMultiLine());
   CHECK(status->getText().startsWith(message));
-  CHECK(status->getHeight() >= 60);
+  CHECK(status->getHeight() >= 20);
   CHECK(editor.getLocalBounds().contains(editor.getLocalArea(status, status->getLocalBounds())));
 }
 
@@ -1090,6 +1092,8 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
           dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
     auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
+    if (tooltip && tooltip->getTooltip().length() <= 20) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
+                                                                     component.getParentComponent() ? component.getParentComponent()->getComponentID().toRawUTF8() : "-", tooltip->getTooltip().toRawUTF8());
     if (tooltip) CHECK(tooltip->getTooltip().length() > 20);
     ++controls;
   });

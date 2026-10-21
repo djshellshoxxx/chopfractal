@@ -131,6 +131,15 @@ void forEachControl(juce::Component& root, Fn&& fn) {
   }
 }
 
+// The component with this component ID anywhere below `root` (Component::findChildWithID only looks at direct children).
+inline juce::Component* findById(juce::Component& root, const juce::String& id) {
+  juce::Component* found = nullptr;
+  forEachControl(root, [&](juce::Component& c) {
+    if (!found && c.getComponentID() == id) found = &c;
+  });
+  return found;
+}
+
 // Exactly one button must carry the text, or the helper fails the test (a second match would make a click ambiguous).
 inline juce::Button* findButton(juce::Component& root, const juce::String& text) {
   juce::Button* found = nullptr;

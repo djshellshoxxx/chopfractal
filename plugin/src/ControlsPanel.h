@@ -27,18 +27,13 @@ class ControlsPanel : public EditorPanelBase {
   void addToggle(ParamToggle&, const char* paramId, const juce::String& title);
 
   Attachment& apvts_;
-  juce::ToggleButton editMode_{"Move / resize hits"};
-  juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
+  juce::TextButton followHost_{"Follow DAW"};
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
-  juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"}, zoom_{"Zoom In"},
-      collapse_{"Collapse"}, lock_{"Lock Bar"}, dice_{"New Seed"};
+  juce::TextButton mutate_{"Mutate"}, dice_{"New Seed"};
   juce::ToggleButton embed_{"Embed source in project"};
   juce::Label seedLabel_{{}, "Seed"};
   juce::TextEditor seed_;
   ParamSlider density_, swing_, variation_, dry_, gain_;
-  juce::ComboBox bars_;
-  juce::Label barsLabel_{{}, "Length (bars)"};
-  std::unique_ptr<Attachment::ComboBoxAttachment> barsAttachment_;
   ParamToggle enable_, reverse_, pitch_, retrigger_, filter_, glide_, crunch_;
   ParamSlider fxIntensity_, chaos_;
 };

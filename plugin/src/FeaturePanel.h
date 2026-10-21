@@ -14,6 +14,10 @@ class FeaturePanel : public EditorPanelBase {
 
   // Public so tests can drive them without modal dialogs.
   void reroll() { cmd_.reroll(); }
+  // The shell's Evolve button drives the same settings as the rows below (Every, Amount, Depth, Motif).
+  void setEvolveEnabled(bool on);
+  bool evolveEnabled() const { return evolve_.getToggleState(); }
+  juce::String presetName() const;  // the preset chosen in the list, empty after a manual change
   void applyPreset(const chopfractal::presets::Preset&);
   chopfractal::presets::Preset currentPreset(const juce::String& name) const;
   void savePresetNamed(const juce::String& name, bool overwrite);
@@ -33,12 +37,12 @@ class FeaturePanel : public EditorPanelBase {
   juce::TextButton smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"}, exportWav_{"Export WAV"},
       exportKit_{"Export Kit"}, locate_{"Locate Source"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
-  juce::TextButton reroll_{"Reroll"}, savePreset_{"Save Preset"}, deletePreset_{"Delete"};
+  juce::TextButton savePreset_{"Save Preset"}, deletePreset_{"Delete"};
   juce::ComboBox role_, preset_, detectMode_;
   std::vector<PresetManager::Entry> presets_;
   DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
   DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
-  juce::ToggleButton evolve_{"Evolve"};
+  juce::ToggleButton evolve_{"Run Evolve"};  // legacy mirror of the shell's Evolve button
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;
   chopfractal::evolve::Settings pushedEvolve_;  // the settings this panel last sent; a different session value (a restored project) is shown

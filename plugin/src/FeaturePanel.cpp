@@ -99,11 +99,10 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
     c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi = {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }); };
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
-  for (juce::Button* b : std::initializer_list<juce::Button*>{&reroll_, &savePreset_, &deletePreset_}) {
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&savePreset_, &deletePreset_}) {
     addAndMakeVisible(*b);
     b->setTitle(b->getButtonText());
   }
-  reroll_.onClick = [this] { reroll(); };
   savePreset_.onClick = [this] { askSavePreset(); };
   deletePreset_.onClick = [this] { deleteSelectedPreset(); };
   preset_.setTitle("Preset");
@@ -135,6 +134,16 @@ FractalUi FeaturePanel::fractalUi() const {
 EvolveUi FeaturePanel::evolveUi() const { return {evolve_.getToggleState(), every_.getSelectedId() - 1, evolveAmount_.getValue()}; }
 
 ExportUi FeaturePanel::exportUi() const { return {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }
+
+void FeaturePanel::setEvolveEnabled(bool on) {
+  evolve_.setToggleState(on, juce::dontSendNotification);
+  pushEvolve();
+}
+
+juce::String FeaturePanel::presetName() const {
+  const int i = preset_.getSelectedId() - 1;
+  return i >= 0 && i < static_cast<int>(presets_.size()) ? preset_.getText() : juce::String();
+}
 
 void FeaturePanel::pushEvolve() {
   const EvolveUi ui = evolveUi();
@@ -228,7 +237,6 @@ void FeaturePanel::resized() {
   preset_.setBounds(featD.removeFromLeft(190).reduced(2));
   savePreset_.setBounds(featD.removeFromLeft(90).reduced(2));
   deletePreset_.setBounds(featD.removeFromLeft(70).reduced(2));
-  reroll_.setBounds(featD.removeFromLeft(80).reduced(2));
   featD.removeFromLeft(16);
   role_.setBounds(featD.removeFromLeft(110).reduced(2));
   setRole_.setBounds(featD.removeFromLeft(80).reduced(2));

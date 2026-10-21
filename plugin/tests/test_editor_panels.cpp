@@ -46,13 +46,15 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   probe.refresh(true, 920);
   const auto& tree = probe.view().tree;
   CHECK(tree.size() == 2);
-  auto* history = editor->findChildWithID("HistoryPanel");
+  ed->openDrawer("tools");  // the family tree and the orbit view live in the Tools drawer
+  pump(60);
+  auto* history = findById(*editor, "HistoryPanel");
   CHECK(history != nullptr);
   if (!history || tree.size() != 2) return;
   const auto& root = *std::find_if(tree.begin(), tree.end(), [](const auto& n) { return !n.active; });
   const int stepX = probe.view().treeCols > 0 ? std::min(64, std::max(6, (history->getWidth() - 60) / probe.view().treeCols)) : 64;
   const int stepY = probe.view().treeRows > 0 ? std::min(30, std::max(6, (history->getHeight() - 40) / probe.view().treeRows)) : 30;
-  sim.click(history->getPosition() + juce::Point<int>(24 + root.column * stepX, 22 + root.depth * stepY));
+  sim.click(editor->getLocalPoint(history, juce::Point<int>(24 + root.column * stepX, 22 + root.depth * stepY)));
   pump(100);
   CHECK(patternBytes(p) == generated);
 
@@ -66,9 +68,11 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   sim.click({b.getX() + static_cast<int>((first.x0 + (first.x1 - first.x0) * 0.5) * b.getWidth()), b.getY() + static_cast<int>((static_cast<float>(first.chopIndex) + 0.5f) * laneH)});
   CHECK(ed->selectedHit() == first.id);
 
-  auto* orbit = editor->findChildWithID("OrbitPanel");
+  auto* orbit = findById(*editor, "OrbitPanel");
   CHECK(orbit != nullptr);
   if (!orbit) return;
+  if (auto* tools = dynamic_cast<juce::Viewport*>(findById(*editor, "ToolsDrawer"))) tools->setViewPosition(400, 0);  // bring the orbit into view
+  pump(30);
   const auto& view = probe.view().orbit;
   const double R = std::min(orbit->getWidth(), orbit->getHeight()) / 2.0 - 4.0;
   const auto centre = orbit->getLocalBounds().getCentre();
@@ -78,7 +82,7 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
     const auto radii = cf::ui::arcRadii(view, arc, R);
     const double r = (radii.inner + radii.outer) / 2.0, a = arc.startAngle + arc.sweep / 2.0;
     const juce::Point<int> local(centre.x + static_cast<int>(std::lround(r * std::sin(a))), centre.y - static_cast<int>(std::lround(r * std::cos(a))));
-    sim.click(orbit->getPosition() + local);
+    sim.click(editor->getLocalPoint(orbit, local));
     if (ed->selectedHit() == arc.id) {
       clickedAnother = true;
       break;

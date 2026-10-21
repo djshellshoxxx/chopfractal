@@ -1,16 +1,44 @@
 #include "PatternPanel.h"
 
 #include <algorithm>
+#include <chopfractal/chop_contracts/time.hpp>
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 #include <cmath>
 #include <cstdlib>
 
+#include "CdlLookAndFeel.h"
 #include "EditorTheme.h"
 
 namespace cf = chopfractal;
 using editor_theme::laneColour;
 
-PatternPanel::PatternPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "PatternPanel") { setOpaque(true); }
+PatternPanel::PatternPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "PatternPanel"), playhead_(model) {
+  setOpaque(true);
+  addAndMakeVisible(playhead_);
+}
+
+void PatternPanel::resized() { playhead_.setBounds(getLocalBounds()); }
+
+void PatternPanel::setPlaying(bool on) {
+  if (on && !vblank_) vblank_ = std::make_unique<juce::VBlankAttachment>(this, [this] { playhead_.repaint(); });
+  if (!on && vblank_) {
+    vblank_.reset();
+    playhead_.repaint();
+  }
+}
+
+void PatternPanel::PlayheadLayer::paint(juce::Graphics& g) {
+  const double pos = model.playheadQuarters();
+  const auto len = model.view().orbit.lengthTicks;
+  if (pos < 0.0 || len <= 0) return;
+  const double ticks = std::fmod(pos * static_cast<double>(chopfractal::kTicksPerQuarter), static_cast<double>(len));
+  const float x = static_cast<float>(ticks / static_cast<double>(len)) * static_cast<float>(getWidth());
+  g.setColour(cdl::pal().rain);
+  g.fillRect(x - 1.0f, 0.0f, 2.0f, static_cast<float>(getHeight()));
+  juce::Path tri;
+  tri.addTriangle(x - 5.0f, 0.0f, x + 5.0f, 0.0f, x, 7.0f);
+  g.fillPath(tri);
+}
 
 void PatternPanel::modelChanged(Change c) {
   if (c == Change::View || c == Change::Selection) repaint();
@@ -20,17 +48,19 @@ void PatternPanel::paint(juce::Graphics& g) {
   const auto& v = model_.view();
   const auto& pattern = v.pattern;
   const auto area = getLocalBounds();
-  g.setFont(13.0f);
-  g.setColour(editor_theme::canvas());
+  g.setFont(cdl::font(cdl::FontRole::Body));
+  g.setColour(editor_theme::background());
   g.fillRect(area);
   // Lanes by chop, numbered so colour is never the only indicator.
   const int lanes = std::max(1, static_cast<int>(v.chops.size()));
   const float laneH = static_cast<float>(area.getHeight()) / static_cast<float>(lanes);
   const float w = static_cast<float>(area.getWidth());
-  g.setColour(juce::Colours::white.withAlpha(0.12f));
+  g.setColour(cdl::pal().edge.withAlpha(0.55f));  // lane separators
+  for (int lane = 1; lane < lanes; ++lane) g.drawHorizontalLine(static_cast<int>(static_cast<float>(lane) * laneH), 0.0f, w);
+  g.setColour(cdl::pal().edge);
   for (double x : pattern.beatLines) g.drawVerticalLine(static_cast<int>(x * w), 0.0f, static_cast<float>(area.getBottom()));
   for (std::size_t b = 0; b < pattern.barLines.size(); ++b) {
-    g.setColour(juce::Colours::white.withAlpha(0.35f));
+    g.setColour(cdl::pal().edgeHi);
     const int x = static_cast<int>(pattern.barLines[b] * w);
     g.drawVerticalLine(x, 0.0f, static_cast<float>(area.getBottom()));
     if (b < pattern.barLocked.size() && pattern.barLocked[b]) {
@@ -46,19 +76,20 @@ void PatternPanel::paint(juce::Graphics& g) {
     g.setColour(laneColour(r.chopIndex).withAlpha(r.depth > 0 ? 0.95f : 0.75f));
     g.fillRect(rect);
     if (r.id == model_.selected() || std::find(selectedHits.begin(), selectedHits.end(), r.id) != selectedHits.end()) {
-      g.setColour(juce::Colours::white);
+      g.setColour(cdl::pal().ink);
       g.drawRect(rect, 2.0f);
     } else if (r.locked || r.hasChild) {
-      g.setColour(r.locked ? editor_theme::accentRed() : juce::Colours::white);
+      g.setColour(r.locked ? editor_theme::accentRed() : cdl::pal().ink);
       g.drawRect(rect, 1.0f);
     }
     if (rect.getWidth() > 14.0f && rect.getHeight() > 12.0f) {
-      g.setColour(juce::Colours::black);
+      g.setColour(cdl::pal().bg);
+      g.setFont(cdl::font(cdl::FontRole::Value, 0.9f));
       g.drawText(juce::String(r.chopIndex + 1), rect.toNearestInt(), juce::Justification::centred);
     }
   }
   if (pattern.rects.empty()) {
-    g.setColour(juce::Colours::grey);
+    g.setColour(cdl::pal().inkMuted);
     g.drawText("Detect chops, then press Generate.", area, juce::Justification::centred);
   }
 
@@ -72,7 +103,7 @@ void PatternPanel::paint(juce::Graphics& g) {
         float x = static_cast<float>(r.x0) * pw;
         float width = static_cast<float>(r.x1 - r.x0) * pw;
         if (dragMode_ == DragMode::Move) x += dx; else width = std::max(2.0f, width + dx);
-        g.setColour(juce::Colours::white.withAlpha(0.8f));
+        g.setColour(cdl::pal().ink.withAlpha(0.8f));
         g.drawRect(x, static_cast<float>(r.chopIndex) * lh + 2.0f, width, lh - 4.0f, 1.5f);
         break;
       }
