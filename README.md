@@ -20,7 +20,7 @@ branch you can return to.
 
 **Architecture and modularity:** [`docs/MODULARITY_MAP.md`](docs/MODULARITY_MAP.md). **IP records (public-safe, high level):** [`IP/README.md`](IP/README.md).
 
-**Where the build stands:** see [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md). Specifications live in
+**Where the build stands:** see [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md). The source workflow and editor are incomplete: live input capture, production GUI polish, real-host compatibility testing and release packaging are still pending. Do not treat the feature overview above as a list of release-validated capabilities. Specifications live in
 [`docs/specs/`](docs/specs/README.md).
 
 ## Layout
