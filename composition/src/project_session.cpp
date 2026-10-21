@@ -206,6 +206,10 @@ Status ProjectSession::installPlayback(const pattern::Pattern& p) {
 }
 
 Status ProjectSession::republish() {
+  if (morphActive_) {  // the preview stands in for the pattern (groove, effects and markers changed under it)
+    if (refreshMorph().ok()) return {};
+    endMorph(true);
+  }
   if (!sourceData_) {
     publish(std::make_shared<const render::Playback>());  // no source: the renderer passes input through
     return {};
@@ -224,6 +228,7 @@ Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* his
   if (fx_.any()) result = pattern::applyFxPass(result.value(), fx_);  // gesture effects follow every new pattern
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
+  endMorph(true);
   patterns_.adopt(std::move(result.value()));
   pendingActivation_ = history::kNoNode;  // a queued variation switch must not overwrite what the user just made
   if (report) noteReport(*report);
@@ -281,6 +286,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   auto map = source::ChopMap::create(std::move(info));
   if (!map.ok()) return map.error();  // nothing has changed yet
   evolve_.stop();  // there is no pattern for a new source
+  endMorph(true);
   sourceData_ = std::move(data);
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
@@ -294,6 +300,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
 }
 
 void ProjectSession::clearSource() {
+  endMorph(true);
   sourceData_.reset();
   chopMap_.reset();
   chops_.reset();
@@ -359,7 +366,19 @@ Status ProjectSession::reconcileAfterMarkerChange() {
   pattern::Pattern cleaned = pattern::sanitize(patterns_.current(), *chops_);
   if (pattern::serialize(cleaned) == pattern::serialize(patterns_.current())) return republish();
   notice(Notice::Level::Info, "Some events were adjusted because their chops changed.");
-  return finalize(std::move(cleaned), nullptr);  // one undo step
+  const bool wasMorphing = morphActive_;  // the repaired real pattern is not an interruption: the preview carries on
+  const double morphT = morphT_;
+  morphActive_ = false;
+  Status fin = finalize(std::move(cleaned), nullptr);  // one undo step
+  if (wasMorphing) {
+    morphActive_ = true;
+    morphT_ = morphT;
+    if (!refreshMorph().ok()) {
+      endMorph(true);
+      republish();
+    }
+  }
+  return fin;
 }
 
 Status ProjectSession::relinkSource(std::shared_ptr<const render::SourceData> data) {
@@ -464,6 +483,7 @@ bool ProjectSession::undo() {
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Undo stopped here. Pick it from the family tree to adapt it.");
     return false;
   }
+  endMorph(true);
   pendingActivation_ = history::kNoNode;
   return true;
 }
@@ -475,6 +495,7 @@ bool ProjectSession::redo() {
     notice(Notice::Level::Warning, "That version no longer fits the current chops, so Redo stopped here. Pick it from the family tree to adapt it.");
     return false;
   }
+  endMorph(true);
   pendingActivation_ = history::kNoNode;
   return true;
 }
@@ -486,6 +507,7 @@ Status ProjectSession::recallSnapshot(std::size_t slot) {
     patterns_.undo();
     return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
   }
+  endMorph(true);
   pendingActivation_ = history::kNoNode;
   return {};
 }
@@ -621,6 +643,7 @@ Status ProjectSession::applyActivation(history::NodeId node) {
   pattern::Pattern restored = pattern::sanitize(p.value(), *chops_);
   Status v = installPlayback(restored);
   if (!v.ok()) return v;
+  endMorph(true);
   patterns_.adopt(std::move(restored));
   history_.setActive(node);
   pendingActivation_ = history::kNoNode;
@@ -915,6 +938,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 
   // ---- commit ----
   loadedEmbedded_ = loadedFlag;
+  endMorph(true);  // a loaded project never starts in a morph
   if (newEvolve) {
     evolve_.start(*newEvolve);  // not enabled: only remembers the settings
   } else {

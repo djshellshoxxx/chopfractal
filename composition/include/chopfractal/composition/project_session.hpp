@@ -14,6 +14,7 @@
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 #include <chopfractal/level_match/level_match.hpp>
 #include <chopfractal/pattern_engine/fx_pass.hpp>
+#include <chopfractal/pattern_engine/morph.hpp>
 #include <chopfractal/pattern_engine/pattern.hpp>
 #include <chopfractal/pattern_engine/session.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
@@ -280,8 +281,22 @@ class ProjectSession {
   Status commitEdit(const std::string& label = {});  // settled manual edits become one history node
   bool undo();
   bool redo();
-  Status storeSnapshot(std::size_t slot) { return patterns_.storeSnapshot(slot); }
+  Status storeSnapshot(std::size_t slot);  // refreshes a running morph (composition/src/morph.cpp)
   Status recallSnapshot(std::size_t slot);
+
+  // ---- A/B morph (F10; composition/src/morph.cpp) ----
+  // Blends the stored A and B patterns by `t` (0 = A, 1 = B) into a PREVIEW that only the audio side sees: pattern(),
+  // history, undo and the saved state are untouched until commitMorph(). Every command that changes the pattern ends the
+  // morph (a notice says so); Evolve and morph exclude each other.
+  Status beginMorph(double t = 0.5);  // both slots required; installs the preview playback
+  Status setMorph(double t);          // 0..1, NaN is InvalidArgument; no history, no undo entry
+  bool morphActive() const { return morphActive_; }
+  double morphAmount() const { return morphT_; }
+  // The pattern the panels draw: the morph preview while it is active, else pattern().
+  const pattern::Pattern* displayPattern() const;
+  // Freezes the blend (unmatched hits resolved), records it as a family-tree node "Morph A>B NN%" and one undo step.
+  Status commitMorph(const std::string& label = {});
+  void cancelMorph();  // back to the real pattern; no notice
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -427,6 +442,13 @@ class ProjectSession {
   mutable std::uint64_t annotatedKey_ = 0;
   groove::Groove groove_;
   SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
+  // morph (F10)
+  bool endMorph(bool withNotice);  // drops the preview state only; callers that change the pattern republish themselves
+  Status refreshMorph();           // rebuilds and republishes the preview from the current slots and amount
+  Result<pattern::Pattern> morphPattern(double t, bool freeze) const;
+  bool morphActive_ = false;
+  double morphT_ = 0.5;
+  std::shared_ptr<const pattern::Pattern> morphPreview_;
   Status decodeGroove(const StateSection& s);
   Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p, bool withGroove) const;
 };

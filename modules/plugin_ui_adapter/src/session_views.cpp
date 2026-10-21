@@ -87,4 +87,62 @@ std::string dragSkippedEventsMessage(int skipped) {
 }
 std::string dragTempFileErrorMessage() { return "Could not create a temporary file. Use Export instead."; }
 
+// ---- F10 ----
+
+std::string morphAmountText(double amount) {
+  if (!(amount > 0.0)) return "A";
+  if (!(amount < 1.0)) return "B";
+  return std::to_string(static_cast<long long>(std::llround(amount * 100.0))) + "% B";
+}
+
+MorphView buildMorphView(const MorphInput& in) {
+  MorphView v;
+  const bool stored = in.hasA && in.hasB;
+  v.toggleEnabled = (stored && !in.scenesPlaying) || in.active;
+  v.toggleOn = in.active;
+  v.toggleTooltip = !stored ? "Store A and B first."
+                    : in.scenesPlaying && !in.active ? "Cancel the scene playback before morphing."
+                    : "Morph between A and B. Locks are not enforced inside the blend.";
+  v.sliderEnabled = in.active;
+  v.sliderText = morphAmountText(in.amount);
+  v.commitEnabled = v.cancelEnabled = in.active;
+  v.badgeVisible = in.active;
+  if (in.active) {
+    const long long pct = std::llround(std::min(1.0, std::max(0.0, in.amount)) * 100.0);
+    v.status = "Morphing " + std::to_string(pct) + "% toward B. Commit Morph to keep it, or Cancel Morph.";
+  }
+  return v;
+}
+
+std::string morphCommittedMessage() { return "Committed the morph as a new variation."; }
+std::string morphCancelledMessage() { return "Morph cancelled; your pattern is unchanged."; }
+std::string morphEndedMessage() { return "Morph ended because the pattern was changed."; }
+
+void MorphCoalescer::reset(double applied) {
+  applied_ = pending_ = applied;
+  has_ = final_ = false;
+  lastMs_ = -1000000;
+}
+void MorphCoalescer::setPending(double value) {
+  pending_ = std::min(1.0, std::max(0.0, value));
+  has_ = true;
+  final_ = false;
+}
+void MorphCoalescer::release() { final_ = true; }
+bool MorphCoalescer::take(long long nowMs, double& value) {
+  if (!has_) return false;
+  const double delta = std::fabs(pending_ - applied_);
+  if (final_) {
+    has_ = false;
+    final_ = false;
+    if (delta == 0.0) return false;
+  } else {
+    if (delta < kMinDelta || nowMs - lastMs_ < kIntervalMs) return false;
+  }
+  applied_ = pending_;
+  lastMs_ = nowMs;
+  value = pending_;
+  return true;
+}
+
 }  // namespace chopfractal::ui

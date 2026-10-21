@@ -80,4 +80,52 @@ std::string dragTooLongMessage();
 std::string dragSkippedEventsMessage(int skipped);                 // "N events were skipped because their chops no longer exist."
 std::string dragTempFileErrorMessage();
 
+// ---------------------------------------------------------------------------------------------
+// F10: A/B morph
+// ---------------------------------------------------------------------------------------------
+
+struct MorphInput {
+  bool hasA = false, hasB = false;
+  bool active = false;
+  double amount = 0.5;
+  bool scenesPlaying = false;  // F09: morph and scene playback exclude each other
+};
+struct MorphView {
+  bool toggleEnabled = false;       // the "Morph" toggle
+  std::string toggleTooltip;        // "Store A and B first." / "Cancel the scene playback before morphing." / the normal text
+  bool toggleOn = false;
+  bool sliderEnabled = false;       // "Morph amount" (disabled while the toggle is off)
+  std::string sliderText;           // "A", "B" or "37% B"
+  bool commitEnabled = false, cancelEnabled = false;
+  bool badgeVisible = false;        // the "Morph preview" text badge on the pattern panel
+  std::string badgeText = "Morph preview";
+  std::string status;               // "Morphing 37% toward B. Commit Morph to keep it, or Cancel Morph." while active, else empty
+};
+// "A" at 0, "B" at 1, otherwise "<percent toward B>% B".
+std::string morphAmountText(double amount);
+MorphView buildMorphView(const MorphInput& in);
+std::string morphCommittedMessage();   // "Committed the morph as a new variation."
+std::string morphCancelledMessage();   // "Morph cancelled; your pattern is unchanged."
+std::string morphEndedMessage();       // "Morph ended because the pattern was changed."
+
+// Coalesces slider drags into session setMorph calls: a pending value is applied when it differs from the applied one by
+// at least kMinDelta and kIntervalMs have passed since the last application; the final value (release) is always applied.
+// The editor calls setPending() from the slider callback, release() on mouse-up and take() from its timer (10 Hz or faster).
+class MorphCoalescer {
+ public:
+  static constexpr double kMinDelta = 0.005;
+  static constexpr long long kIntervalMs = 50;
+  void reset(double applied);
+  void setPending(double value);
+  void release();
+  // True when the caller must apply `value` now (and then the coalescer treats it as applied).
+  bool take(long long nowMs, double& value);
+  double applied() const { return applied_; }
+
+ private:
+  double applied_ = 0.5, pending_ = 0.5;
+  bool has_ = false, final_ = false;
+  long long lastMs_ = -1000000;
+};
+
 }  // namespace chopfractal::ui

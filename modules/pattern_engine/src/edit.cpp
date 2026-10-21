@@ -121,7 +121,7 @@ Result<FlatEventList> flatten(const Pattern& p, const ChopSnapshot& chops) {
   FlattenLimits lim;
   lim.maxEvents = static_cast<std::size_t>(p.settings.maxEvents);
   const Ticks barT = barTicks(p.settings);
-  const std::uint64_t probSeed = hashCombine(p.settings.seed, 0x50524F42ull);
+  const std::uint64_t probSeed = probabilitySeedFor(p.settings.seed);
   for (std::size_t b = 0; b < p.bars.size(); ++b)
     for (const Beat& bt : p.bars[b].beats) {
       Status s = flattenInto(out, bt.events, static_cast<Ticks>(b) * barT, barT, {}, chops, lim, probSeed);

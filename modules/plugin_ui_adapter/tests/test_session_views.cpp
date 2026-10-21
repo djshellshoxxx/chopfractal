@@ -1,5 +1,7 @@
 #include <chopfractal/plugin_ui_adapter/session_views.hpp>
 
+#include <cmath>
+
 #include "chop_test.hpp"
 
 using namespace chopfractal::ui;
@@ -98,4 +100,64 @@ CHOP_TEST(drag_file_names_and_messages_are_exact) {
   CHECK(dragSkippedEventsMessage(1) == "1 event was skipped because their chops no longer exist.");
   CHECK(dragHintText("/d") == "Dragged files are kept in /d until you delete them. Use Export for files you want to keep.");
   CHECK(dragTempFileErrorMessage() == "Could not create a temporary file. Use Export instead.");
+}
+
+// ---- F10 ----
+
+CHOP_TEST(morph_amount_text_and_view_follow_the_spec) {
+  CHECK(morphAmountText(0.0) == "A" && morphAmountText(1.0) == "B" && morphAmountText(0.37) == "37% B" && morphAmountText(0.5) == "50% B");
+  CHECK(morphAmountText(-1) == "A" && morphAmountText(2) == "B");
+  MorphInput in;
+  MorphView v = buildMorphView(in);
+  CHECK(!v.toggleEnabled && v.toggleTooltip == "Store A and B first." && !v.sliderEnabled && !v.badgeVisible && v.status.empty());
+  in.hasA = in.hasB = true;
+  v = buildMorphView(in);
+  CHECK(v.toggleEnabled && !v.commitEnabled && !v.cancelEnabled && !v.toggleOn);
+  in.active = true;
+  in.amount = 0.37;
+  v = buildMorphView(in);
+  CHECK(v.toggleOn && v.sliderEnabled && v.commitEnabled && v.cancelEnabled && v.badgeVisible && v.badgeText == "Morph preview");
+  CHECK(v.status == "Morphing 37% toward B. Commit Morph to keep it, or Cancel Morph." && v.sliderText == "37% B");
+  in.active = false;
+  in.scenesPlaying = true;
+  v = buildMorphView(in);
+  CHECK(!v.toggleEnabled && v.toggleTooltip == "Cancel the scene playback before morphing.");
+  CHECK(morphCommittedMessage() == "Committed the morph as a new variation." && morphCancelledMessage() == "Morph cancelled; your pattern is unchanged." &&
+        morphEndedMessage() == "Morph ended because the pattern was changed.");
+}
+
+CHOP_TEST(slider_coalesces_rapid_changes) {
+  MorphCoalescer c;
+  c.reset(0.5);
+  int applications = 0;
+  double v = 0;
+  for (int i = 0; i < 50; ++i) {  // 50 slider callbacks within 20 ms, polled every callback
+    c.setPending(0.5 + 0.005 * (i + 1));
+    if (c.take(i * 20 / 50, v)) ++applications;
+  }
+  CHECK(applications <= 1);
+  c.release();
+  CHECK(c.take(21, v) && std::fabs(v - 0.75) < 1e-9);
+  CHECK(!c.take(22, v));
+  // slow drag: one application per 50 ms at most, and only for real changes
+  MorphCoalescer d;
+  d.reset(0.0);
+  int n = 0;
+  for (long long t = 0; t <= 500; t += 10) {
+    d.setPending(static_cast<double>(t) / 1000.0);
+    if (d.take(t, v)) ++n;
+  }
+  CHECK(n >= 5 && n <= 11);
+  // below the minimum delta nothing is applied, but release applies the final value if it differs at all
+  MorphCoalescer e;
+  e.reset(0.5);
+  e.setPending(0.502);
+  CHECK(!e.take(1000, v));
+  e.release();
+  CHECK(e.take(1001, v) && std::fabs(v - 0.502) < 1e-12);
+  MorphCoalescer f;
+  f.reset(0.5);
+  f.setPending(0.5);
+  f.release();
+  CHECK(!f.take(5000, v));
 }

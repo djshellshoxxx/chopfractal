@@ -193,6 +193,12 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
 
 void sortFlat(FlatEventList& list);  // by (start, id)
 
+// The deterministic probability draw flattenInto uses: `probabilitySeedFor(pattern seed)` once per pattern, then one
+// fixed draw per event id. A hit plays when probability >= 1 or its draw is below the probability, so raising a
+// probability can only add hits (the morph relies on that monotonicity).
+std::uint64_t probabilitySeedFor(std::uint64_t patternSeed);
+bool probabilityPasses(std::uint64_t probabilitySeed, EventId id, float probability);
+
 // Range/shape validation of one event and its subtree (no source lookups).
 Status validateEvent(const Event& e, int depth = 0);
 

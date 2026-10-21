@@ -9,6 +9,19 @@ works without it but the slots would not survive a reload)  **Blocks:** none
 - **Chaos interplay is removed:** Chaos v1 is generation-time (F08 audit note), so there is no overlay to layer on the morph. Playback is `morph -> flatten`. The test `chaos_layers_on_top_of_the_morph` is dropped.
 - A failed slot recall (chops changed) makes `beginMorph` return `NotFound` with the Recall message `That snapshot no longer fits the current chops.`; this is the only recall-failure path morph needs to handle.
 
+### 0.1 Session-layer status (2026-10-21, branch feat/SESS-session-features)
+**Done and tested:** `pattern::morph` (modules/pattern_engine/src/morph.cpp) with the matching rules, the interpolation table, the probability crossfade, freeze mode and every refusal; `probabilitySeedFor/probabilityPasses` in `chop_contracts` (flatten uses them, golden hashes unchanged); `ProjectSession::beginMorph/setMorph/commitMorph/cancelMorph/morphActive/morphAmount/displayPattern` (composition/src/morph.cpp) with the interruption hooks in `finalize`, `undo`, `redo`, `recallSnapshot`, `applyActivation`, `loadState`, `loadSource`, `clearSource`, `applyStretched` and the Evolve exclusion; A/B slots persist through the F01 `ab` block (nothing new is saved by the morph); the view model `plugin_ui_adapter/session_views.hpp` (`buildMorphView`, `morphAmountText`, `MorphCoalescer`, exact messages). **Not built here (the GUI worker owns the panels):** the Morph row, the badge on the pattern panel and the editor timer wiring. Section 12 lists what each control must call.
+
+*Decisions made while implementing (they override the body):*
+1. `PatternSession::snapshot(slot)` already exists as `slot(slot)` (F01); morph reads that.
+2. A matched hit may move by at most one grid cell: both matching passes use `kMorphMatchGridCells` (= 1) times the grid. A hit that moved further is an A-only hit plus a B-only hit.
+3. The gesture-effect blocks (Echo, Tremolo-Pan, Stutter, Roll) of a matched pair are discrete: the side chosen by the 0.5 switch supplies its block or none.
+4. `beginMorph` is refused while Evolve runs (`Switch Evolve off before morphing.`), and `setEvolve(enabled)` is refused while a morph is active (`Cancel the morph before switching Evolve on.`); the body's "setEvolve ends the morph" is replaced by the refusal in the UX section.
+5. Marker edits do not end the morph: the preview is rebuilt from the repaired slots (`sanitize`); if the real pattern had to be repaired the morph carries on over it without the "ended" notice.
+6. With gesture effects on (`setFx`), the preview runs the effect pass over the unfrozen blend and a commit runs it over the frozen one (finalize does it), so a commit can differ from the preview in which hits carry an effect; without them the two are identical (tested).
+7. `cancelMorph()` is silent; the GUI shows `morphCancelledMessage()`. `commitMorph` queues the Info notice `Committed the morph as a new variation.`; an interruption queues `Morph ended because the pattern was changed.`.
+8. At t = 1 the result is B itself with B's own ids, so B-only ids are stable for t in (0, 1) but differ from B's original ids at the endpoint.
+
 ## 1. Summary and user value
 Today the editor has Store A / Recall A / Store B / Recall B: a hard A-or-B comparison. F10 adds a **Morph** slider that blends continuously between the two stored patterns: levels,
 pans, pitches, effects and timing glide per event, while hits that exist in only one pattern fade in or out by probability. The producer scrubs the slider while the loop plays (the
@@ -190,15 +203,15 @@ voice behavior. (4) Commit at 40 %, then play: identical to the preview; Undo re
 the preview updates immediately. (6) Press Generate while morphing: the preview ends and the message appears.
 
 ## 8. Acceptance criteria
-- [ ] `morph(a, b, 0)` and `morph(a, b, 1)` are byte-identical to `a` and `b`; `morph(a, a, t)` equals `a`.
-- [ ] Event matching follows the two-pass rule exactly, including the id-collision case, and never crosses bars; pinned by tests.
-- [ ] Every field follows the interpolation table; discrete fields switch at `t >= 0.5`; the pinned numeric example matches within 1e-6.
-- [ ] Unmatched events fade monotonically; B-only ids are independent of `t`; committed results flatten to the same events as the preview.
-- [ ] The preview changes only the playback: `pattern()`, history, undo depth, A/B slots and saved state are identical before and after any number of `setMorph` calls.
-- [ ] Commit creates exactly one family-tree node (label with percent) and one undo step; Cancel and every other command end the preview with the specified messages.
-- [ ] Different length/meter/grid and over-cap cases are refused with the exact messages and leave state untouched.
+- [x] `morph(a, b, 0)` and `morph(a, b, 1)` are byte-identical to `a` and `b`; `morph(a, a, t)` equals `a`.
+- [x] Event matching follows the two-pass rule exactly, including the id-collision case, and never crosses bars; pinned by tests.
+- [x] Every field follows the interpolation table; discrete fields switch at `t >= 0.5`; the pinned numeric example matches within 1e-6.
+- [x] Unmatched events fade monotonically; B-only ids are independent of `t`; committed results flatten to the same events as the preview.
+- [x] The preview changes only the playback: `pattern()`, history, undo depth, A/B slots and saved state are identical before and after any number of `setMorph` calls.
+- [x] Commit creates exactly one family-tree node (label with percent) and one undo step; Cancel and every other command end the preview with the specified messages.
+- [x] Different length/meter/grid and over-cap cases are refused with the exact messages and leave state untouched.
 - [ ] The slider's audible effect arrives within one audio block plus 50 ms of the last value; at most one `setMorph` application per 50 ms during drags.
-- [ ] No serialized format, host parameter or manifest change; the four golden hashes `2397844821793184813`, `12084884237330071892`, `13710596758976548913`, `18237151833431327128` are
+- [x] No serialized format, host parameter or manifest change; the four golden hashes `2397844821793184813`, `12084884237330071892`, `13710596758976548913`, `18237151833431327128` are
       unchanged (the `flattenInto` refactor is behavior-identical).
 - [ ] All new controls have titles and keyboard operation; the preview is flagged by text.
 
@@ -226,6 +239,19 @@ the preview updates immediately. (6) Press Generate while morphing: the preview 
 - **Stale preview after external changes.** Central `endMorph` calls at every mutation entry point; a unit test iterates all of them; add new mutators to the list when written.
 - **Performance of rapid republish.** Coalescing + O(n^2) with n <= 512 per pattern (n per bar far smaller); fallback: raise the coalescing interval to 100 ms.
 - **Two features define `displayPattern()` (F09, F10).** Both specs state the same contract; the second PR to merge reuses the existing function and only adds its override.
+
+## 12. Commands the GUI must call
+All calls run on the message thread under `proc.withSession(...)`. Texts, enable rules and the slider coalescing come from `plugin_ui_adapter/session_views.hpp`.
+| Control | Call |
+|---|---|
+| Row state (enable, tooltips, badge, slider text, status line) | `ui::buildMorphView({hasA = hasSnapshot(0), hasB = hasSnapshot(1), active = morphActive(), amount = morphAmount(), scenesPlaying})` every timer tick |
+| Toggle "Morph" on | `beginMorph(slider value, default 0.5)`; on error show `error().message` and keep the toggle off |
+| Toggle "Morph" off / "Cancel Morph" | `cancelMorph()`, then show `ui::morphCancelledMessage()` |
+| Slider "Morph amount" | `MorphCoalescer::setPending(v)` in the callback, `release()` on mouse-up, and in the 10 Hz-or-faster timer `if (c.take(nowMs, v)) setMorph(v)`; double-click sets 0.5; on `setMorph` error show the message and leave the toggle on |
+| "Commit Morph" | `commitMorph()`, then `ui::morphCommittedMessage()` |
+| Pattern panel and Orbit view | draw `displayPattern()` instead of `pattern()`; show `badgeText` when `badgeVisible` |
+| Store A / Store B | `storeSnapshot(0/1)` (a running morph refreshes by itself) |
+| Interruptions | drain `takeNotices()` as usual; `ui::morphEndedMessage()` arrives as a notice and the toggle follows `morphActive()` |
 
 ## 11. Implementation steps
 1. `probabilitySeedFor`/`probabilityPasses` refactor + `PatternSession::snapshot` + tests (goldens unchanged). 2. `morph.hpp/.cpp`: matching, interpolation, structure rebuild,

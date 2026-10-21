@@ -15,12 +15,14 @@ Deterministic hierarchical pattern model (phrase, bar, beat, event), Generate an
 - `PatternSession`: undo/redo and two A/B snapshot slots
 - `setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)
 - `mapRegions(pattern, fn)`: applies a range mapping to every sub-region, recursively through zoom trees (used when a source is time-stretched)
+- `morph(a, b, t, chops, freeze)`: A/B blend of two finished patterns (matched hits interpolate, unmatched hits fade by probability; `freeze` resolves the draws)
 
 Public headers:
 
 - `include/chopfractal/pattern_engine/pattern.hpp`
 - `include/chopfractal/pattern_engine/session.hpp`
 - `include/chopfractal/pattern_engine/fx_pass.hpp`
+- `include/chopfractal/pattern_engine/morph.hpp`
 
 ## Contract
 

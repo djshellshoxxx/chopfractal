@@ -9,7 +9,8 @@
   "public_headers": [
     "include/chopfractal/pattern_engine/pattern.hpp",
     "include/chopfractal/pattern_engine/session.hpp",
-    "include/chopfractal/pattern_engine/fx_pass.hpp"
+    "include/chopfractal/pattern_engine/fx_pass.hpp",
+    "include/chopfractal/pattern_engine/morph.hpp"
   ],
   "dependencies": [
     {
@@ -40,7 +41,8 @@
     "`serialize()` / `deserialize()` (schema 1, engine version 1)",
     "`PatternSession`: undo/redo and two A/B snapshot slots",
     "`setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)",
-    "`mapRegions(pattern, fn)`: applies a range mapping to every sub-region, recursively through zoom trees (used when a source is time-stretched)"
+    "`mapRegions(pattern, fn)`: applies a range mapping to every sub-region, recursively through zoom trees (used when a source is time-stretched)",
+    "`morph(a, b, t, chops, freeze)`: A/B blend of two finished patterns (matched hits interpolate, unmatched hits fade by probability; `freeze` resolves the draws)"
   ],
   "limits": [
     "Pattern length 1, 2, 4 or 8 bars; grids 1/1 to 1/32, straight or triplet",
