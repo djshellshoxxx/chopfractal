@@ -1,0 +1,37 @@
+{
+  "id": "level_match",
+  "name": "Level match",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::level_match",
+  "public_headers": [
+    "include/chopfractal/level_match/level_match.hpp"
+  ],
+  "dependencies": [],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions with no shared state: call from any non-real-time thread (the plugin runs them on a worker). They allocate, so never call them from an audio callback.",
+  "platforms": "Any C++17 compiler. No dependencies at all.",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/level_match -B build/level_match && cmake --build build/level_match && ctest --test-dir build/level_match",
+  "summary": "ITU-R BS.1770-4 integrated loudness (K-weighting, 400 ms blocks with 75 % overlap, absolute and relative gates) and the Level Match gain: the clamped, 0.1 dB rounded gain that brings a generated pattern to the loudness of the loop it came from, with a headroom rule so the match alone can never clip.",
+  "public_api": [
+    "`measure(planar, channels, frames, sampleRate) -> Loudness{lufs, samplePeak, valid}`",
+    "`computeMatch(source, pattern, trimDb, limiterOn, ceilingDb) -> MatchResult{gainDb, requestedDb, valid, clamped, headroomLimited}`",
+    "`kWeightShelf(sampleRate)` and `kWeightHighPass(sampleRate)` biquad coefficients (double)"
+  ],
+  "limits": [
+    "Mono or stereo, 8 kHz and up; at least 100 ms of audio; gain clamped to +/-12 dB and rounded to 0.1 dB; mono is measured as if duplicated to both channels"
+  ],
+  "adapters": [
+    "Render the pattern offline with the loop's own sample rate, measure both, then feed the two `Loudness` values to `computeMatch`."
+  ],
+  "adapter_notes": "The module does no rendering and holds no state; caching and scheduling are the caller's job.",
+  "removal": "Delete the folder; callers lose Level match only.",
+  "example": "examples/minimal.cpp"
+}
