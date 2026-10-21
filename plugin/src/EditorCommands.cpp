@@ -114,6 +114,7 @@ void EditorCommands::generate() {
   const double v = params.get(cf::host::kVariationAmount);
   base.variation = {v, v, v, v};
   cf::pattern::Settings s = cf::composition::settingsFromParams(params, base);
+  s.brk.tempoHint = std::min(999.0, std::max(20.0, proc_.activeBpm.load()));  // turns the engine's millisecond timing into ticks
   s.maxShiftTicks = std::min<cf::Ticks>(20, cf::gridTicks(s.grid) / 8);
   run([=](cf::composition::ProjectSession& session) { return session.generate(s); });
 }
@@ -121,6 +122,7 @@ void EditorCommands::generate() {
 void EditorCommands::mutate() {
   const cf::host::ParamValues params = proc_.currentParams();
   const std::uint64_t seed = model_.seed() + 1;
+  const double tempo = std::min(999.0, std::max(20.0, proc_.activeBpm.load()));
   bool hasPattern = false;
   proc_.withSession([&](cf::composition::ProjectSession& s) { hasPattern = s.pattern() != nullptr; });
   if (hasPattern) model_.setSeed(seed);  // a refused Mutate does not consume a seed
@@ -141,6 +143,8 @@ void EditorCommands::mutate() {
     cf::pattern::MutateOptions opt;
     opt.seed = seed;
     opt.amount = cf::composition::mutateAmountFromParams(params);
+    cf::composition::applyBreakParams(params, live, false);  // profile, anchors, groove, fill; the engine version stays the pattern's own
+    live.brk.tempoHint = tempo;
     live = cf::composition::applyChaos(live, params.get(cf::host::kChaos));
     return session.mutate(opt, &live);
   });

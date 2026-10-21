@@ -36,6 +36,19 @@ enum ParamIndex : std::size_t {
   kAllowCrunch,
   kFxIntensity,
   kChaos,         // manifest version 3
+  kEngineVersion, // engine v2 (docs/specs/break-engine-v2.md): 0 Legacy, 1 Break; missing in an old project = Legacy
+  kBreakProfile,
+  kBreakBackbeat,
+  kBreakAnchors,
+  kBreakGroove,
+  kBreakHumanize,
+  kBreakFill,
+  kBreakGlitch,
+  kGrooveEnable,  // F17 Groove Lab
+  kGrooveTemplate,
+  kGrooveSwing,
+  kGrooveHumTime,
+  kGrooveHumVel,
   kLevelMatch,    // F16
   kMatchTrimDb,
   kLimiterEnable,

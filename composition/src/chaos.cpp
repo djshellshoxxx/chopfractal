@@ -33,6 +33,13 @@ pattern::Settings applyChaos(const pattern::Settings& base, double chaos) {
   s.pitchRange = std::min(24, std::max(base.pitchRange, static_cast<int>(std::lround(12.0 * c))));
   s.maxRetrigger = std::min(limits::kMaxRetrigger, std::max(base.maxRetrigger, 2 + static_cast<int>(std::lround(6.0 * c))));
   s.maxShiftTicks = std::max(base.maxShiftTicks, static_cast<Ticks>(std::floor(static_cast<double>(gridTicks(base.grid) / 8) * c)));
+  if (base.engineVersion >= pattern::kEngineVersionBreak) {
+    // Engine v2: chaos raises glitch gestures (stutters need the retrigger allowance earlier) and, in the soft
+    // profiles only, loosens the anchors; a strict profile keeps its backbeat at any chaos.
+    s.brk.chaos = std::max(base.brk.chaos, c);
+    if (c >= 0.45) s.allowRetrigger = true;
+    s.brk.fill = lerpToward(base.brk.fill, 1.0, 0.5 * c);
+  }
   return s;
 }
 

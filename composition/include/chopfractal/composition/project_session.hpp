@@ -28,6 +28,7 @@
 #include <chopfractal/chop_insight/insight.hpp>
 #include <chopfractal/evolve/evolve.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
+#include <chopfractal/groove/groove.hpp>
 #include <chopfractal/wav_export/wav.hpp>
 #include <atomic>
 #include <functional>
@@ -154,6 +155,7 @@ struct StateSection {
 // the warning "Some <feature> settings could not be restored.".
 using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
+constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
 constexpr std::size_t kMaxExtrasBlocks = 32;
@@ -169,6 +171,8 @@ using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(c
 class ProjectSession {
  public:
   ProjectSession();
+  ProjectSession(const ProjectSession&) = delete;  // the Groove section decoder captures `this`
+  ProjectSession& operator=(const ProjectSession&) = delete;
 
   // ---- audio side ----
   // Where validated playback snapshots are published. Not owned; must outlive the session or be detached.
@@ -201,6 +205,9 @@ class ProjectSession {
   bool sourceMissing() const { return chopMap_.has_value() && !sourceData_; }
   const source::ChopMap* chopMap() const { return chopMap_ ? &*chopMap_ : nullptr; }
   ChopSnapshotPtr chops() const { return chops_; }
+  // The chops with their engine v2 roles and level-match trims (explicit roles first, then audio analysis); cached.
+  // Generation and Mutate of a v2 pattern read this view; describeEvent() needs it too. Null before a source is loaded.
+  ChopSnapshotPtr annotatedChops() const;
 
   Result<std::vector<source::Marker>> previewChops(const DetectOptions& options) const;  // never applies
   Status applyChops(const DetectOptions& options);
@@ -252,6 +259,18 @@ class ProjectSession {
   Status setFavorite(history::NodeId node, bool favorite);
   Status deleteBranch(history::NodeId node, bool includeFavorites = false);
   Result<std::string> compareNodes(history::NodeId a, history::NodeId b) const;
+
+  // ---- Groove Lab (F17; composition/src/groove.cpp) ----
+  // Playback-time swing, push/pull, humanize and accents. Never changes the pattern; rebuilds the playback snapshot.
+  // The groove is project state (section tag 14, absent while it equals the default) and has its own undo stack.
+  const groove::Groove& groove() const { return groove_; }
+  Status setGroove(const groove::Groove& g);
+  bool canUndoGroove() const { return grooveHistory_.canUndo(); }
+  bool canRedoGroove() const { return grooveHistory_.canRedo(); }
+  bool undoGroove();
+  bool redoGroove();
+  // The events MIDI export and drag-out write: the playback's events, or without the groove when bakeIntoMidi is off.
+  Result<FlatEventList> midiEvents() const;
 
   // ---- Fractal Rhythm ----
   // Replaces the chosen bars (empty = every unlocked bar) with a fractal groove; locked bars are refused when
@@ -355,12 +374,24 @@ class ProjectSession {
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;
   std::vector<Notice> notices_;
+  mutable ChopSnapshotPtr annotated_;
+  mutable std::uint64_t annotatedKey_ = 0;
+  groove::Groove groove_;
+  SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
+  Status decodeGroove(const StateSection& s);
+  Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p, bool withGroove) const;
 };
 
 // ---- host parameter binding ----
 // Automatable parameters map onto generation settings; the pattern keeps its own copy, so changing a
 // parameter never rewrites an existing pattern until the user presses Generate or Mutate.
 pattern::Settings settingsFromParams(const host::ParamValues& values, pattern::Settings base);
+// Engine v2 controls (profile, backbeat, anchors, groove / humanize / fill / glitch amounts) from the parameters.
+// `setEngineVersion` also copies the engine choice: true when generating, false for Mutate, which keeps the version
+// the pattern was made with (composition/src/engine_params.cpp).
+void applyBreakParams(const host::ParamValues& values, pattern::Settings& settings, bool setEngineVersion);
+// The Groove Lab state the five groove parameters describe, on top of the stored groove (grid, push/pull, accents, seed).
+groove::Groove grooveFromParams(const host::ParamValues& values, const groove::Groove& base);
 // Chaos macro (docs/specs/pass3/_BRIEF.md P1): returns `base` unchanged for chaos <= 0 (or non-finite);
 // otherwise raises variation, density, transform/effect allowances and magnitudes. Monotone in `chaos`,
 // output always satisfies pattern::validateSettings when `base` does. settingsFromParams applies it.

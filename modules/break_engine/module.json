@@ -1,0 +1,49 @@
+{
+  "id": "break_engine",
+  "name": "Break engine",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::break_engine",
+  "public_headers": [
+    "include/chopfractal/break_engine/break_engine.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "DrumRole, Ticks, EventTransform / EventFx, RNG"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [
+    "Rule tables derive from measurements of the Groove MIDI Dataset v1.0.0 (Magenta, Creative Commons Attribution 4.0); keep the attribution in THIRD_PARTY_NOTICES.md when copying the module."
+  ],
+  "third_party": [
+    "Groove MIDI Dataset (Gillick et al., 2019), CC BY 4.0: derived statistics only, no data files are shipped"
+  ],
+  "threading": "Pure functions; thread-safe; not real-time safe (allocates the plan).",
+  "platforms": "Any C++17 compiler. Bit-identical output across platforms (integer and exact-double arithmetic only).",
+  "deterministic": true,
+  "real_time_safe": false,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/break_engine -B build/break_engine && cmake --build build/break_engine && ctest --test-dir build/break_engine",
+  "summary": "Break-aware rhythm model (engine v2): role-driven 16-step bar plans for drum breaks with backbeat anchors, per-step per-role probability and velocity tables, ghost notes, kick/snare collision rules, 4-bar phrase modifiers, bar-4 fills, fill and glitch gesture tables, six genre profiles, and seeded role-aware swing and microtiming. It plans which role plays where; mapping onto chops and events is done by pattern_engine.",
+  "public_api": [
+    "`planPattern(PlanSettings)` / `planBar(PlanSettings, bar)` -> `BarPlan{hits[]}` with role, step, tick, velocity, gesture tag and anchor flag",
+    "`Options` (profile, backbeat variant, anchor mode, groove, humanize, fill, glitch, chaos, phrase strictness, tempo hint) and `valid(Options)`",
+    "`cellProbability`, `anchorProbability`, `fillProbability`, `effectiveSwing`, `profileInfo` for tests and reports",
+    "`canAdd(settings, cells, cell, anchor)`: the collision and density rules, reused by mutate"
+  ],
+  "limits": [
+    "16 steps per bar (4/4 on a 16th grid); other meters stay on the legacy engine",
+    "Rolls and stutters are separate hits (no retrigger expansion); at most two glitch gestures and one fill per bar"
+  ],
+  "adapters": [
+    "Map each Hit's role onto a chop of that role (pattern_engine does this) and its velocity onto event level."
+  ],
+  "adapter_notes": "The caller supplies which roles exist (`Avail`) so the plan never asks for a hat the source does not have.",
+  "removal": "Remove pattern_engine's engine v2 path first (generate_v2.cpp); the legacy engine does not use this module.",
+  "example": "examples/minimal.cpp"
+}

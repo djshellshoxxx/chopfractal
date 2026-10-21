@@ -1,4 +1,5 @@
 #include <chopfractal/chop_contracts/bytes.hpp>
+#include <chopfractal/composition/engine_roles.hpp>
 #include <chopfractal/composition/project_session.hpp>
 
 #include "state_wire.hpp"
@@ -139,6 +140,7 @@ ProjectSession::ProjectSession() : history_(history::Config{}) {
   // The only registered step so far: a v1 payload is a valid v2 payload with no extras section. Policy for every
   // future bump: raise the module's schema constant, register one step per version, add a fixture test.
   migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
+  registerSectionDecoder(kTagGroove, "Groove", [this](const StateSection& sec) { return decodeGroove(sec); });
 }
 
 void ProjectSession::notice(Notice::Level level, std::string text) { notices_.push_back({level, std::move(text)}); }
@@ -161,6 +163,9 @@ void ProjectSession::noteReport(const pattern::GenerationReport& report) {
       case pattern::Note::Kind::LockedSkipped: ++locked; break;
       case pattern::Note::Kind::LimitReached: limited = true; break;
       case pattern::Note::Kind::NoCandidate: break;
+      case pattern::Note::Kind::EngineFallback:
+        notice(Notice::Level::Info, "The break engine needs 4/4 on a 1/8 or finer straight grid, so this pattern used the classic engine.");
+        break;
     }
   }
   if (locked) notice(Notice::Level::Info, std::to_string(locked) + " locked or edited section(s) were kept.");
@@ -190,10 +195,11 @@ std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
 
 Status ProjectSession::installPlayback(const pattern::Pattern& p) {
   if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
-  auto flat = pattern::flatten(p, *chops_);
-  if (!flat.ok()) return flat.error();
-  if (!sourceData_) return {};  // source missing: pattern authoring continues without audio
-  auto pb = render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p), playbackOptions_);
+  if (!sourceData_) {  // source missing: pattern authoring continues without audio
+    auto flat = pattern::flatten(p, *chops_);
+    return flat.ok() ? Status{} : flat.error();
+  }
+  auto pb = buildPlayback(p, true);
   if (!pb.ok()) return pb.error();
   publish(pb.value());
   return {};
@@ -393,7 +399,8 @@ Status ProjectSession::generate(const pattern::Settings& settings, const std::st
   if (!chopMap_) return makeError(ErrorCode::InvalidArgument, "load a source first");
   auto policy = makePolicy();
   pattern::GenerationReport report;
-  auto r = pattern::generate(*chops_, settings, policy.get(), &report);
+  const ChopSnapshotPtr view = settings.engineVersion >= pattern::kEngineVersionBreak ? annotatedChops() : chops_;  // v2 reads roles and trims
+  auto r = pattern::generate(*view, settings, policy.get(), &report);
   return finalize(std::move(r), (label.empty() ? std::string("Generate") : label).c_str(), &report);
 }
 
@@ -419,12 +426,14 @@ Status ProjectSession::mutate(const pattern::MutateOptions& options, const patte
     cur.maxRetrigger = live->maxRetrigger;
     cur.maxShiftTicks = live->maxShiftTicks;
     cur.maxEvents = live->maxEvents;
+    cur.brk = live->brk;  // profile, backbeat, anchors and amounts follow the controls; the engine version stays the pattern's own
     Status vs = pattern::validateSettings(cur);
     if (!vs.ok()) return vs;
   }
   auto policy = makePolicy();
   pattern::GenerationReport report;
-  auto r = pattern::mutate(base, *chops_, options, policy.get(), &report);
+  const ChopSnapshotPtr view = base.engineVersion >= pattern::kEngineVersionBreak ? annotatedChops() : chops_;
+  auto r = pattern::mutate(base, *view, options, policy.get(), &report);
   return finalize(std::move(r), (label.empty() ? std::string("Mutate") : label).c_str(), &report);
 }
 
@@ -535,6 +544,17 @@ Result<zoom::Context> ProjectSession::zoomContext(const pattern::Pattern& p, con
   return ctx;
 }
 
+// Engine v2: the first child of an anchor hit (downbeat kick, backbeat snare) keeps the parent's transient.
+static std::shared_ptr<const NestedPattern> anchoredChild(const ProjectSession& session, const pattern::Pattern& p, EventId id, bool topLevel, const Event& parent,
+                                                          std::shared_ptr<const NestedPattern> child, std::uint64_t seed, std::size_t budget) {
+  if (!topLevel || p.engineVersion < pattern::kEngineVersionBreak) return child;
+  const ChopSnapshotPtr view = session.annotatedChops();
+  if (!view) return child;
+  const auto role = pattern::describeEvent(p, id, *view);
+  if (!role || !role->anchor) return child;
+  return keepTransientFirst(child, parent, seed, budget);
+}
+
 Status ProjectSession::zoomIn(EventId id, const zoom::Settings& zs, std::uint64_t seed) {
   if (!patterns_.hasPattern()) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
   const pattern::Pattern& p = patterns_.current();
@@ -548,7 +568,7 @@ Status ProjectSession::zoomIn(EventId id, const zoom::Settings& zs, std::uint64_
   parent.child.reset();
   auto child = zoom::createChildPattern(parent, ctx.value(), zs, seed);
   if (!child.ok()) return child.error();
-  return finalize(withChild(p, t, child.value()), "Zoom");
+  return finalize(withChild(p, t, anchoredChild(*this, p, t.event->id, t.top == t.event, parent, child.value(), seed, ctx.value().eventBudget)), "Zoom");
 }
 
 Status ProjectSession::mutateChildren(EventId id, const zoom::Settings& zs, std::uint64_t seed) {
@@ -563,7 +583,9 @@ Status ProjectSession::mutateChildren(EventId id, const zoom::Settings& zs, std:
   if (!ctx.ok()) return ctx.error();
   auto child = zoom::mutateChildren(*t.event, ctx.value(), zs, seed);
   if (!child.ok()) return child.error();
-  return finalize(withChild(p, t, child.value()), "Mutate children");
+  Event parent = *t.event;
+  parent.child.reset();
+  return finalize(withChild(p, t, anchoredChild(*this, p, t.event->id, t.top == t.event, parent, child.value(), seed, ctx.value().eventBudget)), "Mutate children");
 }
 
 Status ProjectSession::collapse(EventId id) {
@@ -907,6 +929,8 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   history_ = std::move(newHistory);
   pendingActivation_ = history::kNoNode;
   patterns_.reset();
+  groove_ = groove::Groove{};  // a project without the Groove section plays straight; the decoder below restores a saved one
+  grooveHistory_.reset(groove_);
   if (newPattern) patterns_.restore(std::move(*newPattern));
   patterns_.restoreSlots(std::move(newSlots));  // after restore(), which clears the slots
   extras_ = std::move(newExtras);
@@ -937,6 +961,8 @@ void ProjectSession::reset() {
   rules_ = roles::RuleSet{};
   extras_ = ProjectExtras{};
   sections_.clear();
+  groove_ = groove::Groove{};
+  grooveHistory_.reset(groove_);
   notices_.clear();
 }
 
@@ -973,6 +999,7 @@ pattern::Settings settingsFromParams(const host::ParamValues& v, pattern::Settin
   base.allowGlide = v.get(host::kAllowGlide) >= 0.5;
   base.allowCrunch = v.get(host::kAllowCrunch) >= 0.5;
   base.fxIntensity = v.get(host::kFxIntensity);
+  applyBreakParams(v, base, true);
   return applyChaos(base, v.get(host::kChaos));
 }
 

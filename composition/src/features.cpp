@@ -1,4 +1,5 @@
 // Fractal Rhythm, Evolve, Smart Setup and export: the composition-level glue for the feature modules.
+#include <chopfractal/composition/engine_roles.hpp>
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <chopfractal/midi_export/midi.hpp>
@@ -61,7 +62,9 @@ Status ProjectSession::applyFractal(const fractal::Settings& fs, const std::vect
     ctx.bar = b;
     auto events = fractal::generateBar(ctx, fs);
     if (!events.ok()) return events.error();
-    auto q = pattern::setBarEvents(next, b, std::move(events.value()), *chops_);
+    std::vector<Event> bar = std::move(events.value());
+    if (p.engineVersion >= pattern::kEngineVersionBreak) bar = overlayAnchors(std::move(bar), *annotatedChops(), ctx.barTicks, fs.seed, b);  // the backbeat survives the motif
+    auto q = pattern::setBarEvents(next, b, std::move(bar), *chops_);
     if (!q.ok()) return q.error();
     next = std::move(q.value());
   }
@@ -96,7 +99,8 @@ Result<bool> ProjectSession::evolveStep(double chaos) {
   pattern::Pattern base = patterns_.current();
   const pattern::Settings stored = base.settings;
   if (chaos > 0.0) base.settings = applyChaos(stored, chaos);
-  auto r = pattern::mutate(base, *chops_, mo, policy.get(), &report);
+  const ChopSnapshotPtr view = base.engineVersion >= pattern::kEngineVersionBreak ? annotatedChops() : chops_;
+  auto r = pattern::mutate(base, *view, mo, policy.get(), &report);
   if (r.ok()) {
     pattern::Pattern next = std::move(r.value());
     const std::uint64_t stepSeed = next.settings.seed;  // the mutation's own seed stays on the result
@@ -192,8 +196,10 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderMidi(const KitOptions& o
   spec.numerator = patterns_.current().settings.timeSignature.numerator;
   spec.denominator = patterns_.current().settings.timeSignature.denominator;
   spec.trackName = o.name.substr(0, 60);
+  auto midiEv = midiEvents();  // honours the groove's bake flag
+  if (!midiEv.ok()) return midiEv.error();
   for (int loop = 0; loop < o.loops; ++loop)
-    for (const FlatEvent& e : playback_->events) {
+    for (const FlatEvent& e : midiEv.value()) {
       std::size_t idx = n;
       for (std::size_t i = 0; i < n; ++i)
         if (chops_->chops[i].id == e.chop) idx = i;

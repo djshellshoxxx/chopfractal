@@ -3,6 +3,7 @@
 // Everything here is a pure function over immutable value types: Pattern in, Pattern out. No audio
 // buffers, file paths, host playhead, or UI types. Threading: call from UI/worker threads only; the
 // flattened event list is what the audio side consumes.
+#include <chopfractal/break_engine/break_engine.hpp>
 #include <chopfractal/chop_contracts/chop.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/ids.hpp>
@@ -21,7 +22,12 @@ namespace chopfractal::pattern {
 
 // Bump kEngineVersion whenever generation output for the same inputs would change. Saved patterns carry
 // the engine version, so an algorithm change never silently rewrites an old pattern.
-constexpr std::uint32_t kEngineVersion = 1;
+//   1 = legacy engine (source-order slots, generic metric weights). Unchanged; its golden hashes are pinned.
+//   2 = break-aware engine (role-driven, backbeat anchors, velocity hierarchy, phrase and fill model).
+// A pattern saved without a v2 block loads as version 1 and keeps using the legacy path for Mutate.
+constexpr std::uint32_t kEngineVersionLegacy = 1;
+constexpr std::uint32_t kEngineVersionBreak = 2;
+constexpr std::uint32_t kEngineVersion = kEngineVersionBreak;  // newest version this build can read
 constexpr std::uint32_t kSchemaVersion = 1;
 
 struct Variation {
@@ -32,6 +38,10 @@ struct Variation {
 };
 
 struct Settings {
+  // Which generation engine produces (and later mutates) this pattern. The library default stays 1 so existing
+  // callers and pinned hashes are untouched; the host layer (settingsFromParams) defaults new projects to 2.
+  std::uint32_t engineVersion = kEngineVersionLegacy;
+  breakeng::Options brk;  // used only when engineVersion >= 2
   int bars = 4;  // 1, 2, 4 or 8
   TimeSignature timeSignature;
   Grid grid{16, false};
@@ -68,7 +78,7 @@ struct Bar {
 };
 
 struct Pattern {
-  std::uint32_t engineVersion = kEngineVersion;
+  std::uint32_t engineVersion = kEngineVersionLegacy;
   Settings settings;
   ScopeId phraseId;
   bool phraseLocked = false;
@@ -77,7 +87,7 @@ struct Pattern {
 };
 
 struct Note {
-  enum class Kind : std::uint8_t { BlockedByRule, LockedSkipped, LimitReached, NoCandidate };
+  enum class Kind : std::uint8_t { BlockedByRule, LockedSkipped, LimitReached, NoCandidate, EngineFallback };
   Kind kind = Kind::NoCandidate;
   std::uint32_t rule = 0;
   int bar = 0;
@@ -100,6 +110,22 @@ std::size_t eventCount(const Pattern& p);  // all events including zoomed childr
 
 Result<Pattern> generate(const ChopSnapshot& chops, const Settings& settings, const ICandidatePolicy* policy = nullptr,
                          GenerationReport* report = nullptr);
+// True when engine v2 can generate for these settings (4/4 on a straight grid of 1/8 or finer). Otherwise
+// generate() falls back to the legacy engine and reports Note::Kind::EngineFallback.
+bool supportsBreakEngine(const Settings& s);
+// Roles the chops can play; what the planner needs to know before it plans.
+breakeng::Avail availableRoles(const ChopSnapshot& chops);
+// Role, nearest 16th step and anchor status of a top-level event of a v2 pattern (nullopt for legacy patterns,
+// unknown ids and zoomed children). Anchors are the downbeat kick and the backbeat snare (including a displaced one).
+struct EventRole {
+  DrumRole role = DrumRole::Unknown;
+  int step = 0;
+  bool anchor = false;
+};
+std::optional<EventRole> describeEvent(const Pattern& p, EventId id, const ChopSnapshot& chops);
+// The planner settings a pattern's Settings imply (used by tests, the audition tool and mutate).
+breakeng::PlanSettings planSettingsOf(const Settings& s, const ChopSnapshot& chops);
+
 Result<Pattern> mutate(const Pattern& pattern, const ChopSnapshot& chops, const MutateOptions& options,
                        const ICandidatePolicy* policy = nullptr, GenerationReport* report = nullptr);
 

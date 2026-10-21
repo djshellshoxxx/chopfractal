@@ -32,33 +32,33 @@ CHOP_TEST(section_roundtrip_and_absent_when_empty) {
   CHECK(statefix::fixtureSession(a));
   const auto plain = a.saveState(false).value();
   CHECK(plain == std::vector<std::uint8_t>(std::begin(v1fixture::kV1FixtureBytes), std::end(v1fixture::kV1FixtureBytes)));
-  CHECK(a.section(14) == nullptr);
-  StateSection groove = makeSection(14, 10, 0x21, 3);
+  CHECK(a.section(25) == nullptr);
+  StateSection groove = makeSection(25, 10, 0x21, 3);
   groove.bytes = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   CHECK(a.setSection(groove).ok());
-  CHECK(a.section(14) != nullptr && a.section(14)->bytes == groove.bytes && a.section(14)->schema == 3);
+  CHECK(a.section(25) != nullptr && a.section(25)->bytes == groove.bytes && a.section(25)->schema == 3);
   CHECK(a.stateUsesSchemaV2());
   const auto saved = a.saveState(false).value();
   CHECK(saved != plain);
 
   ProjectSession b;
   CHECK(b.loadState(saved.data(), saved.size(), {}).ok());
-  CHECK(b.section(14) != nullptr);
-  CHECK(b.section(14) && b.section(14)->bytes == groove.bytes && b.section(14)->schema == 3 && b.section(14)->tag == 14);
+  CHECK(b.section(25) != nullptr);
+  CHECK(b.section(25) && b.section(25)->bytes == groove.bytes && b.section(25)->schema == 3 && b.section(25)->tag == 25);
   CHECK(b.saveState(false).value() == saved);
 
   // Setting empty bytes removes the section and the next save equals the pre-section save.
   StateSection empty;
-  empty.tag = 14;
+  empty.tag = 25;
   CHECK(b.setSection(empty).ok());
-  CHECK(b.section(14) == nullptr);
+  CHECK(b.section(25) == nullptr);
   CHECK(!b.stateUsesSchemaV2());
   CHECK(b.saveState(false).value() == plain);
   // A new project replaces the sections of the old one.
   ProjectSession c;
   CHECK(c.setSection(groove).ok());
   CHECK(c.loadState(plain.data(), plain.size(), {}).ok());
-  CHECK(c.section(14) == nullptr);
+  CHECK(c.section(25) == nullptr);
 }
 
 CHOP_TEST(unknown_tag_12_is_preserved_by_a_build_that_does_not_know_it) {
@@ -91,10 +91,10 @@ CHOP_TEST(per_tag_cap_rejects_oversize_and_tags_below_9_are_refused) {
   CHECK_EQ(sectionByteCap(11), 32u * 1024u * 1024u);
   CHECK_EQ(sectionByteCap(15), 64u);
   CHECK_EQ(sectionByteCap(16), 1024u * 1024u);
-  CHECK(s.setSection(makeSection(14, 64 * 1024)).ok());
-  Status over = s.setSection(makeSection(14, 64 * 1024 + 1));
+  CHECK(s.setSection(makeSection(25, 64 * 1024)).ok());
+  Status over = s.setSection(makeSection(25, 64 * 1024 + 1));
   CHECK(!over.ok() && over.error().code == ErrorCode::OutOfRange);
-  CHECK(s.section(14) != nullptr && s.section(14)->bytes.size() == 64u * 1024u);  // a refused set changes nothing
+  CHECK(s.section(25) != nullptr && s.section(25)->bytes.size() == 64u * 1024u);  // a refused set changes nothing
   CHECK(!s.setSection(makeSection(15, 65)).ok());
   CHECK(s.setSection(makeSection(15, 64)).ok());
   CHECK(s.setSection(makeSection(16, 1024 * 1024)).ok());
@@ -128,14 +128,14 @@ CHOP_TEST(per_tag_cap_rejects_oversize_and_tags_below_9_are_refused) {
 CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
   ProjectSession a;
   CHECK(statefix::fixtureSession(a));
-  CHECK(a.setSection(makeSection(14, 4, 0x01)).ok());
+  CHECK(a.setSection(makeSection(25, 4, 0x01)).ok());
   CHECK(a.setSection(makeSection(10, 4, 0x02)).ok());
   CHECK(a.setSection(makeSection(20, 4, 0x03)).ok());
   const auto saved = a.saveState(false).value();
 
   ProjectSession b;
   int groove = 0, pads = 0;
-  b.registerSectionDecoder(14, "groove", [&](const StateSection& s) -> Status {
+  b.registerSectionDecoder(25, "groove", [&](const StateSection& s) -> Status {
     ++groove;
     return makeError(ErrorCode::Corrupt, "nope" + std::to_string(s.bytes.size()));
   });
@@ -146,7 +146,7 @@ CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
   CHECK(b.loadState(saved.data(), saved.size(), {}).ok());
   CHECK_EQ(groove, 1);
   CHECK_EQ(pads, 1);
-  CHECK(b.section(14) == nullptr);
+  CHECK(b.section(25) == nullptr);
   CHECK(b.section(10) != nullptr && b.section(20) != nullptr);
   CHECK(b.pattern() != nullptr);
   CHECK_EQ(countWarnings(b, "Some groove settings could not be restored."), 1);
@@ -154,18 +154,18 @@ CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
   auto again = b.saveState(false).value();
   ProjectSession c;
   CHECK(c.loadState(again.data(), again.size(), {}).ok());
-  CHECK(c.section(14) == nullptr && c.section(10) != nullptr);
+  CHECK(c.section(25) == nullptr && c.section(10) != nullptr);
   // Decoders do not run for a project without the section, and unregistering stops them.
   ProjectSession d;
   int calls = 0;
-  d.registerSectionDecoder(14, "groove", [&](const StateSection&) -> Status { ++calls; return {}; });
+  d.registerSectionDecoder(25, "groove", [&](const StateSection&) -> Status { ++calls; return {}; });
   const auto plain = std::vector<std::uint8_t>(std::begin(v1fixture::kV1FixtureBytes), std::end(v1fixture::kV1FixtureBytes));
   CHECK(d.loadState(plain.data(), plain.size(), {}).ok());
   CHECK_EQ(calls, 0);
-  d.registerSectionDecoder(14, "groove", nullptr);
+  d.registerSectionDecoder(25, "groove", nullptr);
   CHECK(d.loadState(saved.data(), saved.size(), {}).ok());
   CHECK_EQ(calls, 0);
-  CHECK(d.section(14) != nullptr);
+  CHECK(d.section(25) != nullptr);
 }
 
 CHOP_TEST(extras_total_over_40_mib_is_rejected) {
@@ -193,14 +193,14 @@ CHOP_TEST(extras_total_over_40_mib_is_rejected) {
 CHOP_TEST(section_blocks_survive_truncation_and_byte_flip_sweeps) {
   ProjectSession a;
   CHECK(statefix::fixtureSession(a));
-  CHECK(a.setSection(makeSection(14, 24, 0x41)).ok());
+  CHECK(a.setSection(makeSection(25, 24, 0x41)).ok());
   CHECK(a.setSection(makeSection(17, 12, 0x42)).ok());
   const auto saved = a.saveState(false).value();
   const auto payload = statefix::compositionPayload(saved);
   auto run = [&](const std::vector<std::uint8_t>& p) {
     const auto state = statefix::patchComposition(saved, [&](std::vector<std::uint8_t>& q) { q = p; });
     ProjectSession s;
-    s.registerSectionDecoder(14, "groove", [](const StateSection& sec) -> Status {
+    s.registerSectionDecoder(25, "groove", [](const StateSection& sec) -> Status {
       return sec.bytes.size() == 24 ? Status{} : Status{makeError(ErrorCode::Corrupt, "size")};
     });
     CHECK(s.loadState(state.data(), state.size(), {}).ok());

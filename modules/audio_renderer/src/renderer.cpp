@@ -58,6 +58,9 @@ struct Voice {
   float heldL = 0.f, heldR = 0.f;
   // Quality stage and gesture effects (all inert by default).
   bool cosFade = false;        // raised-cosine fades instead of linear ramps
+  // Engine v2 hints from the event (0 / false = the legacy behaviour, bit for bit).
+  std::uint8_t chokeGroup = 0;
+  bool smoothFades = false;    // smoothstep ramps instead of linear
   SliceClass cls = SliceClass::Other;
   bool repeat = false;
   bool secondary = false;
@@ -77,6 +80,16 @@ struct Trigger {
   int frame;
   const FlatEvent* event;
 };
+
+float smoothstep01(float x) { return x * x * (3.f - 2.f * x); }  // x in [0, 1]
+
+// Which sounding groups a new hit of group `incoming` cuts: a kick or snare cuts its own previous hit, a closed hat
+// cuts earlier closed hats and open hats, an open hat cuts earlier open hats (groups: 1 kick, 2 snare, 3 closed hat, 4 open hat).
+bool chokes(std::uint8_t incoming, std::uint8_t sounding) {
+  if (incoming == 0 || sounding == 0) return false;
+  if (incoming == 3) return sounding == 3 || sounding == 4;
+  return incoming == sounding;
+}
 
 bool finiteIn(float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; }
 
@@ -356,13 +369,20 @@ struct Renderer::Impl {
     if (e.region.empty() || e.region.start < 0 || e.region.end > src.frames) return;
     if (slice.fxBit && !(fxMask & slice.fxBit)) return;           // that effect is bypassed
     if (slice.replacedBy && (fxMask & slice.replacedBy)) return;  // its repeats play instead of this base event
-    if (polish) applyChoke(slice);
+    if (e.chokeGroup != 0) {  // the engine named the roles: those groups decide, not the inferred slice classes
+      for (Voice& old : voices)
+        if (old.active && !old.fading && chokes(e.chokeGroup, old.chokeGroup)) releaseVoice(old);  // short fade, no click
+    } else if (polish) {
+      applyChoke(slice);
+    }
     Voice* v = allocateVoice(slice.secondary);
     if (!v) return;
     SampleRange region = e.region;
     if (polish && slice.regionStart >= 0 && slice.regionStart < region.start) region.start = slice.regionStart;
     const std::int64_t gate = static_cast<std::int64_t>(std::llround(static_cast<double>(e.duration) / ticksPerFrame));
     startVoice(*v, src, region, e.tx, gate, e.fadeInFrames, e.fadeOutFrames, e.fx, &slice, ticksPerFrame, e.duration);
+    v->chokeGroup = e.chokeGroup;
+    v->smoothFades = e.smoothFades;
   }
 
   void drainPreview(const Playback* pb, bool allow) {
@@ -397,8 +417,11 @@ struct Renderer::Impl {
   }
 
   void renderVoice(Voice& v, int begin, int end) {
-    // Raised-cosine ramp for polished voices, the plain linear ramp (the v1 sound) otherwise.
-    auto shape = [&v](float x) { return v.cosFade ? 0.5f - 0.5f * std::cos(static_cast<float>(kPi) * x) : x; };
+    // Raised-cosine ramp for polished voices, smoothstep for engine v2 hints, the plain linear ramp (the v1 sound) otherwise.
+    auto shape = [&v](float x) {
+      if (v.cosFade) return 0.5f - 0.5f * std::cos(static_cast<float>(kPi) * x);
+      return v.smoothFades ? smoothstep01(x) : x;
+    };
     for (int i = begin; i < end; ++i) {
       if (!v.active) return;
       if (v.age >= v.gateFrames) {

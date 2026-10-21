@@ -16,6 +16,11 @@
       "id": "chop_contracts",
       "version": "^0.1",
       "reason": "event model, flatten(), chop snapshot, policy interface, RNG, byte codec, time, undo stack"
+    },
+    {
+      "id": "break_engine",
+      "version": "^0.1",
+      "reason": "engine v2: role-driven bar plans, break profiles and rule tables"
     }
   ],
   "license": "LicenseRef-ChopFractal-Proprietary",

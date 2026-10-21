@@ -236,6 +236,7 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
         Item it;
         it.e = e;
         it.e.echo.reset();
+        it.e.chokeGroup = 0;  // an echo repeat never cuts the next real hit
         it.e.start = start;
         it.e.tx.level = static_cast<float>(std::min(static_cast<double>(e.tx.level) * std::pow(decay, k), static_cast<double>(limits::kMaxLevel)));
         it.s.regionStart = an.start;

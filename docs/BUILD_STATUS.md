@@ -40,7 +40,7 @@ Eighteen portable C++17 modules (no JUCE, no host types), a headless composition
 | `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, slice-quality stage, Echo/Tremolo-Pan/Stutter/Roll, match gain and true-peak safety limiter, lock-free handoff, latency-compensated offline render; `fx_audition` tool writes one WAV per effect | 70 |
 | `level_match` | BS.1770-4 loudness measurement and match-gain computation | 9 |
 | `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
-| `plugin_host_adapter` | parameter manifest (version 3: 41 parameters; `chaos` then the F16, E01, E02, Stutter, Roll and slice-polish rows), host-time validation, bus rules | 8 |
+| `plugin_host_adapter` | parameter manifest (version 3: 54 parameters; `chaos`, then the engine v2 and Groove Lab rows, then the F16, E01, E02, Stutter, Roll and slice-polish rows), host-time validation, bus rules | 8 |
 | `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 9 |
 | `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 30 |
 | `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 28 |

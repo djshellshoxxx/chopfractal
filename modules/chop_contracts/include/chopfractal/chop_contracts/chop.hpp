@@ -18,12 +18,18 @@ struct SampleRange {
   friend constexpr bool operator!=(SampleRange a, SampleRange b) { return !(a == b); }
 };
 
+// Drum role of a chop as the break-aware engine (engine v2) and the groove layer see it. Unknown means
+// "nobody decided"; the composition root fills it from the user's role map and from Smart Setup analysis.
+enum class DrumRole : std::uint8_t { Unknown = 0, Kick, Snare, Ghost, Hat, OpenHat, Cymbal, Perc, Other };
+
 struct ChopInfo {
   ChopId id;
   SampleRange range;                  // already includes any user trim
   std::uint32_t group = 0;            // 0 = ungrouped; chops sharing a non-zero group are interchangeable
   std::uint32_t fadeInFrames = 0;     // 0 = renderer default
   std::uint32_t fadeOutFrames = 0;    // 0 = renderer default
+  DrumRole role = DrumRole::Unknown;  // engine v2 / groove only; legacy generation ignores it
+  float gainTrim = 1.f;               // engine v2 only: invisible per-chop level match, multiplied into generated levels
 };
 
 // Only enabled chops appear in a snapshot, ordered by start position.

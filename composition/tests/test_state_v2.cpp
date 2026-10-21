@@ -368,7 +368,7 @@ CHOP_TEST(extras_decoding_survives_truncation_and_byte_flip_sweeps) {
   CHECK(a.storeSnapshot(0).ok());
   CHECK(a.setExtras(e).ok());
   StateSection sec;
-  sec.tag = 14;
+  sec.tag = 25;
   sec.bytes = {1, 2, 3, 4, 5, 6};
   CHECK(a.setSection(sec).ok());
   const auto saved = a.saveState(false).value();
