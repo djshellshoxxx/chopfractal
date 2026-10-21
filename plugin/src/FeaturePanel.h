@@ -24,6 +24,7 @@ class FeaturePanel : public EditorPanelBase {
  private:
   void modelChanged(Change) override;
   void pushEvolve();
+  void updateExportButtons();
   void askSavePreset();
   FractalUi fractalUi() const;
   EvolveUi evolveUi() const;
@@ -37,8 +38,6 @@ class FeaturePanel : public EditorPanelBase {
   std::vector<PresetManager::Entry> presets_;
   DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
   DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
-  double fractalMutation_ = -1.0;  // < 0: derive from the Variation control; set by a preset
-  double fractalAccent_ = 0.85;
   juce::ToggleButton evolve_{"Evolve"};
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;

@@ -8,6 +8,7 @@
 #include <chopfractal/plugin_ui_adapter/orbit.hpp>
 #include <chopfractal/plugin_ui_adapter/views.hpp>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "PluginProcessor.h"
@@ -31,7 +32,9 @@ struct EditorView {
 
 class EditorModel {
  public:
-  enum class Change { View, Evolve, Selection, Seed, Status, Setup, Flags, Extras /* emitted from F01 on */ };
+  // Extras: the session's ProjectExtras differ from the last published copy (project load, restored state); panels re-sync
+  // their widgets with dontSendNotification. Flags also covers the export running state.
+  enum class Change { View, Evolve, Selection, Seed, Status, Setup, Flags, Extras };
   struct Listener {
     virtual ~Listener() = default;
     virtual void modelChanged(Change) = 0;
@@ -60,16 +63,22 @@ class EditorModel {
   void selectSectionsInWave(int startX, int endX, bool click, int canvasWidth);
   void selectSectionsInPattern(juce::Rectangle<int> band, juce::Point<int> end, bool click, juce::Rectangle<int> canvas);
 
-  // ---- transient UI state ----
-  std::uint64_t seed() const { return seed_; }  // default 1; the seed field shows at most 12 decimal digits
+  // ---- persisted UI state (ProjectExtras, saved with the project; F01) ----
+  // `extras()` is the cached copy of the session's extras. A panel changes it through setExtras(): the mutator edits a
+  // copy, the copy is validated and stored in the session (no undo step) and the host is told the state changed. A
+  // refused (invalid) edit leaves everything as it was.
+  const chopfractal::composition::ProjectExtras& extras() const { return extras_; }
+  bool setExtras(const std::function<void(chopfractal::composition::ProjectExtras&)>& mutate);
+
+  std::uint64_t seed() const { return extras_.seed; }  // default 1; the seed field shows at most 12 decimal digits
   void setSeed(std::uint64_t);
   const chopfractal::composition::SetupSuggestion& setup() const { return setup_; }
   bool haveSetup() const { return haveSetup_; }
   void setSetup(chopfractal::composition::SetupSuggestion);  // cleared again by the next rebuild
-  bool editMode() const { return editMode_; }                 // "Move / resize hits"
+  bool editMode() const { return extras_.ui.editHits; }       // "Move / resize hits"
   void setEditMode(bool on);
-  int detectMode() const { return detectMode_; }              // the Detect Chops mode combo's id, 1..4 (see DetectChoice)
-  void setDetectMode(int id) { detectMode_ = id; }
+  int detectMode() const { return extras_.detectMode + 1; }   // the Detect Chops mode combo's id, 1..4 (see DetectChoice)
+  void setDetectMode(int id) { setExtras([id](chopfractal::composition::ProjectExtras& e) { e.detectMode = id - 1; }); }
   bool sourceMissing() const { return sourceMissing_; }       // refreshed every tick
   // The session's Evolve state, refreshed every tick (it can change between rebuilds).
   bool evolveRunning() const { return evolveRunning_; }
@@ -88,6 +97,9 @@ class EditorModel {
   double activeBpm() const { return proc_.activeBpm.load(); }
   bool embedSource() const { return proc_.embedSource.load(); }
   void setEmbedSource(bool on) { proc_.embedSource = on; }
+  // Export on a worker thread (progress shown at the 10 Hz tick, Cancel Export in the status bar).
+  bool exportRunning() const { return proc_.exportStatus().state == ExportStatus::State::Running; }
+  float exportFraction() const { return proc_.exportStatus().fraction; }
 
  private:
   void announceSelection();  // status text plus the Selection change, after a rubber-band selection
@@ -105,15 +117,15 @@ class EditorModel {
   std::vector<chopfractal::EventId> selectedHits_;
   std::vector<chopfractal::ChopId> selectedChops_;
 
-  std::uint64_t seed_ = 1;
+  chopfractal::composition::ProjectExtras extras_;           // cache of session.extras(); updated by setExtras() and by refresh()
+  chopfractal::composition::ProjectExtras publishedExtras_;  // what the panels were last told
+  bool extrasPublished_ = false;
   chopfractal::composition::SetupSuggestion setup_;
   bool haveSetup_ = false;
-  bool editMode_ = false;
-  int detectMode_ = 1;
   bool sourceMissing_ = false;
   bool evolveRunning_ = false;
   chopfractal::evolve::Settings evolve_;
 
-  bool flagsPublished_ = false, publishedSourceMissing_ = false, publishedEmbed_ = false;
+  bool flagsPublished_ = false, publishedSourceMissing_ = false, publishedEmbed_ = false, publishedExport_ = false;
   juce::String lastStatusKey_;
 };

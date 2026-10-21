@@ -77,6 +77,8 @@ class EditorCommands {
   void keepEvolved();
   void exportWav(const ExportUi&);
   void exportKit();
+  chopfractal::Status startExport(const ExportRequest&);  // the FileChooser flows end here (public so tests can skip the dialog)
+  void cancelExport();
   juce::File makeDragFile(bool wav, const ExportUi&);
 
   // ---- presets ----

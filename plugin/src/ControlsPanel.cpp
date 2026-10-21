@@ -16,6 +16,7 @@ ControlsPanel::ControlsPanel(EditorModel& model, EditorCommands& commands, juce:
   addAndMakeVisible(transportHint_);
   addAndMakeVisible(editMode_);
   editMode_.setTooltip("Off: drag to select sections. On: drag a hit to move or resize it.");
+  editMode_.setToggleState(model_.editMode(), juce::dontSendNotification);
   editMode_.onClick = [this] { model_.setEditMode(editMode_.getToggleState()); };
   play_.setTitle("Play");
   stop_.setTitle("Stop");
@@ -46,7 +47,7 @@ ControlsPanel::ControlsPanel(EditorModel& model, EditorCommands& commands, juce:
 
   seedLabel_.setJustificationType(juce::Justification::centredRight);
   addAndMakeVisible(seedLabel_);
-  seed_.setText("1");
+  seed_.setText(juce::String(static_cast<juce::int64>(model_.seed())));
   seed_.setInputRestrictions(12, "0123456789");
   seed_.setTitle("Seed");
   seed_.onTextChange = [this] { model_.setSeed(static_cast<std::uint64_t>(seed_.getText().getLargeIntValue())); };
@@ -110,6 +111,12 @@ void ControlsPanel::modelChanged(Change c) {
       break;
     case Change::Flags:
       if (embed_.getToggleState() != model_.embedSource()) embed_.setToggleState(model_.embedSource(), juce::dontSendNotification);
+      if (editMode_.getToggleState() != model_.editMode()) editMode_.setToggleState(model_.editMode(), juce::dontSendNotification);
+      break;
+    case Change::Extras:  // a project was restored: show its saved choices
+      if (static_cast<std::uint64_t>(seed_.getText().getLargeIntValue()) != model_.seed())
+        seed_.setText(juce::String(static_cast<juce::int64>(model_.seed())), juce::dontSendNotification);
+      if (editMode_.getToggleState() != model_.editMode()) editMode_.setToggleState(model_.editMode(), juce::dontSendNotification);
       break;
     default:
       break;

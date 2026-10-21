@@ -11,5 +11,6 @@ class StatusBar : public EditorPanelBase {
   void modelChanged(Change) override;
 
   juce::TextEditor messages_;
+  juce::TextButton cancelExport_{"Cancel Export"};  // visible only while an export runs
   juce::String lastLine_;
 };

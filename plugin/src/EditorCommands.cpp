@@ -108,6 +108,7 @@ void EditorCommands::generate() {
   const cf::host::ParamValues params = proc_.currentParams();
   cf::pattern::Settings base;
   base.seed = model_.seed();
+  base.grid = {model_.extras().gridDivision, model_.extras().gridTriplet};  // the persisted generation grid (default 1/16 straight)
   const cf::TimeSignature hostMeter{proc_.hostBeatsPerBar.load(), proc_.hostBeatUnit.load()};
   if (hostMeter.valid()) base.timeSignature = hostMeter;  // bars follow the host's meter (4/4 when it gives none)
   const double v = params.get(cf::host::kVariationAmount);
@@ -357,24 +358,18 @@ void EditorCommands::exportWav(const ExportUi& ui) {
                           if (f == juce::File()) return;
                           const bool extensionAdded = !f.hasFileExtension("wav");
                           if (extensionAdded) f = f.getParentDirectory().getChildFile(f.getFileName() + ".wav");  // "my.loop" becomes "my.loop.wav", not a WAV named .loop
-                          cf::composition::ExportWavOptions o;
+                          ExportRequest req;
+                          req.kind = ExportRequest::Kind::Wav;
                           static const cf::wav::Format kFmt[] = {cf::wav::Format::Pcm16, cf::wav::Format::Pcm24, cf::wav::Format::Float32};
                           static const int kRate[] = {44100, 48000, 88200, 96000};
                           static const int kLoops[] = {1, 2, 4, 8, 16};
-                          o.wav.format = kFmt[std::max(0, std::min(2, ui.formatIndex))];
-                          o.wav.sampleRate = kRate[std::max(0, std::min(3, ui.rateIndex))];
-                          o.loops = kLoops[std::max(0, std::min(4, ui.loopsIndex))];
-                          o.bpm = proc_.activeBpm.load();
-                          o.overwrite = !extensionAdded;  // the native dialog asked about the name as typed; a name we extended is checked again
-                          const std::string path = f.getFullPathName().toStdString();
-                          cf::Status status;
-                          cf::composition::ExportReport rep;
-                          proc_.withSession([&](cf::composition::ProjectSession& s) {
-                            auto r = s.exportWav(path, o);
-                            if (r.ok()) rep = r.value(); else status = r.error();
-                          });
-                          model_.setStatus(status.ok() ? "Exported " + f.getFileName() + (rep.clipped ? " (" + juce::String(static_cast<juce::int64>(rep.clipped)) + " samples clipped; lower the output gain)" : juce::String())
-                                                       : juce::String(status.error().message));
+                          req.wav.wav.format = kFmt[std::max(0, std::min(2, ui.formatIndex))];
+                          req.wav.wav.sampleRate = kRate[std::max(0, std::min(3, ui.rateIndex))];
+                          req.wav.loops = kLoops[std::max(0, std::min(4, ui.loopsIndex))];
+                          req.wav.bpm = proc_.activeBpm.load();
+                          req.wav.overwrite = !extensionAdded;  // the native dialog asked about the name as typed; a name we extended is checked again
+                          req.path = f.getFullPathName().toStdString();
+                          startExport(req);
                         });
 }
 
@@ -383,18 +378,24 @@ void EditorCommands::exportKit() {
   chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this](const juce::FileChooser& fc) {
     const juce::File dir = fc.getResult();
     if (dir == juce::File()) return;
-    cf::composition::KitOptions k;
-    k.bpm = proc_.activeBpm.load();
-    const std::string path = dir.getFullPathName().toStdString();
-    cf::Status status;
-    cf::composition::ExportReport rep;
-    proc_.withSession([&](cf::composition::ProjectSession& s) {
-      auto r = s.exportKit(path, k);  // refuses before writing if any file already exists
-      if (r.ok()) rep = r.value(); else status = r.error();
-    });
-    model_.setStatus(status.ok() ? "Producer Kit written to " + dir.getFileName() + " (" + juce::String(static_cast<int>(rep.files.size())) + " files)" : juce::String(status.error().message));
+    ExportRequest req;
+    req.kind = ExportRequest::Kind::Kit;
+    req.kit.bpm = proc_.activeBpm.load();
+    req.path = dir.getFullPathName().toStdString();
+    startExport(req);  // refuses before writing if any file already exists
   });
 }
+
+// Starts the worker; the progress text, the final message and the Cancel Export button come from the processor and the
+// 10 Hz refresh. A request that cannot start (nothing to render, file exists, another export running) says why.
+cf::Status EditorCommands::startExport(const ExportRequest& request) {
+  const cf::Status status = proc_.startExport(request);
+  if (!status.ok()) model_.setStatus(juce::String(status.error().message));
+  model_.rebuild();  // publishes the running flag at once (Export buttons disable, Cancel Export appears)
+  return status;
+}
+
+void EditorCommands::cancelExport() { proc_.cancelExport(); }
 
 juce::File EditorCommands::makeDragFile(bool wav, const ExportUi& ui) {
   cf::Status status;

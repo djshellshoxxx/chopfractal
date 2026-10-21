@@ -8,9 +8,22 @@
 
 #include <array>
 #include <atomic>
+#include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
+
+// A project export that runs on a worker thread (F01 section 5).
+struct ExportRequest {
+  enum class Kind { Wav, Kit } kind = Kind::Wav;
+  std::string path;                       // the WAV file, or the kit directory
+  chopfractal::composition::ExportWavOptions wav;
+  chopfractal::composition::KitOptions kit;
+};
+struct ExportStatus {
+  enum class State { Idle, Running, Done, Failed, Cancelled } state = State::Idle;
+  float fraction = 0.f;
+};
 
 class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
@@ -69,12 +82,26 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Position within the pattern in quarter notes (for the Orbit View playhead); negative when not playing.
   double playheadQuarters() const { return playheadQuarters_.load(std::memory_order_relaxed); }
 
+  // ---- export on a worker thread (message thread unless noted) ----
+  // Plans under the session lock, then renders and writes on a juce::Thread. Conflict "An export is already running."
+  // while one runs; planning errors (nothing to render, file exists, ...) are returned and nothing starts. The final
+  // outcome arrives as the status message and as exportStatus().state (Done, Failed or Cancelled).
+  chopfractal::Status startExport(const ExportRequest& request);
+  void cancelExport();                // asks the worker to stop; no partial files remain
+  ExportStatus exportStatus() const;  // any thread (atomics)
+  juce::String exportDisplayName() const;  // file or directory name of the current or last export
+  // A reference-only audio restore is decoding on a worker (setStateInformation returned before it finished).
+  bool restoreInFlight() const { return restoresRunning_.load() > 0; }
+  // Number of decodeFile calls made by the calling thread so far (lets tests prove setStateInformation does no decoding).
+  static int decodeCallsOnThisThread();
+
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
+  void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
   // Declaration order matters: the renderer must outlive the session that publishes into its mailbox.
@@ -93,7 +120,19 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::uint64_t appliedTransportCommand_ = 0;
   double freeRunQuarters_ = 0.0;  // audio thread only: local clock for hosts without a position
   juce::ThreadPool loadPool_{juce::ThreadPool::Options{}.withNumberOfThreads(1)};  // file decoding; drained in the destructor
+  juce::ThreadPool restorePool_{juce::ThreadPool::Options{}.withNumberOfThreads(1)};  // audio of a reference-only project; own pool so Locate Source never waits behind it
+  std::atomic<int> restoresRunning_{0};
+  // The "epoch" of every project replacement: setStateInformation and loadFileAsync bump it, and a worker result
+  // that finds a different value was superseded and is dropped.
   std::atomic<std::uint64_t> loadTicket_{0};
+  class ExportWorker;
+  void finishExport(const chopfractal::Result<chopfractal::composition::ExportReport>& result);
+  std::unique_ptr<ExportWorker> exportWorker_;
+  chopfractal::composition::ExportProgress exportProgress_;
+  std::atomic<int> exportState_{static_cast<int>(ExportStatus::State::Idle)};
+  ExportRequest::Kind exportKind_ = ExportRequest::Kind::Wav;
+  juce::String exportName_;
+  mutable juce::CriticalSection exportLock_;
   juce::String status_;
   mutable juce::CriticalSection statusLock_;
 

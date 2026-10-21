@@ -21,7 +21,7 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   exportKit_.onClick = [this] { cmd_.exportKit(); };
 
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
-  detectMode_.setSelectedId(1);
+  detectMode_.setSelectedId(model_.detectMode(), juce::dontSendNotification);
   detectMode_.setTitle("Detection mode");
   detectMode_.onChange = [this] { model_.setDetectMode(detectMode_.getSelectedId()); };
   addAndMakeVisible(detectMode_);
@@ -40,21 +40,24 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
     recall->onClick = [this, i] { cmd_.recallSnapshot(i); };
   }
   for (const auto& r : cf::roles::builtinRoles()) role_.addItem(juce::String(r), role_.getNumItems() + 1);
-  role_.setSelectedId(1);
+  role_.setSelectedId(model_.extras().roleIndex + 1, juce::dontSendNotification);
   role_.setTitle("Role for the selected hit's chop");
+  role_.onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.roleIndex = role_.getSelectedId() - 1; }); };
   addAndMakeVisible(role_);
   setRole_.onClick = [this] { cmd_.setRoleOfSelected(role_.getText()); };
 
   motifLabel_.setJustificationType(juce::Justification::centredRight);
   addAndMakeVisible(motifLabel_);
-  motif_.setText(juce::String(FractalUi{}.motif));
+  motif_.setText(juce::String(model_.extras().motif), juce::dontSendNotification);
   motif_.setInputRestrictions(8, "xa.");
+  motif_.onTextChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.motif = motif_.getText().toStdString(); }); };
   motif_.setTitle("Fractal motif: x hit, a accent, dot rest");
   addAndMakeVisible(motif_);
   depthLabel_.setJustificationType(juce::Justification::centredRight);
   addAndMakeVisible(depthLabel_);
   depth_.addItemList({"1", "2", "3"}, 1);
-  depth_.setSelectedId(2);
+  depth_.setSelectedId(model_.extras().fractalDepth, juce::dontSendNotification);
+  depth_.onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.fractalDepth = depth_.getSelectedId(); }); };
   depth_.setTitle("Fractal depth");
   addAndMakeVisible(depth_);
 
@@ -84,14 +87,16 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   addAndMakeVisible(fmtLabel_);
   addAndMakeVisible(loopsLabel_);
   exportFormat_.addItemList({"16-bit", "24-bit", "32-bit float"}, 1);
-  exportFormat_.setSelectedId(2);
+  exportFormat_.setSelectedId(model_.extras().exportUi.formatIndex + 1, juce::dontSendNotification);
   exportFormat_.setTitle("Export format");
   exportRate_.addItemList({"44.1 kHz", "48 kHz", "88.2 kHz", "96 kHz"}, 1);
-  exportRate_.setSelectedId(2);
+  exportRate_.setSelectedId(model_.extras().exportUi.rateIndex + 1, juce::dontSendNotification);
   exportRate_.setTitle("Export sample rate");
   exportLoops_.addItemList({"1", "2", "4", "8", "16"}, 1);
-  exportLoops_.setSelectedId(2);
+  exportLoops_.setSelectedId(model_.extras().exportUi.loopsIndex + 1, juce::dontSendNotification);
   exportLoops_.setTitle("Export loops");
+  for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_})
+    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi = {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }); };
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&reroll_, &savePreset_, &deletePreset_}) {
@@ -122,8 +127,8 @@ FractalUi FeaturePanel::fractalUi() const {
   FractalUi f;
   f.motif = motif_.getText().toStdString();
   f.depth = depth_.getSelectedId();
-  f.mutation = fractalMutation_;
-  f.accent = fractalAccent_;
+  f.mutation = model_.extras().fractalMutation;
+  f.accent = model_.extras().fractalAccentDecay;
   return f;
 }
 
@@ -156,10 +161,18 @@ void FeaturePanel::modelChanged(Change c) {
       const auto& v = model_.view();
       for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_}) b->setEnabled(v.hasSource);
       fractal_.setEnabled(v.hasPattern);
-      const bool canExport = v.hasPattern && !model_.sourceMissing();  // exports render the source audio
-      for (juce::Button* b : std::initializer_list<juce::Button*>{&exportWav_, &exportKit_}) b->setEnabled(canExport);
-      dragMidi_.setEnabled(canExport);
-      dragWav_.setEnabled(canExport);
+      updateExportButtons();
+      break;
+    }
+    case Change::Extras: {  // a project was restored: show its saved choices without firing the widgets' own handlers
+      const auto& e = model_.extras();
+      if (motif_.getText().toStdString() != e.motif) motif_.setText(juce::String(e.motif), juce::dontSendNotification);
+      if (depth_.getSelectedId() != e.fractalDepth) depth_.setSelectedId(e.fractalDepth, juce::dontSendNotification);
+      if (role_.getSelectedId() != e.roleIndex + 1) role_.setSelectedId(e.roleIndex + 1, juce::dontSendNotification);
+      if (detectMode_.getSelectedId() != e.detectMode + 1) detectMode_.setSelectedId(e.detectMode + 1, juce::dontSendNotification);
+      if (exportFormat_.getSelectedId() != e.exportUi.formatIndex + 1) exportFormat_.setSelectedId(e.exportUi.formatIndex + 1, juce::dontSendNotification);
+      if (exportRate_.getSelectedId() != e.exportUi.rateIndex + 1) exportRate_.setSelectedId(e.exportUi.rateIndex + 1, juce::dontSendNotification);
+      if (exportLoops_.getSelectedId() != e.exportUi.loopsIndex + 1) exportLoops_.setSelectedId(e.exportUi.loopsIndex + 1, juce::dontSendNotification);
       break;
     }
     case Change::Setup:
@@ -168,10 +181,19 @@ void FeaturePanel::modelChanged(Change c) {
       break;
     case Change::Flags:
       locate_.setEnabled(model_.sourceMissing());
+      updateExportButtons();
       break;
     default:
       break;
   }
+}
+
+void FeaturePanel::updateExportButtons() {
+  const auto& v = model_.view();
+  const bool canExport = v.hasPattern && !model_.sourceMissing();  // exports render the source audio
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&exportWav_, &exportKit_}) b->setEnabled(canExport && !model_.exportRunning());  // one export at a time
+  dragMidi_.setEnabled(canExport);
+  dragWav_.setEnabled(canExport);
 }
 
 void FeaturePanel::resized() {
@@ -225,8 +247,12 @@ void FeaturePanel::applyPreset(const cf::presets::Preset& p) {
   cmd_.applyPresetParams(p);
   motif_.setText(juce::String(p.motif), juce::dontSendNotification);
   depth_.setSelectedId(std::max(1, std::min(3, p.depth)), juce::dontSendNotification);
-  fractalMutation_ = p.mutation;
-  fractalAccent_ = p.accentDecay;
+  model_.setExtras([&p](cf::composition::ProjectExtras& e) {  // the widgets above were set silently, so the persisted copy follows here
+    e.motif = p.motif;
+    e.fractalDepth = std::max(1, std::min(3, p.depth));
+    e.fractalMutation = p.mutation;
+    e.fractalAccentDecay = p.accentDecay;
+  });
   static const int kEvery[] = {1, 2, 4, 8, 16};
   for (int i = 0; i < 5; ++i)
     if (kEvery[i] == p.evolveEvery) every_.setSelectedId(i + 1, juce::dontSendNotification);

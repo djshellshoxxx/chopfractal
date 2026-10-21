@@ -35,6 +35,10 @@ class PatternSession {
   Status storeSnapshot(std::size_t slot);
   Status recallSnapshot(std::size_t slot);  // undoable
   bool hasSnapshot(std::size_t slot) const { return slot < 2 && slots_[slot] != nullptr; }
+  // Read access for project-state saving; nullptr if the slot is empty or slot >= 2.
+  std::shared_ptr<const Pattern> slot(std::size_t slot) const { return slot < 2 ? slots_[slot] : nullptr; }
+  // Project load: call after restore() (which clears the slots). Keeps the current pattern and undo history.
+  void restoreSlots(std::array<std::shared_ptr<const Pattern>, 2> slots) { slots_ = std::move(slots); }
 
  private:
   SnapshotStack<std::shared_ptr<const Pattern>> history_;

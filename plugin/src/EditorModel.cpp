@@ -5,17 +5,23 @@
 
 namespace cf = chopfractal;
 
-EditorModel::EditorModel(ChopFractalProcessor& processor) : proc_(processor) {}
+EditorModel::EditorModel(ChopFractalProcessor& processor) : proc_(processor) {
+  proc_.withSession([this](cf::composition::ProjectSession& s) { extras_ = s.extras(); });  // an editor opened on a restored project starts from its extras
+  publishedExtras_ = extras_;  // the panels read extras() while they are constructed, so the first refresh has nothing to announce
+  extrasPublished_ = true;
+}
 
 bool EditorModel::refresh(bool force, int waveWidthPx) {
   waveWidthPx_ = waveWidthPx;
   bool rebuilt = false;
   bool selectionChanged = false;
+  cf::composition::ProjectExtras sessionExtras;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     juce::String sig;
     sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<int>(s.history().size()) << "|"
         << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1);
     sourceMissing_ = s.sourceMissing();
+    sessionExtras = s.extras();
     evolveRunning_ = s.evolveRunning();
     evolve_ = s.evolveSettings();
     if (!force && sig == signature_) return;
@@ -71,6 +77,14 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     selectionChanged = selectionChanged || hitsBefore != selectedHits_.size() || chopsBefore != selectedChops_.size();
   });
 
+  if (!extrasPublished_ || !(sessionExtras == publishedExtras_)) {
+    // A project load (or anything else that replaced the session's extras behind the panels' backs) re-syncs the widgets.
+    extrasPublished_ = true;
+    extras_ = sessionExtras;
+    publishedExtras_ = sessionExtras;
+    emit(Change::Seed);
+    emit(Change::Extras);
+  }
   emit(Change::Evolve);  // every tick: the Feature panel compares the session's Evolve state with its own controls
   if (rebuilt) {
     emit(Change::Setup);
@@ -78,10 +92,15 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     emit(Change::View);
   }
   const bool embed = embedSource();
-  if (!flagsPublished_ || publishedSourceMissing_ != sourceMissing_ || publishedEmbed_ != embed) {
+  const ExportStatus exportNow = proc_.exportStatus();
+  const bool exporting = exportNow.state == ExportStatus::State::Running;
+  if (exporting)  // the worker reports a fraction; the tick turns it into the status text
+    proc_.setStatusMessage("Exporting " + proc_.exportDisplayName() + ": " + juce::String(static_cast<int>(exportNow.fraction * 100.f)) + "%");
+  if (!flagsPublished_ || publishedSourceMissing_ != sourceMissing_ || publishedEmbed_ != embed || publishedExport_ != exporting) {
     flagsPublished_ = true;
     publishedSourceMissing_ = sourceMissing_;
     publishedEmbed_ = embed;
+    publishedExport_ = exporting;
     emit(Change::Flags);
   }
   // Messages arrive from other threads' work too (file loading, Evolve, restore): publish the status when it changes.
@@ -149,8 +168,22 @@ void EditorModel::selectSectionsInPattern(juce::Rectangle<int> band, juce::Point
   announceSelection();
 }
 
+bool EditorModel::setExtras(const std::function<void(cf::composition::ProjectExtras&)>& mutate) {
+  cf::composition::ProjectExtras next = extras_;
+  mutate(next);
+  if (next == extras_) return true;
+  cf::Status status;
+  proc_.withSession([&](cf::composition::ProjectSession& s) { status = s.setExtras(next); });
+  if (!status.ok()) return false;  // invalid (for example an empty motif): the session keeps the previous value
+  extras_ = next;
+  publishedExtras_ = next;  // the panels made this change themselves; they need no re-sync
+  proc_.updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
+  return true;
+}
+
 void EditorModel::setSeed(std::uint64_t seed) {
-  seed_ = seed;
+  if (seed > 999999999999ull) seed %= 1000000000000ull;  // the field holds at most 12 digits
+  setExtras([seed](cf::composition::ProjectExtras& e) { e.seed = seed; });
   emit(Change::Seed);
 }
 
@@ -161,7 +194,7 @@ void EditorModel::setSetup(cf::composition::SetupSuggestion s) {
 }
 
 void EditorModel::setEditMode(bool on) {
-  editMode_ = on;
+  setExtras([on](cf::composition::ProjectExtras& e) { e.ui.editHits = on; });
   emit(Change::Flags);
 }
 

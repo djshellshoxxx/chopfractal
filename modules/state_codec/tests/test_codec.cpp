@@ -95,6 +95,30 @@ CHOP_TEST(migrations_chain_in_order_and_reject_newer_or_missing) {
   CHECK(!reg.migrate("bad", {1, {}}, 2).ok());
 }
 
+CHOP_TEST(migration_registry_runs_identity_step_from_v1_to_v2) {
+  MigrationRegistry reg;
+  CHECK_EQ(reg.size(), 0u);
+  reg.add("composition", 1, [](const std::vector<std::uint8_t>& in) -> Result<std::vector<std::uint8_t>> { return in; });
+  CHECK_EQ(reg.size(), 1u);
+  const std::vector<std::uint8_t> payload{1, 2, 3, 4};
+  auto up = reg.migrate("composition", {1, payload}, 2);
+  CHECK(up.ok());
+  CHECK_EQ(up.value().schemaVersion, 2u);
+  CHECK(up.value().bytes == payload);
+}
+
+CHOP_TEST(migration_registry_rejects_newer_schema_and_missing_step) {
+  MigrationRegistry reg;
+  reg.add("composition", 1, [](const std::vector<std::uint8_t>& in) -> Result<std::vector<std::uint8_t>> { return in; });
+  auto newer = reg.migrate("composition", {3, {}}, 2);
+  CHECK(!newer.ok() && newer.error().code == ErrorCode::UnsupportedVersion);
+  auto missing = reg.migrate("composition", {2, {}}, 3);  // no step registered for 2 -> 3
+  CHECK(!missing.ok() && missing.error().code == ErrorCode::NotFound);
+  auto unknown = reg.migrate("source_chop", {1, {}}, 2);
+  CHECK(!unknown.ok() && unknown.error().code == ErrorCode::NotFound);
+  CHECK(reg.migrate("source_chop", {1, {}}, 1).ok());  // current schemas need no step
+}
+
 CHOP_TEST(crc32_matches_the_standard_check_value) {
   const char* s = "123456789";
   CHECK_EQ(crc32(reinterpret_cast<const std::uint8_t*>(s), 9), 0xCBF43926u);

@@ -156,6 +156,7 @@ CHOP_TEST(project_state_round_trips_parameters_pattern_history_and_audio) {
   ChopFractalProcessor b;
   prepare(b);
   b.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  waitForRestore(b);
   CHECK_NEAR(*b.apvts.getRawParameterValue("density"), 0.9f, 1e-5);
   CHECK(*b.apvts.getRawParameterValue("allow_reverse") > 0.5f);
   bool restored = false;
@@ -283,6 +284,7 @@ CHOP_TEST(effect_parameters_reach_generation_and_the_state_round_trips) {
   p.getStateInformation(blob);
   ChopFractalProcessor q;
   q.setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+  waitForRestore(q);
   CHECK_NEAR(q.currentParams().get(cf::host::kFxIntensity), 0.9, 1e-6);
   CHECK(q.currentParams().get(cf::host::kAllowFilter) == 1.0);
 }
@@ -297,6 +299,7 @@ CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
   p.getStateInformation(blob);
   ChopFractalProcessor q;
   q.setStateInformation(blob.getData(), static_cast<int>(blob.getSize()));
+  waitForRestore(q);
   CHECK(q.embedSource.load());                                  // a re-save keeps the audio inside the project
   CHECK_NEAR(q.manualBpm.load(), 97.5, 1e-9);
   juce::MemoryBlock again;
@@ -307,6 +310,7 @@ CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
   p.getStateInformation(ref);
   ChopFractalProcessor r;
   r.setStateInformation(ref.getData(), static_cast<int>(ref.getSize()));
+  waitForRestore(r);
   CHECK(!r.embedSource.load());
 }
 
@@ -657,6 +661,7 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
   ChopFractalProcessor q;
   prepare(q);
   q.setStateInformation(mb.getData(), static_cast<int>(mb.getSize()));
+  waitForRestore(q);
   if (patternBytes(q) != out.pattern) {
     *ok = false;
     std::fprintf(stderr, "  state round trip changed the pattern\n");
@@ -1029,6 +1034,7 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     ChopFractalProcessor restored;
     prepare(restored);
     restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    waitForRestore(restored);
     CHECK(patternBytes(restored) == patternBytes(p));
     CHECK(restored.startPlayback());
     FakePlayHead stoppedHost;
