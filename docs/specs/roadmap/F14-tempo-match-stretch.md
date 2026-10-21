@@ -2,6 +2,9 @@
 
 **Status:** Portable parts implemented (module, session API, tests); plugin and UI pending  **Size:** L (10 engineer-days)  **Depends on:** F00 (FeaturePanel, WavePanel, StatusBar); F01 (background job runner, optional); shares `sourceNeedsEmbed()` with F12 (whichever lands first adds it)  **Blocks:** none
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** Smart Setup's loop/tempo suggestion and "Use Tempo" (manual BPM fallback) exist and are the assist the body builds on; there is no stretch engine. Decisions recorded by the audit: no conflicts with the as-built code were found; the FeaturePanel controls (`Match to host`, `Cancel`, `Undo Stretch`) need a home because rows A to D are full (row A is 648 px used before F06/F07, row C 848): they open from a single `Tempo match...` button (110 px) appended to row A (648 + 90 for F06 + 110 = 848 of 920 px) that shows the call-out holding the Quality combo, Match to host, Cancel and Undo Stretch. The body's inline status strings are unchanged. F16 note: a stretched source changes loudness only marginally; Level Match re-measures the source after a stretch.
+
 ## 1. Summary and user value
 Match a loop that was recorded or downloaded at one tempo to the project's tempo by time-stretching it offline into a new source, while keeping every chop boundary exactly on its scaled position, so roles, pattern events and Smart Setup still apply. Today the renderer only resamples (pitch follows duration, see `renderer.hpp` header comment) and `suggestLoop` only suggests a BPM; the producer must stretch in a DAW and re-import. This turns "any loop, any tempo" into one click.
 

@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** Automated layers exist: 34 ctest targets (191 test cases across the 16 modules and the composition root, plus clean-consumer examples), plugin shell tests (28, headless and under xvfb), ASan/UBSan/TSan jobs, the Steinberg validator (47/47 on Linux), the portability gates and the clean-consumer transfer test, run in CI on GCC, Clang, macOS arm64 and MSVC. Not run: the host matrix on real DAWs, mono-host behavior in a host, long-duration soak (F05 adds a scripted one), CPU and memory thresholds on a reference machine, installer and uninstall checks (F15). The new roadmap specs add their own acceptance sections; roadmap README sections 6 and 7 are the per-PR gates.
+
+
 ## Test layers
 
 ### Unit tests

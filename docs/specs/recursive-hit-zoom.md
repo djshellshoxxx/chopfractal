@@ -1,6 +1,9 @@
 # Recursive Hit Zoom
 
 **Status:** Creation spec for review  
+
+**Implementation (audited 2026-10-20):** Built and tested (`recursive_hit_zoom`): nested child patterns inside a hit, depth default 2 (maximum 3), recursive locks, collapse, composition and renderer flattening. Editor: Zoom In and Collapse buttons on the selected hit; nested hits are drawn in the Pattern view and the Orbit View. Editing a nested hit directly is not supported (F02 refuses with a message). Known limit: the event cap counts zoomed children, so a near-full zoomed pattern can fail to mutate.
+
 **Module ID:** `recursive_hit_zoom`  
 **Purpose:** Let a user open one pattern event and create a smaller, nested rhythm inside that event's original time and audio boundaries.
 

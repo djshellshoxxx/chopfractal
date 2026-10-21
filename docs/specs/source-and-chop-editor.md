@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** Import (WAV verified, other JUCE-readable formats untested), mono/stereo handling, transient and even-grid analysis, marker model with undo/redo and reconciliation, audition, missing-source recovery and drag-and-drop loading are built. The editor exposes Shift+click add marker, Alt+click delete and click-to-audition; marker dragging, snap, trim, labels and waveform zoom are specified in F02 and not built. **Input capture (Arm/Capture/Stop/Keep) is not built** (F12). The "recommended 30 s capture ceiling" below is superseded by F12 (60 s, 100 MB, decided there).
+
+
 ## Purpose
 
 The source subsystem imports or captures a loop, stores it safely for project recall, analyzes likely chop boundaries, and gives the user final control over those boundaries. Automatic detection is a starting point; user markers always take precedence.

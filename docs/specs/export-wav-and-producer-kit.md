@@ -1,6 +1,9 @@
 # WAV export and Producer Kit export
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested (`wav_export`, `midi_export`, `ProjectSession::exportWav/exportKit/renderMidi/renderWavBytes`): WAV 16/24/32f, deterministic dither, normalize, atomic writes, Producer Kit (slices, `pattern.mid`, `kit.txt`), drag-out of the current pattern (pass 3). Export still runs on the message thread (F01). Loudness matching and a limiter before export are F16; arrangement-length export with section markers is F18.
+
 **Module IDs:** `wav_export`, `midi_export` (portable), composition export actions  
 **Purpose:** Get the generated groove out of the plugin: a rendered WAV of the pattern, and a Producer Kit (every chop as its own WAV plus a MIDI file that replays the pattern on those slices) so the result can be rebuilt in any sampler or drum rack.
 

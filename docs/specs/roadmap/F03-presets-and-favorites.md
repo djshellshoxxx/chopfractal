@@ -2,8 +2,22 @@
 
 **Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (ControlsPanel, HistoryPanel), F01 (`ProjectExtras` incl. grid and tree-filter prefs, `setExtras`)  **Blocks:** F09 (scenes reuse the preset apply path), F10
 
+## 0. Implementation status (audited 2026-10-20)
+**Partly built by pass 3 (presets); favorites, search, categories, rules and undo are not started.**
+
+*Implemented:* portable module `modules/preset_store` (namespace `chopfractal::presets`, header `presets.hpp`): a flat `Preset` record (name, bars, density, swing, variation, fxIntensity, chaos, six allow flags, Fractal motif/depth/mutation/accent decay, Evolve every/amount), validation, a bounds-checked binary format (`CFPR`, version 1, FNV-1a checksum), `fileNameFor`, six factory presets (Tight Groove, Lazy Swing, Stutter Storm, Tape Wobble, Glitch Garden, Fractal Break). Plugin: `PresetManager` (user `.cfpreset` files in `<userApplicationData>/ChopFractal/Presets`, atomic write, Windows-reserved names handled), a preset combo ("Factory: ..." entries then user entries), Save Preset (name prompt), Delete (user presets only), Reroll. Loading a preset sets the matching parameters and editor fields and **never changes the pattern until Generate is pressed**.
+
+*Not implemented:* seed, generation grid and rule templates in presets, categories and descriptions, the Presets popup menu, rename, favorites (presets and variation tree), tree search, `ProjectSession::applyPreset`, one-level preset undo, "Show Presets Folder".
+
+*Decisions that override the body below:*
+1. **Keep the module name, namespace and header:** `chopfractal::presets` and `preset_store/presets.hpp` (the body's `chopfractal::preset` / `preset.hpp` are read as these). `library.hpp` is new beside it.
+2. **Format v2 replaces v1 as the written format; v1 stays readable forever.** `deserialize` detects the `CFPR` magic and maps the v1 flat fields into the v2 `params` list (ids `pattern_bars`, `density`, `swing`, `variation_amount`, `fx_intensity`, `chaos`, `allow_reverse`, `allow_pitch`, `allow_retrigger`, `allow_filter`, `allow_glide`, `allow_crunch`; the Fractal and Evolve fields map to the v2 fields of the same meaning (v2 `preset_gen` also carries `f64 mutation, f64 accentDecay`, applied to F01's `ProjectExtras::fractalMutation/fractalAccentDecay`; `chaos` is a normal `params` entry, so presets apply 12 generation parameters, not 11), `seed = 1`, grid 16 straight, no rules). The flat fields are removed from `Preset` and the shipped tests are updated in the same commit (behavior preserved: the same six factory presets produce the same Generate output when applied through the new path). Old builds show v2 files as unreadable and skip them (documented, pre-beta).
+3. **Factory list is 18 entries, not 12:** the six shipped presets are frozen (their values reached alpha users) and gain categories (Tight Groove and Lazy Swing: Hip-hop; Stutter Storm, Tape Wobble, Glitch Garden: Glitch; Fractal Break: Fractal), seeds 201 to 206, no rules, grid 16, and keep their own Evolve cadence; the 12 rows in the table below are added after them. Everywhere the body says "12 factory presets" read "18 (6 shipped + 12 new)"; the pinned-hash test pins all 18.
+4. **Apply and Generate defaults to off** (the shipped behavior: a preset only sets controls). The menu item stays, stored as the APVTS property `presetAutoGenerate`, default false.
+5. **Sizes:** HistoryPanel is 808 x 106 in the as-built layout (not 808 x 106); the overlay is positioned 4 px from the top-right edge regardless.
+
 ## 1. Summary and user value
-The plugin starts blank: no factory presets (BUILD_STATUS "Known gaps") and no way to keep a setup. F03 adds a portable `preset_store` module (preset file format, 12 deterministic factory presets, a user-folder library), a Presets menu in ControlsPanel (apply, save, rename, delete, favorite, undo), and a favorites filter plus search on the variation tree in HistoryPanel. Producers get a quick start, can keep their own recipes, and can find the good variations in a long family tree.
+Pass 3 shipped six factory presets and plain user presets; what is missing is a richer format (seed, grid, rule templates, categories), a proper menu, favorites and undo. F03 extends the portable `preset_store` module (preset file format v2, 18 deterministic factory presets, a user-folder library), a Presets menu in ControlsPanel (apply, save, rename, delete, favorite, undo), and a favorites filter plus search on the variation tree in HistoryPanel. Producers get a quick start, can keep their own recipes, and can find the good variations in a long family tree.
 
 ## 2. User stories and scope
 - As a producer I pick "Boom Bap Basics" and press Generate to get a musical result without touching 12 controls.
@@ -19,7 +33,7 @@ The plugin starts blank: no factory presets (BUILD_STATUS "Known gaps") and no w
 **Presets menu** (`juce::PopupMenu`, exact structure and strings):
 ```
 Undo Preset                        (disabled unless an applied preset can be undone)
-Apply and Generate                 (checkable, default on; stored as the APVTS state property `presetAutoGenerate`, the same mechanism as `embedSource`)
+Apply and Generate                 (checkable, default off; stored as the APVTS state property `presetAutoGenerate`, the same mechanism as `embedSource`)
 ---
 Favorites >                        (submenu; empty = disabled item "No favorites yet")
 Hip-hop > ...  Breaks > ...  Glitch > ...  Fractal > ...  Minimal > ...      (factory, alphabetical by name, star prefix "* " on favorites)
@@ -32,13 +46,13 @@ Toggle Favorite >                  (submenu of all presets)
 Show Presets Folder
 ```
 Selecting a preset applies it. Messages (status line, exact): applied `Preset "<name>" applied.`; applied+generated `Preset "<name>" applied and generated.`; saved `Preset "<name>" saved.`; exists confirm (AlertWindow) `A preset named "<name>" already exists. Replace it?` with `Replace` / `Cancel`; invalid name `Preset names are 1 to 48 characters and cannot contain \ / : * ? " < > |`; newer file `"<name>" was made by a newer ChopFractal and cannot be loaded.` (the item is listed greyed); unknown settings `"<n>" setting(s) from a newer version were ignored.`; undo `Preset undone.`; folder error `Could not write the preset folder: <reason>`.
-**Factory behavior:** applying sets the 11 generation parameters (below), the seed field, the generation grid, Fractal motif and depth, Evolve every/amount/ramp/ceiling (Evolve stays off), and replaces the project's rule set with the preset's rule template (empty template clears rules). It never touches `dry_mix`, `output_gain_db`, `effect_enable`, markers, roles, the pattern or history until Generate runs.
-**HistoryPanel (724 x 190) overlay** (top-right, 4 px from edges): `ToggleButton` `Favorites` (title `Show favorites only`, 84 x 20) and `TextEditor` (title `Search variations`, 130 x 20, empty-text hint `Search`, max 32 chars). Filtered view keeps: nodes that match, the active node always, and re-parents children of hidden nodes to their nearest visible ancestor so the tree stays connected. Empty result text: `No variations match. Clear the search or turn off Favorites.` Favorite nodes additionally draw a 5-point star (outline 8 px radius) right of the dot so favorite state is not colour-only. Double-click on a node toggles favorite (`setFavorite`). Existing click-to-activate and right-click menu are unchanged. Search matches case-insensitively against the label, the decimal node id and the decimal seed.
+**Factory behavior:** applying sets the 12 generation parameters (below), the seed field, the generation grid, Fractal motif and depth, Evolve every/amount/ramp/ceiling (Evolve stays off), and replaces the project's rule set with the preset's rule template (empty template clears rules). It never touches `dry_mix`, `output_gain_db`, `effect_enable`, markers, roles, the pattern or history until Generate runs.
+**HistoryPanel (808 x 106) overlay** (top-right, 4 px from edges): `ToggleButton` `Favorites` (title `Show favorites only`, 84 x 20) and `TextEditor` (title `Search variations`, 130 x 20, empty-text hint `Search`, max 32 chars). Filtered view keeps: nodes that match, the active node always, and re-parents children of hidden nodes to their nearest visible ancestor so the tree stays connected. Empty result text: `No variations match. Clear the search or turn off Favorites.` Favorite nodes additionally draw a 5-point star (outline 8 px radius) right of the dot so favorite state is not colour-only. Double-click on a node toggles favorite (`setFavorite`). Existing click-to-activate and right-click menu are unchanged. Search matches case-insensitively against the label, the decimal node id and the decimal seed.
 
 ## 4. Data model and state
 ```cpp
-// modules/preset_store/include/chopfractal/preset_store/preset.hpp
-namespace chopfractal::preset {
+// modules/preset_store/include/chopfractal/preset_store/presets.hpp
+namespace chopfractal::presets {
 constexpr std::uint32_t kSchemaVersion = 1;
 constexpr std::size_t kMaxFileBytes = 256 * 1024;
 struct ParamValue { std::string id; double value = 0.0; };          // manifest ids; plain (not normalized) values; a Choice stores its index
@@ -56,7 +70,7 @@ struct Preset {
 Status validate(const Preset&);
 std::vector<std::uint8_t> serialize(const Preset&);                 // codec container, modules: preset_meta, preset_params, preset_gen, preset_rules (each schema 1)
 Result<Preset> deserialize(const std::uint8_t*, std::size_t);       // UnsupportedVersion for newer, Corrupt for malformed, size-checked before allocating
-const std::vector<Preset>& factoryPresets();                        // 12, order as in the table, built once, immutable
+const std::vector<Preset>& factoryPresets();                        // 18: the six shipped presets first (frozen), then the table below; built once, immutable
 }
 ```
 File extension `.cfpreset`; payload is the `state_codec` container (`codec::encode` with `CodecLimits{maxTotalBytes = 256 KiB}`), so CRC and size validation come for free. Rules use `roles::serialize(RoleMap{}, rules)` bytes as the `preset_rules` payload (so the rule schema version rides along). No change to any project state format; F01's `ProjectExtras` already carries seed/motif/depth/grid. Favorites for presets: `favorites.txt` in the preset folder, UTF-8, one key per line, `factory:<name>` or `user:<file stem>`, max 200 lines (extra lines ignored). Host parameters: none added.
@@ -94,9 +108,9 @@ class PresetLibrary {
 };
 std::string fileStemFor(const std::string& presetName);                       // replaces forbidden chars with '_', trims, max 48
 ```
-`composition/include/.../project_session.hpp` (**HOT**): `Status applyPreset(const preset::Preset&)` — validates, then in one all-or-nothing step: `setExtras` (seed, motif, depth, grid), `setEvolve` with `enabled=false`, `setRules` (validation warnings become notices). Adds `preset_store` to `CHOPFRACTAL_COMPOSITION_DEPS` in `composition/CMakeLists.txt` and to the module list in the top-level `CMakeLists.txt` (**HOT**, before `composition`).
-`plugin/src/PluginProcessor.h` (**HOT**): `int applyPresetParams(const std::vector<chopfractal::preset::ParamValue>&)` — message thread; for each known manifest id, `snapValue` then `param->setValueNotifyingHost(normalize(...))`; skips `dry_mix`, `output_gain_db`, `effect_enable`; returns the count of ignored ids. `std::vector<preset::ParamValue> snapshotGenerationParams() const`.
-`EditorCommands` (F00): `applyPreset(const preset::Preset&, bool generate)`, `savePresetAs(name, category, overwrite)`, `undoPreset()`, `presetMenu()` (builds the menu; the callback holds a `SafePointer`). `PresetUndo { std::vector<ParamValue> params; ProjectExtras extras; roles::RuleSet rules; evolve::Settings evolve; }` is stored in `EditorCommands` (one level, cleared by a project load/`Change::Extras` from outside).
+`composition/include/.../project_session.hpp` (**HOT**): `Status applyPreset(const presets::Preset&)` — validates, then in one all-or-nothing step: `setExtras` (seed, motif, depth, grid), `setEvolve` with `enabled=false`, `setRules` (validation warnings become notices). Adds `preset_store` to `CHOPFRACTAL_COMPOSITION_DEPS` in `composition/CMakeLists.txt` and to the module list in the top-level `CMakeLists.txt` (**HOT**, before `composition`).
+`plugin/src/PluginProcessor.h` (**HOT**): `int applyPresetParams(const std::vector<chopfractal::presets::ParamValue>&)` — message thread; for each known manifest id, `snapValue` then `param->setValueNotifyingHost(normalize(...))`; skips `dry_mix`, `output_gain_db`, `effect_enable`; returns the count of ignored ids. `std::vector<presets::ParamValue> snapshotGenerationParams() const`.
+`EditorCommands` (F00): `applyPreset(const presets::Preset&, bool generate)`, `savePresetAs(name, category, overwrite)`, `undoPreset()`, `presetMenu()` (builds the menu; the callback holds a `SafePointer`). `PresetUndo { std::vector<ParamValue> params; ProjectExtras extras; roles::RuleSet rules; evolve::Settings evolve; }` is stored in `EditorCommands` (one level, cleared by a project load/`Change::Extras` from outside).
 `modules/plugin_ui_adapter` (`views.hpp`): `struct TreeFilter { bool favoritesOnly = false; std::string text; };` `std::vector<TreeNodeView> layoutHistoryTreeFiltered(const std::vector<history::NodeSummary>&, history::NodeId active, const TreeFilter&);` (calls `layoutHistoryTree` on the reduced, re-parented list).
 
 ## 6. Behavior details and edge cases
@@ -111,15 +125,15 @@ std::string fileStemFor(const std::string& presetName);                       //
 
 ## 7. Test plan
 **Unit, `modules/preset_store/tests/test_preset_store.cpp`**
-- `factory_presets_are_valid_unique_and_stable`: count 12; names unique; each passes `validate`; every `params` id exists in `host::parameterManifest()` (checked in the composition test to keep the module free of the host adapter); `fnv1a` of all `serialize(p)` concatenated equals a pinned constant (fill in at implementation, then frozen).
+- `factory_presets_are_valid_unique_and_stable`: count 18; names unique; each passes `validate`; every `params` id exists in `host::parameterManifest()` (checked in the composition test to keep the module free of the host adapter); `fnv1a` of all `serialize(p)` concatenated equals a pinned constant (fill in at implementation, then frozen).
 - `preset_round_trip`: serialize/deserialize equals; rules round-trip through `roles::serialize`.
 - `hostile_preset_files_are_rejected`: truncated, CRC flipped, schema 2, 300 KiB, 65 rules, 33 params, duplicate param id, name with `/`, name 49 bytes, control characters -> specific `ErrorCode`s, no crash, no large allocation (run under ASan).
-- `library_save_list_rename_delete_in_a_temp_dir`: save two, list = 12 + 2, overwrite refused without flag, rename updates key and file, delete removes, favorites persist across a new `PresetLibrary` instance, atomic write leaves no `.tmp` on success.
+- `library_save_list_rename_delete_in_a_temp_dir`: save two, list = 18 + 2, overwrite refused without flag, rename updates key and file, delete removes, favorites persist across a new `PresetLibrary` instance, atomic write leaves no `.tmp` on success.
 - `file_stem_sanitizing`: forbidden chars, reserved names, trimming, collisions.
 - `unsupported_newer_preset_is_listed_but_not_loadable`: `loadable=false`, reason `made by a newer ChopFractal`.
 **Unit, plugin_ui_adapter**: `tree_filter_keeps_matches_active_and_reparents` (chain 1-2-3-4, only 4 favorite, active 1 -> nodes {1,4}, node 4 parent 1); `tree_filter_text_matches_label_id_and_seed_case_insensitively`; `tree_filter_off_equals_layoutHistoryTree`.
 **Integration, composition (`test_presets.cpp`)**
-- `applying_a_preset_then_generate_equals_manual_generate`: for each of the 12 factory presets: apply (params applied to a `host::ParamValues`, session `applyPreset`), `generate(settingsFromParams(...) + seed + grid)` bytes == hand-built `Settings` generate bytes in an independent session.
+- `applying_a_preset_then_generate_equals_manual_generate`: for each of the 18 factory presets: apply (params applied to a `host::ParamValues`, session `applyPreset`), `generate(settingsFromParams(...) + seed + grid)` bytes == hand-built `Settings` generate bytes in an independent session.
 - `preset_does_not_touch_dry_gain_or_effect_enable` (shell test with real APVTS: values before == after).
 - `preset_apply_is_all_or_nothing`: invalid rules in a hand-built preset -> extras/rules/evolve unchanged.
 - `undo_preset_restores_params_extras_rules_and_evolve`.
@@ -128,9 +142,9 @@ std::string fileStemFor(const std::string& presetName);                       //
 **Determinism/sanitizer**: ASan on preset hostile-file test; pattern_engine tests unchanged. **Manual QA:** (1) Open Presets > Hip-hop > Boom Bap Basics with a loop loaded: sliders move, seed shows 101, pattern generated; Undo Preset restores slider values. (2) Save Preset... "My Groove": file appears in the folder shown by Show Presets Folder; restart the DAW: preset listed under User. (3) Rename and Delete work; deleting asks for confirmation. (4) Favorite 2 of 6 variations, turn on Favorites: only they and the active node remain, with stars. (5) Type a name fragment: tree filters live.
 
 ## 8. Acceptance criteria
-- [ ] 12 factory presets with the exact names/values above; the pinned hash test passes.
+- [ ] 18 factory presets (the six shipped ones unchanged, then the table above) with the exact names/values; the pinned hash test passes.
 - [ ] Apply never changes `dry_mix`, `output_gain_db`, `effect_enable`, markers, roles, pattern or history.
-- [ ] Apply + Generate output is byte-identical to a manual Generate with the same settings (all 12 presets).
+- [ ] Apply + Generate output is byte-identical to a manual Generate with the same settings (all 18 presets).
 - [ ] Save/load/rename/delete/favorite work on a temp folder; writes are atomic; hostile files never crash or allocate more than 1 MiB.
 - [ ] Undo Preset restores parameters, seed, motif, depth, grid, Evolve settings and rules exactly.
 - [ ] Favorites-only view shows exactly {favorites} union {active}; search narrows further; both survive project save/reload (F01).
@@ -154,9 +168,9 @@ std::string fileStemFor(const std::string& presetName);                       //
 | docs/BUILD_STATUS.md | Mod | gaps |
 
 ## 10. Risks and mitigations
-- Preset sound quality is subjective: the table is data-only and each row can be tuned by changing numbers plus the pinned hash in one commit; QA listens to all 12 on the drum fixture and a real break before release.
+- Preset sound quality is subjective: the table is data-only and each row can be tuned by changing numbers plus the pinned hash in one commit; QA listens to all 18 on the drum fixture and a real break before release.
 - Preset folder location differs per OS and may be read-only in sandboxed hosts: failures surface the `Could not write the preset folder` message; menu still works for factory presets.
-- Applying parameters via `setValueNotifyingHost` creates 11 automation events in hosts that are recording automation: documented; `Apply and Generate` is one undo step in the plugin but the host sees parameter writes. Mitigation: use `beginChangeGesture/endChangeGesture` around each write.
+- Applying parameters via `setValueNotifyingHost` creates 12 automation events in hosts that are recording automation: documented; `Apply and Generate` is one undo step in the plugin but the host sees parameter writes. Mitigation: use `beginChangeGesture/endChangeGesture` around each write.
 - Name/stem collisions and reserved names: covered by tests and `Conflict` handling.
 - Tree filter hides the node a user expects: the active node is always visible and the empty text explains how to clear.
 

@@ -1,6 +1,9 @@
 # Modular integration and transfer plan
 
 **Status:** Required build and composition plan  
+
+**Implementation (audited 2026-10-20):** Stages A to D are complete and stage E is complete for portability (clean-consumer transfer 16/16 modules); packaging is F15. The module map below lists the original eleven modules; the tree now also contains `wav_export`, `midi_export`, `evolve`, `fractal_rhythm`, `chop_insight`, `preset_store` and `plugin_ui_adapter` views (section 1 was extended by the audit). New modules planned by the roadmap: `scenes` (F09), `input_capture` (F12), `time_stretch` (F14), `level_match` (F16), `groove` (F17), `arrangement` (F18), `command_palette` (F19).
+
 **Purpose:** Make feature implementation parallelizable, integration predictable, and later module transfer low effort.
 
 ## 1. Module map
@@ -14,6 +17,10 @@
 | `chop_roles_grammar` | Role metadata, rule validation, candidate policy | `chop_contracts` | None |
 | `variation_history` | Generic immutable branch graph for serialized snapshots | None | None |
 | `audio_renderer` | Voice playback and event transforms | `chop_contracts` | None |
+| `wav_export`, `midi_export` | Deterministic WAV and Standard MIDI File encode/decode, atomic file write | `chop_contracts` | None |
+| `evolve` | Evolve scheduler (cadence, seeds, ramp) | None | None |
+| `fractal_rhythm`, `chop_insight` | Self-similar motif grooves; chop features and setup suggestions | `chop_contracts` | None |
+| `preset_store` | Preset records, versioned file format, factory presets | `chop_contracts` | None |
 | `state_codec` | Versioned module payload container/migration helpers | None | None |
 | `plugin_host_adapter` | VST3 buses, host timing, automation, lifecycle | JUCE/VST3 plus module contracts | Host-specific |
 | `plugin_ui_adapter` | Source, pattern, hierarchy, roles, and history views | JUCE UI plus view/command contracts | UI-specific |

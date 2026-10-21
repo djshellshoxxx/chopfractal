@@ -1,7 +1,13 @@
 # F09 Evolve scenes
 
 **Status:** Ready for development  **Size:** L (6 engineer-days; README budgets 4 for the list/UI, the extra 2 are the sample-accurate loop-boundary switch in the renderer)  **Depends
-on:** F00 (ScenePanel, FeaturePanel, command layer), F01 (the `scenes` StateSection)  **Blocks:** none
+on:** F00 (ScenePanel, FeaturePanel, command layer), F01 (the `scenes` section, extras tag 11)  **Blocks:** none
+
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** Evolve itself (`modules/evolve`, `ProjectSession::setEvolve/evolveStep/keepEvolved`, UI toggle, cadence, amount, ramp, failure stop) is built and tested; `evolveStep` now takes the live Chaos value (`evolveStep(double chaos = 0.0)`), which does not change anything below. Scenes, the armed loop-boundary switch and the scene list UI do not exist. Decisions recorded by the audit:
+- **State:** the `scenes` section is F01 extras tag 11 (cap 32 MiB, F01 section 4.4), not a separate "StateSection API". Failure policy follows F01: a section that fails to decode is dropped with the Warning `Some scene settings could not be restored.` and the project still loads (the body's "rejects the project load all-or-nothing" is replaced by this, so a damaged scene list can never cost a user their loop).
+- **Chaos:** Chaos v1 is generation-time (F08 audit note), so scenes need no overlay step. Where the body says `buildPlayback` applies the Chaos overlay, read "no overlay".
+- A/B snapshot slots are unaffected; recalling a scene is not a snapshot recall.
 
 ## 1. Summary and user value
 Evolve makes a beat wander, but a good wander is lost the moment it passes. F09 records an Evolve run as numbered **scenes** (each a pattern snapshot plus its seed), lets the producer
@@ -93,10 +99,9 @@ class Sequencer {                          // pure state machine, message thread
 `loopIndex >= current.loops`: `loopIndex = 0`. (4) If `loopIndex >= current.loops` and no armed scene exists (Stop was decided): `running = false; finished = true`. (5) After that, if
 `armed == 0 && loopIndex == current.loops - 1 && !finishing`: decide the next scene: Advance -> following scene in list order (or the first if `wrap`, else decide Stop), Jump ->
 `jumpTo`, Repeat -> none needed, Stop -> mark `finishing`; the chosen id is returned in `arm` (and remembered as `armed`). `loops == 1` therefore arms the following scene as soon as the
-current one starts. **StateSection `scenes` (schema 1, F01 API; absent when the list is empty so projects without scenes are unchanged):** `u8 flags (bit0 wrap)`, `u32 nextId`, `u32
+current one starts. **Extras block `scenes` (tag 11, schema 1, F01 section 4.4; absent when the list is empty so projects without scenes are unchanged):** `u8 flags (bit0 wrap)`, `u32 nextId`, `u32
 count (<= 32)`, per scene: `u32 id`, `str name (<= 32)`, `i32 loops`, `u8 next`, `u32 jumpTo`, `u64 seed`, `u64 evolveStep`, `u32 eventCount`, `i32 bars`, `u32 patternSize (<= 1 MiB)`,
-`bytes pattern`. Whole section <= 32 MiB (about 1.3 MB typical). The loader validates every field and each pattern with `pattern::deserialize`; any error rejects the project load
-all-or-nothing (same policy as the other modules). Runtime state (running, current, loopIndex, armed, recording flag) is never saved; a project always loads with scenes stopped. **Host
+`bytes pattern`. Whole section <= 32 MiB (about 1.3 MB typical). The loader validates every field and each pattern with `pattern::deserialize`; any error drops only this section (one Warning, scenes start empty) and the project loads. Runtime state (running, current, loopIndex, armed, recording flag) is never saved; a project always loads with scenes stopped. **Host
 parameters:** none (manifest unchanged).
 
 **Renderer types (`audio_renderer/renderer.hpp`):**

@@ -2,6 +2,12 @@
 
 **Status:** Ready for development  **Size:** L (8 engineer-days)  **Depends on:** F00 (WavePanel, StatusBar), F01 only for the shared UI-pref trailing block (optional)  **Blocks:** F14 (capture + stretch workflow is a documented combination, not a code dependency)
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** Source loading is still file-only (Load Loop, drag-and-drop, project restore). The plugin has no capture path; `Standalone` builds exist for Windows, so input capture also matters there (the engine must tolerate the standalone wrapper's device input). Decisions recorded by the audit:
+- The optional shared UI-pref block mentioned in the status line is the capture metadata section, F01 extras tag 12 (cap 64 KiB); it is optional and the feature works without F01.
+- The editor in the as-built layout has no free row: the capture controls go into WavePanel's top-left overlay (Arm, Capture, Stop, Keep, Discard as 52 px buttons plus the sync combo) and the 120 x 8 input meter sits at its right edge; WavePanel stays 920 x 120.
+- Shared helper `SourceReplaceUndo` / `sourceNeedsEmbed()` is created by whichever of F12/F14 lands first (roadmap README); the confirmation for replacing a loop that has a pattern is F05's `requestLoad`.
+
 ## 1. Summary and user value
 Record the track's audio input straight into ChopFractal and chop it, instead of exporting a loop to disk and importing it. A four-state flow (Arm / Capture / Stop / Keep) records either free-running or synced to the host's bar grid, using a preallocated buffer so the audio thread never allocates. This closes the last gap in BUILD_STATUS stage 3 ("Not done: input capture") and removes the file-only workflow for the main use case (sample a loop from another track or instrument).
 
