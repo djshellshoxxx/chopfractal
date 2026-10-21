@@ -70,7 +70,7 @@ enum Which : unsigned { kEcho = 1, kTrem = 2, kStutter = 4, kRoll = 8 };
 FlatEventList pattern(unsigned fx) {
   FlatEventList list;
   std::uint64_t id = 1;
-  auto add = [&](int chop, Ticks start, Ticks dur) -> FlatEvent& {
+  auto add = [&](int chop, Ticks start, Ticks dur) -> std::size_t {
     FlatEvent e;
     e.id = EventId{id++};
     e.chop = ChopId{static_cast<std::uint64_t>(chop + 1)};
@@ -78,37 +78,37 @@ FlatEventList pattern(unsigned fx) {
     e.start = start;
     e.duration = dur;
     list.push_back(e);
-    return list.back();
+    return list.size() - 1;  // an index: the vector grows, references would dangle
   };
   for (int bar = 0; bar < 2; ++bar) {
     const Ticks b = bar * 3840;
     add(0, b, 960);
     add(0, b + 1920 + 480, 480);
-    FlatEvent& sn1 = add(2, b + 960, 960);
-    FlatEvent& sn2 = add(2, b + 2880, 960);
+    const std::size_t sn1 = add(2, b + 960, 960);
+    const std::size_t sn2 = add(2, b + 2880, 960);
     for (int h = 0; h < 8; ++h) {
-      FlatEvent& hat = add((h == 7 && bar == 1) ? 3 : 1, b + h * 480, 480);
-      if ((fx & kTrem) && (h % 2) == 1) hat.tremPan = TremPanFx{2, 1, 70};
+      const std::size_t hat = add((h == 7 && bar == 1) ? 3 : 1, b + h * 480, 480);
+      if ((fx & kTrem) && (h % 2) == 1) list[hat].tremPan = TremPanFx{2, 1, 70};
     }
     if (fx & kEcho) {
-      sn1.echo = EchoFx{3, 255, 255};
-      sn2.echo = EchoFx{4, 1, 60};
+      list[sn1].echo = EchoFx{3, 255, 255};
+      list[sn2].echo = EchoFx{4, 1, 60};
     }
     if (fx & kStutter) {
       StutterFx f;
       f.rate = 4;
       f.rateEnd = 6;
       f.pitch = -30;
-      sn2.stutter = f;
-      sn2.echo.reset();
+      list[sn2].stutter = f;
+      list[sn2].echo.reset();
     }
     if (fx & kRoll) {
       RollFx f;
       f.rate = 3;
       f.rateEnd = 8;
       f.flags = kRollSmooth;
-      sn1.roll = f;
-      sn1.echo.reset();
+      list[sn1].roll = f;
+      list[sn1].echo.reset();
     }
   }
   sortFlat(list);

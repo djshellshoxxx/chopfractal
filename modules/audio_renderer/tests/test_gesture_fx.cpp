@@ -338,7 +338,8 @@ CHOP_TEST(stutter_pitch_ramp_changes_the_read_rate_and_probability_thins_the_rep
   int counts[2] = {0, 0};
   for (int run = 0; run < 2; ++run) {
     q.id = EventId{static_cast<std::uint64_t>(5 + run)};
-    for (const PreparedSlice& s : pb(dcSource(40000, 1.f), {q})->slices) counts[run] += s.fxBit == fxbit::kStutter ? 1 : 0;
+    const auto made = pb(dcSource(40000, 1.f), {q});
+    for (const PreparedSlice& s : made->slices) counts[run] += s.fxBit == fxbit::kStutter ? 1 : 0;
   }
   CHECK(counts[0] >= 1 && counts[0] <= 4);
   const auto again = pb(dcSource(40000, 1.f), {q});
