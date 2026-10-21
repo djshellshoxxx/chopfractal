@@ -2,6 +2,7 @@
 
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <cmath>
+#include <initializer_list>
 
 #include "CdlLookAndFeel.h"
 
