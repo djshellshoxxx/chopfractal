@@ -1,5 +1,7 @@
 #include "SoundPanel.h"
 
+#include <algorithm>
+#include <initializer_list>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 
 #include <cmath>

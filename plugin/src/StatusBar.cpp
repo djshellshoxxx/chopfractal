@@ -84,7 +84,7 @@ void StatusBar::updateMessage() {
 }
 
 void StatusBar::refreshReadouts() {
-  const bool compact = getWidth() < 900;
+  const bool compact = getWidth() < 1200;
   if (compact != compact_) {
     compact_ = compact;
     resized();

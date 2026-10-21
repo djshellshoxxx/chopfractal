@@ -182,7 +182,7 @@ CHOP_TEST(status_bar_is_laid_out_at_both_sizes) {
     rig.proc.setStatusMessage("Exported loop-bounce.wav, 4 bars, 8.5 s. A very long message follows so that the line has to be elided at the end of its area", Severity::Warning);
     pump(200);
     auto& bar = rig.ed->statusBar();
-    CHECK_EQ(bar.compact(), size.first < 900);
+    CHECK_EQ(bar.compact(), size.first < 1200);
     CHECK(bar.syncBox().text().startsWith("120.0"));
     CHECK(bar.voiceBox().text().startsWith("V "));
     CHECK(bar.getBottom() <= rig.ed->getHeight());

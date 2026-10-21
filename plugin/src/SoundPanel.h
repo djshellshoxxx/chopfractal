@@ -3,6 +3,8 @@
 // Break engine (profile, backbeat, anchors, humanize, fill), Groove Lab, the Stutter, Roll, Echo and Tremolo-Pan generation
 // effects, slice polish, and the level match and safety limiter settings. Every control is attached to the parameter tree, so
 // automation, presets and a restored project move it, and its tooltip carries the value line from host::describeParam.
+#include <initializer_list>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 

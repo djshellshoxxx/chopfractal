@@ -7,6 +7,7 @@
 // Registering a drawer: build a component, call registerDrawer(id, title, content, width). It gets a toggle button in the
 // top bar (unless showButton is false) and is shown in the drawer region when openDrawer(id) / toggleDrawer(id) is called.
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <functional>
 
 #include "CdlLookAndFeel.h"
 #include "CommandPalette.h"
@@ -160,7 +161,15 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   OrbitPanel orbit_;
   PresetBrowser presets_;
   ExportDrawer export_;
-  juce::Viewport legacyView_;
+  // The Tools drawer scrolls vertically; its body follows the drawer width.
+  struct LegacyViewport : juce::Viewport {
+    std::function<void()> onSized;
+    void resized() override {
+      juce::Viewport::resized();
+      if (onSized) onSized();
+    }
+  };
+  LegacyViewport legacyView_;
   InspectorPanel inspector_;
   FxRackPanel fxRack_;
   RulesPanel rules_;

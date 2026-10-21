@@ -1,5 +1,6 @@
 // History drawer (G2): node details, favorite, rename, compare, A/B slots and the morph, through the real editor.
 #include <algorithm>
+#include <cstring>
 #include <memory>
 
 #include "EditorModel.h"

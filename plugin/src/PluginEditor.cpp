@@ -15,7 +15,7 @@
 namespace cf = chopfractal;
 
 namespace {
-constexpr int kLegacyW = 920, kLegacyH = 344;
+constexpr int kLegacyW = 372, kLegacyControlsH = 338, kLegacyH = kLegacyControlsH + 6 + 56;
 }
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
@@ -55,12 +55,19 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   for (juce::Component* c : std::initializer_list<juce::Component*>{&chrome_, &wave_, &pattern_, &macro_, &topBar_, &status_, &drawer_}) addAndMakeVisible(*c);
 
   // Tools drawer: the older panels, unchanged, at their old relative positions.
-  controls_.setBounds(0, 0, 920, 232 - 36 + 30);
-  features_.setBounds(0, 232 - 36 + 30 + 6, 920, 104);
+  controls_.setBounds(0, 0, kLegacyW, kLegacyControlsH);
+  features_.setBounds(0, kLegacyControlsH + 6, kLegacyW, 56);
   for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_}) legacyBody_.addAndMakeVisible(*c);  // the Orbit View and the family tree have their own drawers
   legacyBody_.setSize(kLegacyW, kLegacyH);
   legacyView_.setViewedComponent(&legacyBody_, false);
-  legacyView_.setScrollBarsShown(true, true);
+  legacyView_.onSized = [this] {
+    const int w = std::max(300, legacyView_.getMaximumVisibleWidth());
+    if (legacyBody_.getWidth() == w) return;
+    controls_.setBounds(0, 0, w, kLegacyControlsH);
+    features_.setBounds(0, kLegacyControlsH + 6, w, 56);
+    legacyBody_.setSize(w, kLegacyH);
+  };
+  legacyView_.setScrollBarsShown(true, false);
   legacyView_.setComponentID("ToolsDrawer");
 
   registerDrawer("presets", "Presets", presets_, 380);
