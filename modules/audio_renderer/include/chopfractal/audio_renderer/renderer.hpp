@@ -13,6 +13,7 @@
 // Threading: prepare()/makePlayback()/mailbox().publish() are non-real-time. process() and reset() are
 // real-time safe: no allocation, locks, I/O, or logging. requestPreview() may be called from one
 // non-RT producer thread.
+#include <chopfractal/audio_renderer/limiter.hpp>
 #include <chopfractal/audio_renderer/mailbox.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/result.hpp>
@@ -114,6 +115,11 @@ struct RenderParams {
   // v1 fades and voice handling bit for bit.
   bool slicePolish = false;
   std::uint8_t fxMask = fxbit::kAll;  // which gesture effects play (bypass without rebuilding the playback)
+  // Output stage (F16). matchGainDb scales the generated branch only (50 ms linear ramp per change, skipped entirely at 0);
+  // the limiter sees everything the plugin outputs and adds Renderer::latencyFrames() of latency while it is on.
+  float matchGainDb = 0.f;
+  bool limiterEnabled = false;
+  float limiterCeilingDb = -1.f;
 };
 
 struct PreviewRequest {
@@ -138,6 +144,9 @@ class Renderer {
   bool requestPreview(const PreviewRequest& request);  // false when the queue is full
   void reset();                                         // RT-safe: silences everything immediately
   int activeVoices() const;                             // sounding + fading voices (preview excluded)
+  // Latency of the safety limiter while it is enabled (0 otherwise); updated once per block.
+  int latencyFrames() const;
+  LimiterTelemetry& limiterTelemetry();
   std::uint64_t droppedTriggers() const;
 
  private:

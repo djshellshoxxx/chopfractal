@@ -107,6 +107,10 @@ struct Renderer::Impl {
   std::uint64_t serialCounter = 0;
   std::uint64_t dropped = 0;
 
+  Limiter limiter;
+  std::atomic<int> latency{0};
+  double matchGain = 1.0, matchTarget = 1.0, matchStep = 0.0;  // linear; ramped per sample
+  int matchRampLeft = 0;
   bool polish = false;                      // RenderParams::slicePolish of the block being processed
   std::uint8_t fxMask = fxbit::kAll;        // RenderParams::fxMask of the block being processed
   std::array<double, 1025> sineTable{};     // one period of sine, for the tremolo-pan LFO (built in prepare)
@@ -128,6 +132,11 @@ struct Renderer::Impl {
     triggers.reserve(kMaxPreparedEvents);
     smoothCoef = 1.0 - std::exp(-1.0 / (0.01 * cfg.sampleRate));
     for (std::size_t i = 0; i < sineTable.size(); ++i) sineTable[i] = std::sin(2.0 * kPi * static_cast<double>(i) / 1024.0);
+    limiter.prepare(cfg.sampleRate, cfg.maxBlock);
+    latency.store(0, std::memory_order_relaxed);
+    matchGain = matchTarget = 1.0;
+    matchStep = 0.0;
+    matchRampLeft = 0;
     outGain = 1.0;
     dry = 0.0;
     gainsPrimed = false;
@@ -552,9 +561,13 @@ struct Renderer::Impl {
       hardKillAll();
       wasPlaying = false;
       haveExpected = false;
+      if (limiter.active()) limiter.reset();
+      latency.store(0, std::memory_order_relaxed);
       passthrough(in, out, nch, frames);
       return;
     }
+    const LimiterParams lp{params.limiterEnabled, params.limiterCeilingDb};
+    latency.store(params.limiterEnabled ? limiter.latencyFrames() : 0, std::memory_order_relaxed);
 
     std::fill(mixL.begin(), mixL.begin() + frames, 0.f);
     std::fill(mixR.begin(), mixR.begin() + frames, 0.f);
@@ -566,17 +579,31 @@ struct Renderer::Impl {
       wasPlaying = false;
       haveExpected = false;
       renderVoices(0, frames);
+      const bool limitIt = params.limiterEnabled || limiter.active();
       for (int i = 0; i < frames; ++i) {
         const float x0 = (in && in[0]) ? in[0][i] : 0.f;
         const float x1 = (nch > 1 && in && in[1]) ? in[1][i] : x0;
         const float l = mixL[static_cast<std::size_t>(i)];
         const float r = mixR[static_cast<std::size_t>(i)];
+        if (limitIt) {  // stereo for the limiter; the mono downmix happens after it
+          mixL[static_cast<std::size_t>(i)] = std::isfinite(x0 + l) ? x0 + l : 0.f;
+          mixR[static_cast<std::size_t>(i)] = std::isfinite(x1 + r) ? x1 + r : 0.f;
+          continue;
+        }
         float o0 = nch == 2 ? x0 + l : x0 + 0.5f * (l + r);
         float o1 = x1 + r;
         if (!std::isfinite(o0)) o0 = 0.f;
         if (!std::isfinite(o1)) o1 = 0.f;
         out[0][i] = o0;
         if (nch == 2) out[1][i] = o1;
+      }
+      if (limitIt) {
+        limiter.process(lp, mixL.data(), mixR.data(), frames);
+        for (int i = 0; i < frames; ++i) {
+          const float a = mixL[static_cast<std::size_t>(i)], b = mixR[static_cast<std::size_t>(i)];
+          out[0][i] = nch == 2 ? a : 0.5f * (a + b);
+          if (nch == 2) out[1][i] = b;
+        }
       }
       return;
     }
@@ -611,16 +638,25 @@ struct Renderer::Impl {
     }
     renderVoices(cursor, frames);
 
-    // Output stage: generated playback, plus optionally the current input; both gains are smoothed
-    // per sample so the result does not depend on the host block size.
+    // Output stage: generated playback (times the level-match gain), plus optionally the current input; all gains are
+    // smoothed per sample so the result does not depend on the host block size. The limiter, when on, comes last.
     const double dB = std::isfinite(params.outputGainDb) ? std::min(24.0, std::max(-96.0, static_cast<double>(params.outputGainDb))) : 0.0;
     const double targetGain = std::pow(10.0, dB / 20.0);
     const double targetDry = std::isfinite(params.dryMix) ? std::min(1.0, std::max(0.0, static_cast<double>(params.dryMix))) : 0.0;
+    const float mdb = std::isfinite(params.matchGainDb) ? std::min(24.f, std::max(-24.f, params.matchGainDb)) : 0.f;
+    const double targetMatch = mdb == 0.f ? 1.0 : std::pow(10.0, static_cast<double>(mdb) / 20.0);
     if (!gainsPrimed) {
       outGain = targetGain;
       dry = targetDry;
+      matchGain = matchTarget = targetMatch;
+      matchRampLeft = 0;
       gainsPrimed = true;
+    } else if (targetMatch != matchTarget) {
+      matchTarget = targetMatch;
+      matchRampLeft = std::max(1, static_cast<int>(std::lround(0.05 * cfg.sampleRate)));  // 50 ms linear ramp per change
+      matchStep = (targetMatch - matchGain) / static_cast<double>(matchRampLeft);
     }
+    const bool limitIt = params.limiterEnabled || limiter.active();
     const float* in0 = (in && in[0]) ? in[0] : nullptr;
     const float* in1 = (nch > 1 && in && in[1]) ? in[1] : in0;
     for (int i = 0; i < frames; ++i) {
@@ -628,10 +664,27 @@ struct Renderer::Impl {
       dry += (targetDry - dry) * smoothCoef;
       if (std::fabs(targetGain - outGain) < 1e-7) outGain = targetGain;
       if (std::fabs(targetDry - dry) < 1e-7) dry = targetDry;
+      if (matchRampLeft > 0) {
+        matchGain += matchStep;
+        if (--matchRampLeft == 0) matchGain = matchTarget;
+      }
       const float x0 = in0 ? in0[i] : 0.f;
       const float x1 = in1 ? in1[i] : 0.f;
-      const float l = mixL[static_cast<std::size_t>(i)];
-      const float r = mixR[static_cast<std::size_t>(i)];
+      float l = mixL[static_cast<std::size_t>(i)];
+      float r = mixR[static_cast<std::size_t>(i)];
+      if (matchGain != 1.0) {  // the generated branch only; skipped entirely at 0 dB so the plain path has no extra multiply
+        l = static_cast<float>(l * matchGain);
+        r = static_cast<float>(r * matchGain);
+      }
+      if (limitIt) {
+        float s0 = static_cast<float>((l + dry * x0) * outGain);
+        float s1 = static_cast<float>((r + dry * (nch == 2 ? x1 : x0)) * outGain);
+        if (!std::isfinite(s0)) s0 = 0.f;
+        if (!std::isfinite(s1)) s1 = 0.f;
+        mixL[static_cast<std::size_t>(i)] = s0;
+        mixR[static_cast<std::size_t>(i)] = s1;
+        continue;
+      }
       float o0, o1 = 0.f;
       if (nch == 2) {
         o0 = static_cast<float>((l + dry * x0) * outGain);
@@ -643,6 +696,18 @@ struct Renderer::Impl {
       if (!std::isfinite(o1) || std::fabs(o1) < 1e-30f) o1 = 0.f;
       out[0][i] = o0;
       if (nch == 2) out[1][i] = o1;
+    }
+    if (limitIt) {
+      limiter.process(lp, mixL.data(), mixR.data(), frames);
+      for (int i = 0; i < frames; ++i) {
+        const float a = mixL[static_cast<std::size_t>(i)], b = mixR[static_cast<std::size_t>(i)];
+        float o0 = nch == 2 ? a : 0.5f * (a + b);
+        float o1 = b;
+        if (!std::isfinite(o0) || std::fabs(o0) < 1e-30f) o0 = 0.f;
+        if (!std::isfinite(o1) || std::fabs(o1) < 1e-30f) o1 = 0.f;
+        out[0][i] = o0;
+        if (nch == 2) out[1][i] = o1;
+      }
     }
   }
 
@@ -695,6 +760,7 @@ bool Renderer::requestPreview(const PreviewRequest& request) {
 
 void Renderer::reset() {
   impl_->hardKillAll();
+  impl_->limiter.reset();
   impl_->wasPlaying = false;
   impl_->haveExpected = false;
 }
@@ -705,6 +771,9 @@ int Renderer::activeVoices() const {
     if (v.active) ++n;
   return n;
 }
+
+int Renderer::latencyFrames() const { return impl_->latency.load(std::memory_order_relaxed); }
+LimiterTelemetry& Renderer::limiterTelemetry() { return impl_->limiter.telemetry(); }
 
 std::uint64_t Renderer::droppedTriggers() const { return impl_->dropped; }
 
@@ -727,8 +796,11 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   const std::int64_t tailFrames = static_cast<std::int64_t>(std::ceil(s.tailSeconds * s.sampleRate));
   const std::int64_t total = mainFrames + tailFrames;
   if (total > static_cast<std::int64_t>(s.sampleRate) * 3600) return makeError(ErrorCode::LimitExceeded, "render would exceed one hour");
+  // The limiter delays the signal by its latency. An export is latency-compensated: render that many extra frames at the
+  // end (nothing new is scheduled there) and drop the same number from the start, so the length is unchanged.
+  const std::int64_t lat = (s.params.limiterEnabled && s.params.enabled) ? Limiter::latencyFor(s.sampleRate) : 0;
 
-  std::vector<std::vector<float>> out(2, std::vector<float>(static_cast<std::size_t>(total), 0.f));
+  std::vector<std::vector<float>> out(2, std::vector<float>(static_cast<std::size_t>(total + lat), 0.f));
   std::vector<float> silence(static_cast<std::size_t>(s.blockSize), 0.f);
   // Two phases so that no block ever straddles the end of the pattern: the output must not depend on the
   // block size. Phase 1 schedules events; phase 2 lets sounding voices ring out without starting new ones.
@@ -752,9 +824,14 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
     }
   };
   renderRange(0, mainFrames, true);
-  renderRange(mainFrames, total, false);
+  renderRange(mainFrames, total + lat, false);
   if (!aborted && progress && !progress(1.0)) aborted = true;
   if (aborted) return makeError(ErrorCode::Cancelled, "export cancelled");
+  if (lat > 0)
+    for (auto& ch : out) {
+      ch.erase(ch.begin(), ch.begin() + static_cast<std::ptrdiff_t>(lat));
+      ch.resize(static_cast<std::size_t>(total));
+    }
   return out;
 }
 
