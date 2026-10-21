@@ -1,0 +1,10 @@
+# Everything needs the maintainer's review; the hot files (see docs/specs/roadmap/README.md section 3) are listed
+# on their own so a future second owner can be added per area without reshuffling the file.
+*                                                            @djshellshoxxx
+/plugin/src/PluginProcessor.*                                @djshellshoxxx
+/plugin/src/PluginEditor.*                                   @djshellshoxxx
+/plugin/CMakeLists.txt                                       @djshellshoxxx
+/CMakeLists.txt                                              @djshellshoxxx
+/composition/include/chopfractal/composition/project_session.hpp @djshellshoxxx
+/modules/plugin_host_adapter/src/parameters.cpp              @djshellshoxxx
+/.github/workflows/                                          @djshellshoxxx

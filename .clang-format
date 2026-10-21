@@ -1,0 +1,14 @@
+# The style the code base already uses: Google-derived, 2-space indent, long lines allowed up to 160 columns.
+# Not enforced in CI yet: reformat the tree in a format-only PR first so it never mixes with logic changes.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+ColumnLimit: 160
+IndentWidth: 2
+AccessModifierOffset: -1
+AllowShortFunctionsOnASingleLine: All
+AllowShortLambdasOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+DerivePointerAlignment: false
+PointerAlignment: Left
