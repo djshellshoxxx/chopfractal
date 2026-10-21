@@ -21,7 +21,8 @@ struct EditorView {
   chopfractal::ui::PeakBins peaks;  // computed for the wave panel's width; kept while the source and width are unchanged
   std::vector<chopfractal::ui::MarkerView> markers;
   std::vector<chopfractal::ChopInfo> chops;
-  chopfractal::ui::PatternView pattern;
+  chopfractal::ui::PatternView pattern;  // the pattern the panels draw: the real one, the A/B morph preview or the playing scene
+  juce::String previewLabel;             // "Morph preview" or "Scene preview" while the drawn pattern is not the project's own
   chopfractal::ui::OrbitView orbit;
   std::vector<chopfractal::ui::TreeNodeView> tree;
   int treeCols = 0, treeRows = 0;

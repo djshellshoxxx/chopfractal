@@ -26,7 +26,8 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       controls_(model_, commands_, processor.apvts),
       features_(model_, commands_),
       history_(model_, commands_),
-      orbit_(model_, commands_) {
+      orbit_(model_, commands_),
+      perform_(processor, model_, commands_) {
   const auto saved = cdl::loadUserSettings();
   cdl::setCurrentTheme(saved.theme);
   advanced_ = saved.advanced;
@@ -40,8 +41,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   controls_.setBounds(0, 0, 920, 232 - 36 + 30);
   features_.setBounds(0, 232 - 36 + 30 + 6, 920, 104);
   history_.setBounds(0, 340, 808, 106);
-  orbit_.setBounds(814, 340, 106, 106);
-  for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_, &history_, &orbit_}) legacyBody_.addAndMakeVisible(*c);
+  for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_, &history_}) legacyBody_.addAndMakeVisible(*c);  // the Orbit View has its own drawer
   legacyBody_.setSize(kLegacyW, kLegacyH);
   legacyView_.setViewedComponent(&legacyBody_, false);
   legacyView_.setScrollBarsShown(true, true);
@@ -49,6 +49,11 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
 
   registerDrawer("tools", "Tools", legacyView_, 420);
   registerDrawer("settings", "Settings", settings_, 300, false);
+  perform_.registerAll([this](const juce::String& id, const juce::String& title, juce::Component& c, int w) { registerMenuDrawer(id, title, c, w); });
+  registerMenuDrawer("orbit", "Orbit", orbit_, 320);
+  features_.attachEvolve(&perform_.evolve());
+  perform_.commands().openDrawer = [this](const juce::String& id) { openDrawer(id); };
+  topBar_.onMenuChoice = [this](const juce::String& id) { toggleDrawer(id); };
   settings_.showTheme(cdl::currentTheme());
   settings_.onTheme = [this](cdl::ThemeId t) { setTheme(t); };
   settings_.onResetSize = [this] { setSize(shell::kDefaultW, shell::kDefaultH); };

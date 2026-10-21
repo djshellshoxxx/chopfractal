@@ -2,6 +2,7 @@
 // Central help catalog for the JUCE shell. Keeps user guidance separate from editor behavior.
 #include <juce_gui_basics/juce_gui_basics.h>
 
+// Controls with their own one-clause tooltips (the wave-two drawers: Evolve, Scenes) are not listed here.
 namespace control_help {
 inline juce::String forName(const juce::String& name) {
   struct Entry { const char* name; const char* help; };
@@ -48,21 +49,8 @@ inline juce::String forName(const juce::String& name) {
     {"Drag MIDI", "Drag this handle into a DAW or file manager to export the current pattern as MIDI for the sliced chops."},
     {"Drag WAV", "Drag this handle into a DAW or file manager to export rendered audio using the export settings."},
     {"Locate Source", "Find the original audio file for a project with missing source audio. Keeps its existing markers, pattern and history."},
-    {"Smart Setup", "Analyze the loop to suggest chop roles, tempo and loop length. Suggestions are applied only when you accept them."},
-    {"Accept Roles", "Apply the role suggestions from Smart Setup to the chops. Used by later Generate or Mutate actions."},
-    {"Use Tempo", "Use Smart Setup's suggested local tempo. The host tempo still takes priority until local Play is used."},
-    {"Fractal", "Create self-similar nested rhythms from the motif and depth controls. x is a hit, a is an accent, and . is a rest."},
-    {"Motif", "Enter up to eight characters: x for hit, a for accented hit, . for rest. Press Fractal to build the rhythm."},
-    {"Fractal motif: x hit, a accent, dot rest", "Enter up to eight characters: x for hit, a for accent, . for rest. Press Fractal to apply."},
-    {"Depth", "Choose how many nested rhythm levels Fractal creates. Higher depth uses more of the event budget."},
-    {"Fractal depth", "Choose 1 to 3 nested levels, then press Fractal. Higher values create finer rhythmic subdivisions."},
-    {"Evolve", "Automatically mutate the pattern during playback. Every sets the cadence; amount sets the change size. Locked parts stay fixed. Keep preserves the current result."},
-    {"Run Evolve", "Same switch as the Evolve button in the strip below the pattern: automatically mutate the pattern during playback. Every, Amount, Depth and Motif apply to it."},
-    {"Every", "Set the number of loops between Evolve changes."},
-    {"Evolve every", "Choose how many playback loops pass between automatic Evolve steps."},
-    {"Evolve amount", "Adjust how much Evolve changes the rhythm at each step. You can change it while Evolve runs."},
-    {"Keep", "Keep the current evolved pattern and stop automatic evolution."},
     {"Export WAV", "Render the current pattern to a WAV file using Format, sample rate and Loops. Requires loaded source audio and a generated pattern."},
+    {"Evolve", "Automatically mutate the pattern during playback. The Evolve drawer sets how often and how much; Keep preserves the current result."},
     {"Cancel Export", "Stop the running export. Files this export created are removed; nothing is left half written."},
     {"Export Kit", "Export each chop as its own WAV plus a MIDI file that reconstructs the pattern on the slices."},
     {"Format", "Select the bit depth or float format for WAV export."},
@@ -70,10 +58,6 @@ inline juce::String forName(const juce::String& name) {
     {"Export sample rate", "Choose the sample rate for rendered WAV export."},
     {"Loops", "Choose how many repetitions the exported WAV contains."},
     {"Export loops", "Choose how many complete repetitions of the pattern to render into the WAV."},
-    {"Store A", "Store the current pattern in comparison slot A. The snapshots are saved with the project."},
-    {"Recall A", "Recall comparison pattern A. It may be unavailable if its source chops have changed."},
-    {"Store B", "Store the current pattern in comparison slot B. The snapshots are saved with the project."},
-    {"Recall B", "Recall comparison pattern B. It may be unavailable if its source chops have changed."},
     {"Role for the selected hit's chop", "Choose a role such as kick, snare or hat for the primary selected hit's source chop. Press Set Role to apply."},
     {"Set Role", "Apply the chosen role to the primary selected hit's source chop. The role is used during future Generate or Mutate."},
     {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},

@@ -9,7 +9,7 @@ Last audited 2026-10-20 against the code on `main` (after pass 3 and audit round
 | 0 Toolchain audit | **Done** | C++17; GCC 13, Clang 18, Apple Clang (macOS arm64) and MSVC 2022 all build and pass the full suite in CI |
 | 1 Source and pattern model | **Done** | Deterministic generation, locks, undo, state round-trip, no audio needed to test it |
 | 2 Minimal audio effect | **Done on Linux** | VST3 shell builds, passes the official Steinberg validator (47/47), pass-through before a source exists |
-| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. Input capture (Arm / Capture / Stop / Keep) is built and tested in the portable layers and the processor; the GUI controls are pending (command list in the F12 spec) |
+| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. Input capture (Arm / Capture / Stop / Keep) is built and tested in the portable layers and the processor; the Capture drawer drives it (Panels menu) |
 | 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
 | 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
 | 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
@@ -118,8 +118,8 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 ## Known gaps
 
-- **Multiple outputs** have no GUI controls yet; routing is driven through the session API (see F11 spec section 12).
-- **Input capture** has no GUI controls yet; the engine, session API, processor and view-model exist (see F12 spec section 12).
+- **Multiple outputs** are routed in the Outputs drawer (Panels menu); the session API behind it is in the F11 spec section 12.
+- **Input capture** is operated from the Capture drawer (Panels menu); the engine, session API and view-model are in the F12 spec section 12.
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
 - Direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
@@ -149,10 +149,13 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F11 | Multi-output stems | Renderer, host buses, session routing (state tag 9), processor and view model built and tested; the Outputs section is pending (command list in the F11 spec, section 12) |
 | F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |
 | F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
-| F09 | Evolve scenes | **Done** (logic and session API; GUI wiring pending): `scenes` module, armed loop-boundary switch in the renderer (`armed_switch.hpp`), state tag 11, export; commands in spec section 12 |
-| F10 | A/B morph | **Done** (logic and session API; GUI wiring pending) |
+| F09 | Evolve scenes | **Done** (Scenes drawer; logic and session API): `scenes` module, armed loop-boundary switch in the renderer (`armed_switch.hpp`), state tag 11, export; commands in spec section 12 |
+| F10 | A/B morph | **Done** (morph row of the Scenes drawer) |
 | F14 | Tempo match | Not started |
 | F13 | MIDI drag-out | **Done** (logic and session API; GUI wiring pending): settings, per-variation export, Producer Kit |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
-| F18 | Arrangement export | **Done** (logic and session API; GUI wiring pending): `arrangement` model and tag 16, `ArrangementJob` worker, `wav_export` cue chunk, `midi_export` markers; commands in spec section 12 |
+| F18 | Arrangement export | **Done** (Arrangement drawer): `arrangement` model and tag 16, `ArrangementJob` worker, `wav_export` cue chunk, `midi_export` markers; commands in spec section 12 |
 | F16, F17, F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |
+
+
+GUI wave two (G4): the Panels menu opens drawers for Capture, Tempo, Pads, Scenes (with the A/B morph row), Evolve (motif presets, depth, accent decay, Smart Setup suggestions), Outputs and Arrangement; the Orbit View has its own drawer. Panel tests live in plugin/tests/test_perform_*.cpp; CHOPFRACTAL_PERFORM_SNAPS=<folder> renders every drawer at 1100x720 and 880x560.

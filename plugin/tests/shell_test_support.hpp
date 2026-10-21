@@ -219,10 +219,12 @@ class MouseSim {
   }
 
  private:
-  // The canvas panel under the point: walks down the visible children; a panel whose ID names one of the four canvases
+  // The canvas panel under the point: walks down the visible children; a panel whose ID names one of the canvases (the four main ones, the drawer pads "pad-N" and "canvas-..." panels)
   // is the target, any other widget is not. A point no child covers belongs to `root` itself, so the helper also
   // works on a component that draws its canvases directly.
-  static bool isCanvasId(const juce::String& id) { return id == "WavePanel" || id == "PatternPanel" || id == "HistoryPanel" || id == "OrbitPanel"; }
+  static bool isCanvasId(const juce::String& id) {
+    return id == "WavePanel" || id == "PatternPanel" || id == "HistoryPanel" || id == "OrbitPanel" || id.startsWith("pad-") || id.startsWith("canvas-");
+  }
   static juce::Component* canvasAt(juce::Component& c, juce::Point<int> local, bool isRoot = true) {
     for (int i = c.getNumChildComponents(); --i >= 0;) {
       auto* child = c.getChildComponent(i);

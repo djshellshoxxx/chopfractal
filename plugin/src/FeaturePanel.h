@@ -1,9 +1,10 @@
 #pragma once
-// Smart Setup, Fractal, Evolve, export, snapshots, roles, presets and drag-out. These controls act on the project
-// rather than on host parameters. Their widget state is translated into the *Ui structs the commands take.
+// Export, roles, detection mode, presets and drag-out (the Tools drawer). Smart Setup, Fractal and Evolve moved to the
+// EvolvePanel and the A/B snapshots to the ScenesPanel; presets read and write their widgets through attachEvolve().
 #include <vector>
 
 #include "DragOut.h"
+#include "EvolvePanel.h"
 #include "EditorPanels.h"
 #include "PresetManager.h"
 
@@ -14,9 +15,11 @@ class FeaturePanel : public EditorPanelBase {
 
   // Public so tests can drive them without modal dialogs.
   void reroll() { cmd_.reroll(); }
-  // The shell's Evolve button drives the same settings as the rows below (Every, Amount, Depth, Motif).
-  void setEvolveEnabled(bool on);
-  bool evolveEnabled() const { return evolve_.getToggleState(); }
+  // The Evolve and Fractal widgets live in the EvolvePanel; the shell attaches it once both exist.
+  void attachEvolve(EvolvePanel* e) { evolve_ = e; }
+  // The shell's Evolve button drives the same settings as the Evolve drawer (Every, Amount, Depth, Motif).
+  void setEvolveEnabled(bool on) { if (evolve_) evolve_->setEvolveEnabled(on); }
+  bool evolveEnabled() const { return evolve_ && evolve_->evolveEnabled(); }
   juce::String presetName() const;  // the preset chosen in the list, empty after a manual change
   void applyPreset(const chopfractal::presets::Preset&);
   chopfractal::presets::Preset currentPreset(const juce::String& name) const;
@@ -27,25 +30,19 @@ class FeaturePanel : public EditorPanelBase {
 
  private:
   void modelChanged(Change) override;
-  void pushEvolve();
   void updateExportButtons();
   void askSavePreset();
-  FractalUi fractalUi() const;
-  EvolveUi evolveUi() const;
+  FractalUi fractalUi() const { return evolve_ ? evolve_->fractalUi() : FractalUi{}; }
+  EvolveUi evolveUi() const { return evolve_ ? evolve_->evolveUi() : EvolveUi{}; }
   ExportUi exportUi() const;
 
-  juce::TextButton smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"}, exportWav_{"Export WAV"},
-      exportKit_{"Export Kit"}, locate_{"Locate Source"};
-  juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
+  juce::TextButton exportWav_{"Export WAV"}, exportKit_{"Export Kit"}, locate_{"Locate Source"}, setRole_{"Set Role"};
   juce::TextButton savePreset_{"Save Preset"}, deletePreset_{"Delete"};
   juce::ComboBox role_, preset_, detectMode_;
   std::vector<PresetManager::Entry> presets_;
   DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
   DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
-  juce::ToggleButton evolve_{"Run Evolve"};  // legacy mirror of the shell's Evolve button
-  juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
-  juce::TextEditor motif_;
-  chopfractal::evolve::Settings pushedEvolve_;  // the settings this panel last sent; a different session value (a restored project) is shown
-  juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
-  juce::Slider evolveAmount_;
+  EvolvePanel* evolve_ = nullptr;
+  juce::Label fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
+  juce::ComboBox exportFormat_, exportRate_, exportLoops_;
 };
