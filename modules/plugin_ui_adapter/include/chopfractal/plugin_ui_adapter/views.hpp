@@ -37,6 +37,8 @@ ViewWindow scrolledBy(const ViewWindow& w, double deltaPx, std::int64_t totalFra
 struct MarkerView {
   ChopId id;
   double x = 0.0;
+  std::int64_t position = 0;   // frames
+  std::uint32_t trimStart = 0, trimEnd = 0;
   bool visible = false;  // inside the current window
   bool enabled = true;
   bool manual = true;
@@ -60,6 +62,14 @@ struct EventRect {
   bool userOwned = false;
   bool hasChild = false;
   bool childActive = false;
+  std::int64_t startTick = 0;     // absolute, within the pattern
+  std::int64_t durationTick = 0;
+  std::int64_t startInBar = 0;    // top-level: ticks into its bar; nested: ticks into the parent window
+  bool enabled = true;            // false = muted; muted hits stay in the view
+  bool topLevel = true;           // depth == 0
+  float pan = 0.f;
+  float probability = 1.f;
+  bool hasFx = false;             // any filter / glide / crunch / gesture block
   std::string description;  // accessible text
 };
 struct PatternView {

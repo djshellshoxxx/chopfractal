@@ -45,7 +45,9 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   exportLoops_.setSelectedId(model_.extras().exportUi.loopsIndex + 1, juce::dontSendNotification);
   exportLoops_.setTitle("Export loops");
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_})
-    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi = {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }); };
+    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi.formatIndex = exportFormat_.getSelectedId() - 1;
+      e.exportUi.rateIndex = exportRate_.getSelectedId() - 1;
+      e.exportUi.loopsIndex = exportLoops_.getSelectedId() - 1; }); };
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
   for (juce::Button* b : std::initializer_list<juce::Button*>{&savePreset_, &deletePreset_}) {

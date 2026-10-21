@@ -2,6 +2,8 @@
 #include <chopfractal/chop_contracts/bytes.hpp>
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 
+#include <cstdio>
+
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -214,6 +216,14 @@ bool GrammarPolicy::isPreserved(const CandidateQuery& q) const {
   return false;
 }
 
+std::uint32_t GrammarPolicy::preservingRule(const CandidateQuery& q) const {
+  for (const Rule& r : rules_.rules)
+    if (r.enabled && r.action.kind == ActionKind::Preserve && matchesChop(r.when, q.chop) && inRange(r.when, q.scope) &&
+        matchesPosition(r.when, q.scope, q.firstInBar))
+      return r.id;
+  return 0;
+}
+
 std::vector<Requirement> GrammarPolicy::required(const ScopeContext& scope, const std::vector<ChopId>& placedInScope) const {
   std::vector<Requirement> out;
   for (const Rule* rp : ordered()) {
@@ -257,6 +267,56 @@ std::string GrammarPolicy::explain(const Decision& d) const {
     }
     text += "; rule " + std::to_string(t.rule) + " (" + labelOf(t.rule) + ") " + effect;
   }
+  return text;
+}
+
+namespace {
+std::string rangeText(const char* noun, int lo, int hi) {  // lo, hi are 0-based and inclusive; hi < 0 is unbounded
+  const std::string n = noun;
+  if (lo <= 0 && hi < 0) return "";
+  if (hi < 0) return " from " + n + " " + std::to_string(lo + 1);
+  if (lo < 0) lo = 0;
+  if (lo == hi) return (n == "bar" ? " in " : " on ") + n + " " + std::to_string(lo + 1);
+  return (n == "bar" ? " in " : " on ") + n + "s " + std::to_string(lo + 1) + "-" + std::to_string(hi + 1);
+}
+std::string weightText(double w) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.2g", w);
+  return buf;
+}
+}  // namespace
+
+std::string describe(const Rule& r) {
+  const Condition& c = r.when;
+  std::string target;
+  if (!c.role.empty()) target = c.role;
+  if (c.chop.valid()) target += std::string(target.empty() ? "" : " ") + "chop #" + std::to_string(c.chop.value);
+  const bool anyTarget = target.empty();
+  if (anyTarget) target = "any chop";
+  std::string range = rangeText("bar", c.barMin, c.barMax) + rangeText("beat", c.beatMin, c.beatMax);
+  std::string position;
+  switch (c.position) {
+    case Position::FirstInBar: position = " first in each bar"; break;
+    case Position::FinalBeat: position = " in the final beat"; break;
+    case Position::PhraseBoundary: position = " at phrase boundaries"; break;
+    case Position::Any: break;
+  }
+  std::string text;
+  switch (r.action.kind) {
+    case ActionKind::Preserve: text = "Keep " + target + position + range; break;
+    case ActionKind::Require: text = "Require " + target + position + range; break;
+    case ActionKind::Forbid: text = "Forbid " + target + position + range; break;
+    case ActionKind::Prefer:
+      text = std::string(r.weight < 1.0 ? "Avoid " : "Prefer ") + target + position + range + " (x" + weightText(r.weight) + ")";
+      break;
+    case ActionKind::MaxConsecutiveRepeats: {
+      const std::string by = r.action.repeatBy == RepeatBy::SameChop ? "chop" : "role";
+      text = "Allow at most " + std::to_string(r.action.count) + (anyTarget ? "" : " " + target) + " of the same " + by + " in a row" + range;
+      break;
+    }
+    case ActionKind::MaxCount: text = "Allow at most " + std::to_string(r.action.count) + " " + target + " per bar" + range; break;
+  }
+  if (text.size() > 200) text.resize(200);
   return text;
 }
 

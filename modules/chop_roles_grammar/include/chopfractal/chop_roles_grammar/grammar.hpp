@@ -96,6 +96,10 @@ class RoleMap {
   std::map<std::uint64_t, RoleId> roles_;
 };
 
+// One plain-English line for a rule (the rule editor's row text and tooltip), at most 200 characters, deterministic.
+// Bars and beats are printed 1-based. Example: "Forbid hat in bars 3-4", "Keep kick first in each bar".
+std::string describe(const Rule& r);
+
 // Static checks; contradictory rules are Warnings (the engine keeps the previous valid event at run time).
 ValidationReport validateRules(const RuleSet& rules, const RoleMap* roles = nullptr);
 
@@ -106,6 +110,8 @@ class GrammarPolicy : public ICandidatePolicy {
 
   Decision evaluate(const CandidateQuery& q) const override;
   bool isPreserved(const CandidateQuery& q) const override;
+  // Id of the first enabled Preserve rule (in file order) that protects the candidate, else 0.
+  std::uint32_t preservingRule(const CandidateQuery& q) const;
   std::vector<Requirement> required(const ScopeContext& scope, const std::vector<ChopId>& placedInScope) const override;
 
   // Human-readable "why this stayed / changed" text agreeing with the actual decision.

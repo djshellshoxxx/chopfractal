@@ -34,6 +34,7 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
   CHECK(editor != nullptr);
   if (!editor) return;
+  editor->setSize(1100, 720);  // earlier tests may have saved another window size
   editor->setVisible(true);
   pump(300);
   auto* ed = dynamic_cast<ChopFractalEditor*>(editor.get());
@@ -46,7 +47,7 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   probe.refresh(true, 920);
   const auto& tree = probe.view().tree;
   CHECK(tree.size() == 2);
-  ed->openDrawer("tools");  // the family tree and the orbit view live in the Tools drawer
+  ed->openDrawer("history");  // the family tree lives in the History drawer, the orbit view in Orbit
   pump(60);
   auto* history = findById(*editor, "HistoryPanel");
   CHECK(history != nullptr);
@@ -62,10 +63,8 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   const auto rects = ed->hitRects();
   CHECK(rects.size() > 1);
   if (rects.size() < 2) return;
-  const auto b = ed->patternBounds();
-  const float laneH = static_cast<float>(b.getHeight()) / static_cast<float>(std::max(1, ed->laneCount()));
   const auto& first = rects.front();
-  sim.click({b.getX() + static_cast<int>((first.x0 + (first.x1 - first.x0) * 0.5) * b.getWidth()), b.getY() + static_cast<int>((static_cast<float>(first.chopIndex) + 0.5f) * laneH)});
+  sim.click(hitPointOf(*ed, first));
   CHECK(ed->selectedHit() == first.id);
 
   CHECK(ed->openDrawer("orbit"));
@@ -127,9 +126,15 @@ CHOP_TEST(wave_panel_shift_click_adds_a_marker_alt_click_removes_it_and_double_c
   };
   const std::size_t nodes = history();
   sim.click(spot);
-  sim.doubleClick(spot);
   pump(100);
   CHECK(markerCount(p) == before);
   CHECK(history() == nodes);
   CHECK(!ed->selectedChops().empty());
+  // Double-click on empty waveform adds a marker (F02); one undo removes it.
+  sim.doubleClick(spot);
+  pump(100);
+  CHECK(markerCount(p) == before + 1);
+  ed->commands().undoMarkers();
+  pump(100);
+  CHECK(markerCount(p) == before);
 }

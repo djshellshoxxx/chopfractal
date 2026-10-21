@@ -83,6 +83,9 @@ std::vector<MarkerView> buildMarkerViews(const source::ChopMap& map, const ViewW
     MarkerView v;
     v.id = m.id;
     v.x = frameToX(window, m.position);
+    v.position = m.position;
+    v.trimStart = m.trimStart;
+    v.trimEnd = m.trimEnd;
     v.visible = m.position >= window.startFrame && m.position < window.endFrame;
     v.enabled = m.enabled;
     v.manual = m.manual;
@@ -103,6 +106,7 @@ std::string describe(const Event& e, int bar, int beat, int indexInBeat, int dep
   s += ", level " + std::to_string(static_cast<int>(std::lround(e.tx.level * 100.f))) + "%";
   if (e.locked) s += ", locked";
   if (e.userOwned) s += ", edited";
+  if (!e.enabled) s += ", muted";
   if (e.child) s += e.childActive ? ", zoomed in" : ", zoom hidden";
   return s;
 }
@@ -128,6 +132,14 @@ void addRects(PatternView& view, const std::vector<Event>& events, const ChopSna
     r.userOwned = e.userOwned;
     r.hasChild = e.child != nullptr;
     r.childActive = e.child != nullptr && e.childActive;
+    r.startTick = abs;
+    r.durationTick = e.duration;
+    r.startInBar = e.start;
+    r.enabled = e.enabled;
+    r.topLevel = depth == 0;
+    r.pan = e.tx.pan;
+    r.probability = e.probability;
+    r.hasFx = e.fx.active() || e.echo || e.tremPan || e.stutter || e.roll;
     r.description = describe(e, bar, beat, index, depth, r.chopIndex, roleOf ? roleOf(e.chop) : std::string());
     view.rects.push_back(std::move(r));
     if (e.child) addRects(view, e.child->events, chops, roleOf, abs, bar, beat, depth + 1, e.id);
