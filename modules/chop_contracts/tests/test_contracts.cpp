@@ -260,3 +260,110 @@ CHOP_TEST(ids_hash_and_compare) {
   CHECK(ok.ok() && ok.value() == 5);
   CHECK(!bad.ok() && bad.error().code == ErrorCode::Corrupt);
 }
+
+namespace {
+std::vector<std::uint8_t> encode(const Event& e) {
+  std::vector<std::uint8_t> buf;
+  bytes::Writer w(buf);
+  writeEvent(w, e);
+  return buf;
+}
+}  // namespace
+
+CHOP_TEST(gesture_effect_blocks_roundtrip_alone_and_together_and_plain_events_keep_their_bytes) {
+  const Event plain = makeEvent(5, 1, 0, 480);
+  const std::vector<std::uint8_t> plainBytes = encode(plain);
+  CHECK_EQ(plainBytes.size(), static_cast<std::size_t>(68));  // the pre-feature size: no new byte for a plain event
+  CHECK_EQ(plainBytes[plainBytes.size() - 2] & (kEventHasEcho | kEventHasTremPan), 0);
+
+  Event all = plain;
+  all.echo = EchoFx{3, 1, 55};
+  all.tremPan = TremPanFx{2, 1, 60};
+  all.stutter = StutterFx{4, 7, 70, 20, -20, -30, 80, 40};
+  all.roll = RollFx{2, 8, 40, 100, 25, kRollPalindrome | kRollSmooth, 10};
+  CHECK(validateEvent(all).ok());
+  const std::vector<std::uint8_t> buf = encode(all);
+  Event back;
+  bytes::Reader r(buf.data(), buf.size());
+  CHECK(readEvent(r, back));
+  CHECK(r.ok());
+  CHECK(back.echo && *back.echo == *all.echo);
+  CHECK(back.tremPan && *back.tremPan == *all.tremPan);
+  CHECK(back.stutter && *back.stutter == *all.stutter);
+  CHECK(back.roll && *back.roll == *all.roll);
+  CHECK(encode(back) == buf);
+
+  for (int which = 0; which < 4; ++which) {  // each block alone
+    Event one = plain;
+    if (which == 0) one.echo = EchoFx{1, 255, 255};
+    if (which == 1) one.tremPan = TremPanFx{0, 3, 90};
+    if (which == 2) one.stutter = StutterFx{};
+    if (which == 3) one.roll = RollFx{};
+    const std::vector<std::uint8_t> b = encode(one);
+    CHECK(b.size() > plainBytes.size());
+    Event rb;
+    bytes::Reader rr(b.data(), b.size());
+    CHECK(readEvent(rr, rb));
+    CHECK_EQ(rb.echo.has_value(), which == 0);
+    CHECK_EQ(rb.tremPan.has_value(), which == 1);
+    CHECK_EQ(rb.stutter.has_value(), which == 2);
+    CHECK_EQ(rb.roll.has_value(), which == 3);
+  }
+  for (std::size_t cut = 0; cut < buf.size(); ++cut) {  // truncation sweep
+    bytes::Reader tr(buf.data(), cut);
+    Event tmp;
+    CHECK(!readEvent(tr, tmp));
+  }
+  for (std::size_t i = 0; i < buf.size(); ++i) {  // bit-flip sweep: never crashes, parsed results are stable
+    for (int bit = 0; bit < 8; ++bit) {
+      std::vector<std::uint8_t> c = buf;
+      c[i] ^= static_cast<std::uint8_t>(1u << bit);
+      bytes::Reader fr(c.data(), c.size());
+      Event tmp;
+      const bool ok = readEvent(fr, tmp);
+      if (ok) {  // whatever parses must re-encode to something that parses to the same bytes
+        const std::vector<std::uint8_t> again = encode(tmp);
+        bytes::Reader rr(again.data(), again.size());
+        Event tmp2;
+        CHECK(readEvent(rr, tmp2));
+        CHECK(encode(tmp2) == again);
+      }
+    }
+  }
+}
+
+CHOP_TEST(gesture_effect_blocks_are_sanitized_on_read_and_unknown_extension_bits_are_refused) {
+  Event e = makeEvent(5, 1, 0, 480);
+  e.echo = EchoFx{9, 77, 110};
+  e.tremPan = TremPanFx{9, 9, 240};
+  e.stutter = StutterFx{99, 99, 1, 200, 0, 0, 250, 250};
+  e.roll = RollFx{99, 99, 250, 250, 250, 0xFF, 0};
+  CHECK(!validateEvent(e).ok());  // callers must not hand out-of-range blocks to the writer
+  std::vector<std::uint8_t> buf = encode(e);
+  Event back;
+  bytes::Reader r(buf.data(), buf.size());
+  CHECK(readEvent(r, back));
+  CHECK(back.echo && back.echo->repeats == 5 && back.echo->rateIndex == 255 && back.echo->level == 100);
+  CHECK(back.tremPan && back.tremPan->mode == 255 && back.tremPan->rateIndex == 255 && back.tremPan->depth == 228);
+  CHECK(back.stutter && back.stutter->rate == kStutterDivisions - 1 && back.stutter->gate == 10 && back.stutter->tail == 100 &&
+        back.stutter->probability == 100 && back.stutter->pan == 100);
+  CHECK(back.roll && back.roll->velStart == 100 && back.roll->freeze == 100 && back.roll->flags == (kRollPalindrome | kRollSmooth));
+  CHECK(validateEvent(back).ok());
+
+  std::vector<std::uint8_t> plain = encode(makeEvent(5, 1, 0, 480));
+  plain[plain.size() - 1] = 8;  // the extension byte is the last of a plain event; bit 3 is reserved
+  bytes::Reader pr(plain.data(), plain.size());
+  Event rejected;
+  CHECK(!readEvent(pr, rejected));
+}
+
+CHOP_TEST(flatten_carries_the_gesture_blocks_and_the_note_tables_are_monotone) {
+  Event e = makeEvent(1, 1, 0, 960);
+  e.stutter = StutterFx{};
+  e.echo = EchoFx{2, 255, 255};
+  FlatEventList out;
+  CHECK(flattenInto(out, {e}, 0, 3840, SampleRange{}, makeChops(), FlattenLimits{}, 1).ok());
+  CHECK_EQ(out.size(), static_cast<std::size_t>(1));
+  if (!out.empty()) CHECK(out[0].stutter && out[0].echo && !out[0].roll && !out[0].tremPan);
+  for (int i = 1; i < kStutterDivisions; ++i) CHECK(kStutterDivisionTicks[i] < kStutterDivisionTicks[i - 1]);
+}

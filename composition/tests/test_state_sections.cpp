@@ -16,7 +16,7 @@ StateSection makeSection(std::uint8_t tag, std::size_t n, std::uint8_t fill = 0x
   StateSection s;
   s.tag = tag;
   s.schema = schema;
-  s.bytes.assign(n, fill);
+  s.bytes = std::vector<std::uint8_t>(n, fill);
   return s;
 }
 int countWarnings(ProjectSession& s, const std::string& text) {

@@ -9,6 +9,7 @@
 #include <chopfractal/chop_contracts/time.hpp>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace chopfractal {
@@ -41,6 +42,88 @@ struct EventFx {
   }
 };
 
+// ---- gesture effects (docs/specs/roadmap/E01, E02, E03, E04) ----
+// Each is an optional per-event block. The flags byte of an event is full (bits 1..32 as before, 64 Echo,
+// 128 Tremolo-Pan), so the Stutter and Roll blocks are signalled in the extension byte that follows it (the old
+// "has child" byte: bit 0 child, bit 1 Stutter, bit 2 Roll; bits 3..7 are reserved and rejected on read).
+// An event without any of these serializes exactly as before.
+constexpr std::uint8_t kEventHasEcho = 64;
+constexpr std::uint8_t kEventHasTremPan = 128;
+constexpr std::uint8_t kExtHasChild = 1;
+constexpr std::uint8_t kExtHasStutter = 2;
+constexpr std::uint8_t kExtHasRoll = 4;
+constexpr std::uint8_t kExtKnownBits = kExtHasChild | kExtHasStutter | kExtHasRoll;
+
+// E01 Echo. repeats 0..5 (0 with the block present = user forced off). rateIndex 0..3 (1/16, 1/8, dotted 1/8, 1/4)
+// or 255 = global. level: 0..100 per-event decay in percent, 255 = global; the value plus 128 marks a hit the user
+// forced (the effect pass leaves it alone).
+struct EchoFx {
+  std::uint8_t repeats = 0;
+  std::uint8_t rateIndex = 255;
+  std::uint8_t level = 255;
+  friend bool operator==(const EchoFx& a, const EchoFx& b) { return a.repeats == b.repeats && a.rateIndex == b.rateIndex && a.level == b.level; }
+};
+// E02 Tremolo-Pan. mode 0 Tremolo, 1 Pan, 2 Both, 255 global, 254 user forced off. rateIndex 0..3 (1/16, 1/8, 1/4, 1/2 per
+// LFO cycle) or 255 global. depth 0..100, 255 global, 128 + depth = user forced.
+struct TremPanFx {
+  std::uint8_t mode = 255;
+  std::uint8_t rateIndex = 255;
+  std::uint8_t depth = 255;
+  friend bool operator==(const TremPanFx& a, const TremPanFx& b) { return a.mode == b.mode && a.rateIndex == b.rateIndex && a.depth == b.depth; }
+};
+// E03 Stutter (buffer repeat of the start of the hit). rate / rateEnd index kStutterDivisions (coarse to fine); equal
+// means a constant rate, otherwise the rate walks one division at a time from rate to rateEnd across the hit and ends
+// on the grid. gate 10..100 % of each repeat is audible, tail 0..100 % of that audible part is the release (low = choppy,
+// high = washy). decay is the per-repeat gain slope in 0.1 dB (negative decays, positive is a crescendo), pitch the total
+// pitch ramp over the hit in 0.1 semitone, probability the chance each repeat after the first plays, pan the width of the
+// left/right alternation of the repeats.
+struct StutterFx {
+  std::uint8_t rate = 4;
+  std::uint8_t rateEnd = 4;
+  std::uint8_t gate = 80;
+  std::uint8_t tail = 30;
+  std::int8_t decay = -15;
+  std::int8_t pitch = 0;
+  std::uint8_t probability = 100;
+  std::uint8_t pan = 0;
+  friend bool operator==(const StutterFx& a, const StutterFx& b) {
+    return a.rate == b.rate && a.rateEnd == b.rateEnd && a.gate == b.gate && a.tail == b.tail && a.decay == b.decay &&
+           a.pitch == b.pitch && a.probability == b.probability && a.pan == b.pan;
+  }
+};
+// E04 Roll (beat-repeat style freeze and roll with a speed ramp). The hit is frozen at freeze (0..100 % into the chop)
+// and that grab is repeated, speeding up from rate to rateEnd (flags bit 1: smooth geometric acceleration, else stepped
+// through the divisions), with the repeat level rising from velStart to velEnd (percent of the hit's level). flags bit 0:
+// palindrome (every other repeat plays backwards). pitch: total ramp in 0.1 semitone.
+struct RollFx {
+  std::uint8_t rate = 4;
+  std::uint8_t rateEnd = 8;
+  std::uint8_t velStart = 50;
+  std::uint8_t velEnd = 100;
+  std::uint8_t freeze = 0;
+  std::uint8_t flags = 0;
+  std::int8_t pitch = 0;
+  friend bool operator==(const RollFx& a, const RollFx& b) {
+    return a.rate == b.rate && a.rateEnd == b.rateEnd && a.velStart == b.velStart && a.velEnd == b.velEnd && a.freeze == b.freeze &&
+           a.flags == b.flags && a.pitch == b.pitch;
+  }
+};
+constexpr std::uint8_t kRollPalindrome = 1;
+constexpr std::uint8_t kRollSmooth = 2;
+
+// Note values in ticks (960 per quarter), coarse to fine: 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32, 1/32T, 1/64, 1/64T.
+constexpr int kStutterDivisions = 10;
+constexpr Ticks kStutterDivisionTicks[kStutterDivisions] = {960, 640, 480, 320, 240, 160, 120, 80, 60, 40};
+constexpr Ticks kEchoSpacingTicks[4] = {240, 480, 720, 960};  // 1/16, 1/8, dotted 1/8, 1/4
+constexpr Ticks kTremPeriodTicks[4] = {240, 480, 960, 1920};  // 1/16, 1/8, 1/4, 1/2
+constexpr int kEchoMaxRepeats = 5;
+
+// Clamps every field of a block into its legal range (readers use these instead of rejecting a file).
+EchoFx sanitize(EchoFx fx);
+TremPanFx sanitize(TremPanFx fx);
+StutterFx sanitize(StutterFx fx);
+RollFx sanitize(RollFx fx);
+
 struct NestedPattern;
 
 // One scheduled playback of a chop. `start` is relative to the enclosing window: the bar for
@@ -53,6 +136,10 @@ struct Event {
   Ticks duration = 0;
   EventTransform tx;
   EventFx fx;
+  std::optional<EchoFx> echo;
+  std::optional<TremPanFx> tremPan;
+  std::optional<StutterFx> stutter;
+  std::optional<RollFx> roll;
   float probability = 1.f;     // resolved deterministically at flatten time
   bool enabled = true;
   bool locked = false;
@@ -79,6 +166,10 @@ struct FlatEvent {
   Ticks duration = 0;
   EventTransform tx;
   EventFx fx;
+  std::optional<EchoFx> echo;
+  std::optional<TremPanFx> tremPan;
+  std::optional<StutterFx> stutter;
+  std::optional<RollFx> roll;
   std::uint32_t fadeInFrames = 0;
   std::uint32_t fadeOutFrames = 0;
   std::uint8_t depth = 0;

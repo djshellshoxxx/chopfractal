@@ -101,7 +101,7 @@ Result<std::shared_ptr<const render::Playback>> ProjectSession::buildPlayback(co
     const int steps = stepT > 0 ? static_cast<int>(barT / stepT) : 16;
     groove::apply(groove_, events, pattern::lengthTicks(p), static_cast<int>(barT), steps, [&](ChopId id) { return groove::classOf(roleOf(id)); });
   }
-  return render::makePlayback(sourceData_, events, pattern::lengthTicks(p));
+  return render::makePlayback(sourceData_, events, pattern::lengthTicks(p), playbackOptions_);
 }
 
 Result<FlatEventList> ProjectSession::midiEvents() const {

@@ -4,7 +4,7 @@ Version 0.1.0 · API 0.1 · C++17
 
 > Generated from `module.json` by `tools/gen_module_docs.py`. Edit the manifest, not this file.
 
-Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.
+Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path. Slice-quality stage (micro-fades, transient-aware starts, voice choke, level trim), Echo, Tremolo-Pan, Stutter and Roll expansion with run-time bypass, match gain and a look-ahead true-peak safety limiter with a latency-compensated, primed offline export.
 
 ## Public API
 
@@ -18,6 +18,8 @@ Public headers:
 
 - `include/chopfractal/audio_renderer/renderer.hpp`
 - `include/chopfractal/audio_renderer/mailbox.hpp`
+- `include/chopfractal/audio_renderer/limiter.hpp`
+- `include/chopfractal/audio_renderer/slice_quality.hpp`
 
 ## Contract
 

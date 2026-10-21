@@ -20,6 +20,7 @@ Public headers:
 
 - `include/chopfractal/pattern_engine/pattern.hpp`
 - `include/chopfractal/pattern_engine/session.hpp`
+- `include/chopfractal/pattern_engine/fx_pass.hpp`
 
 ## Contract
 

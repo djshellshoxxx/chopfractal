@@ -39,6 +39,32 @@ const std::vector<ParamDef>& parameterManifest() {
       {"groove_swing", "Groove Swing", "%", ParamKind::Float, 50.0, 75.0, 50.0, 0.5, 10.0, 3, nullptr},
       {"groove_hum_time", "Groove Humanize Time", "ticks", ParamKind::Float, 0.0, 30.0, 0.0, 1.0, 10.0, 3, nullptr},
       {"groove_hum_vel", "Groove Humanize Velocity", "%", ParamKind::Float, 0.0, 25.0, 0.0, 1.0, 10.0, 3, nullptr},
+      {"level_match", "Level Match", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"match_trim_db", "Match Trim", "dB", ParamKind::Float, -6.0, 6.0, 0.0, 0.0, 10.0, 3, nullptr},
+      {"limiter_enable", "Safety Limiter", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"limiter_ceiling_db", "Limiter Ceiling", "dB", ParamKind::Float, -6.0, 0.0, -1.0, 0.0, 10.0, 3, nullptr},
+      {"allow_echo", "Allow Echo", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"echo_amount", "Echo Amount", "%", ParamKind::Float, 0.0, 100.0, 40.0, 0.0, 10.0, 3, nullptr},
+      {"echo_rate", "Echo Rate", "", ParamKind::Choice, 0.0, 3.0, 1.0, 1.0, 0.0, 3, "1/16|1/8|Dotted 1/8|1/4"},
+      {"echo_decay", "Echo Decay", "%", ParamKind::Float, 10.0, 90.0, 55.0, 0.0, 10.0, 3, nullptr},
+      {"echo_tone", "Echo Tone", "%", ParamKind::Float, 0.0, 100.0, 50.0, 0.0, 10.0, 3, nullptr},
+      {"allow_tremolo", "Allow Tremolo Pan", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"trem_amount", "Tremolo Pan Amount", "%", ParamKind::Float, 0.0, 100.0, 30.0, 0.0, 10.0, 3, nullptr},
+      {"trem_mode", "Tremolo Pan Mode", "", ParamKind::Choice, 0.0, 2.0, 2.0, 1.0, 0.0, 3, "Tremolo|Pan|Both"},
+      {"trem_rate", "Tremolo Pan Rate", "", ParamKind::Choice, 0.0, 3.0, 1.0, 1.0, 0.0, 3, "1/16|1/8|1/4|1/2"},
+      {"trem_depth", "Tremolo Pan Depth", "%", ParamKind::Float, 0.0, 100.0, 60.0, 0.0, 10.0, 3, nullptr},
+      {"allow_stutter", "Allow Stutter", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"stutter_amount", "Stutter Amount", "%", ParamKind::Float, 0.0, 100.0, 25.0, 0.0, 10.0, 3, nullptr},
+      {"stutter_rate", "Stutter Rate", "", ParamKind::Choice, 0.0, 9.0, 4.0, 1.0, 0.0, 3, "1/4|1/4T|1/8|1/8T|1/16|1/16T|1/32|1/32T|1/64|1/64T"},
+      {"stutter_gate", "Stutter Gate", "%", ParamKind::Float, 10.0, 100.0, 80.0, 0.0, 10.0, 3, nullptr},
+      {"stutter_decay_db", "Stutter Decay", "dB", ParamKind::Float, -12.0, 6.0, -1.5, 0.0, 10.0, 3, nullptr},
+      {"stutter_pitch", "Stutter Pitch Ramp", "st", ParamKind::Float, -12.0, 12.0, 0.0, 0.0, 10.0, 3, nullptr},
+      {"allow_roll", "Allow Roll", "", ParamKind::Bool, 0.0, 1.0, 0.0, 1.0, 0.0, 3, nullptr},
+      {"roll_amount", "Roll Amount", "%", ParamKind::Float, 0.0, 100.0, 20.0, 0.0, 10.0, 3, nullptr},
+      {"roll_rate", "Roll Start Rate", "", ParamKind::Choice, 0.0, 9.0, 4.0, 1.0, 0.0, 3, "1/4|1/4T|1/8|1/8T|1/16|1/16T|1/32|1/32T|1/64|1/64T"},
+      {"roll_rate_end", "Roll End Rate", "", ParamKind::Choice, 0.0, 9.0, 8.0, 1.0, 0.0, 3, "1/4|1/4T|1/8|1/8T|1/16|1/16T|1/32|1/32T|1/64|1/64T"},
+      {"roll_freeze", "Roll Freeze Point", "%", ParamKind::Float, 0.0, 100.0, 0.0, 0.0, 10.0, 3, nullptr},
+      {"slice_polish", "Slice Polish", "", ParamKind::Bool, 0.0, 1.0, 1.0, 1.0, 0.0, 3, nullptr},
   };
   return manifest;
 }
@@ -81,12 +107,33 @@ int barsFromChoice(double choiceIndex) {
   return bars[std::min(3L, std::max(0L, i))];
 }
 
-render::RenderParams toRenderParams(const ParamValues& values) {
+render::RenderParams toRenderParams(const ParamValues& values, float matchGainDb) {
   render::RenderParams p;
+  p.slicePolish = values.get(kSlicePolish) >= 0.5;
+  p.limiterEnabled = values.get(kLimiterEnable) >= 0.5;
+  p.limiterCeilingDb = static_cast<float>(values.get(kLimiterCeilingDb));
+  p.matchGainDb = std::isfinite(matchGainDb) ? matchGainDb : 0.f;
+  std::uint8_t mask = 0;
+  if (values.get(kAllowEcho) >= 0.5) mask |= render::fxbit::kEcho;
+  if (values.get(kAllowTremolo) >= 0.5) mask |= render::fxbit::kTremPan;
+  if (values.get(kAllowStutter) >= 0.5) mask |= render::fxbit::kStutter;
+  if (values.get(kAllowRoll) >= 0.5) mask |= render::fxbit::kRoll;
+  p.fxMask = mask;
   p.enabled = values.get(kEffectEnable) >= 0.5;
   p.dryMix = static_cast<float>(values.get(kDryMix));
   p.outputGainDb = static_cast<float>(values.get(kOutputGainDb));
   return p;
+}
+
+render::PlaybackOptions toPlaybackOptions(const ParamValues& values) {
+  render::PlaybackOptions o;
+  o.echoRate = static_cast<std::uint8_t>(std::lround(values.get(kEchoRate)));
+  o.echoDecay = static_cast<std::uint8_t>(std::lround(values.get(kEchoDecay)));
+  o.echoTone = static_cast<std::uint8_t>(std::lround(values.get(kEchoTone)));
+  o.tremMode = static_cast<std::uint8_t>(std::lround(values.get(kTremMode)));
+  o.tremRate = static_cast<std::uint8_t>(std::lround(values.get(kTremRate)));
+  o.tremDepth = static_cast<std::uint8_t>(std::lround(values.get(kTremDepth)));
+  return o;
 }
 
 TimeTranslation translateHostTime(const HostTimeInfo& host, double manualBpm, TimeSignature fallbackMeter) {

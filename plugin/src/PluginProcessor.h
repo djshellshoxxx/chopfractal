@@ -102,6 +102,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);
+  void pollOutputStage();  // message thread: gesture-effect settings, level-match measurement, export parameters, latency
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
   // Declaration order matters: the renderer must outlive the session that publishes into its mailbox.
@@ -111,6 +112,17 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::array<double, 5> lastGrooveParams_{};  // Groove Lab knobs as of the last poll (message thread): the session is touched only when one moved
   std::atomic<double> sampleRate_{48000.0};
+  // pollOutputStage state (message thread only).
+  chopfractal::pattern::FxPassSettings appliedFx_;
+  chopfractal::render::PlaybackOptions appliedOptions_;
+  bool fxApplied_ = false;
+  struct MatchKey {
+    const void* playback = nullptr;
+    double trim = 0, ceiling = 0, bpm = 0;
+    bool on = false, limiter = false;
+    bool operator==(const MatchKey& o) const { return playback == o.playback && trim == o.trim && ceiling == o.ceiling && bpm == o.bpm && on == o.on && limiter == o.limiter; }
+  } matchKey_;
+  int reportedLatency_ = 0;
   std::atomic<double> patternQuarters_{0.0};
   std::atomic<std::uint32_t> boundaryCount_{0};
   std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)

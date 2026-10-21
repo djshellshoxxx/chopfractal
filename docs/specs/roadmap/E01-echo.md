@@ -96,3 +96,10 @@ Sanitizers: ASan/UBSan all; TSan for parameter reads while rendering. Manual QA:
 
 ## 11. Implementation steps
 1. Event field, bit 64, serialization and tests (golden hashes must pass). 2. Pass module with tests. 3. Renderer expansion and tone filter, tests. 4. Manifest rows, processor plumbing. 5. Session settings, extras tag 17, undo. 6. UI call-out, grid glyph, hit editor combo. 7. MIDI report line, docs, registries, QA.
+
+
+## Implementation notes (as built, RND)
+
+- The effect pass is `pattern::applyFxPass(const Pattern&, const FxPassSettings&)` in the new `modules/pattern_engine/src/fx_pass.cpp` (header `fx_pass.hpp`); it only writes the optional per-event blocks, so generation output and the golden hashes are unchanged. Settings: per-effect amount 0..1 (host `allow_x` off means 0), a seed combined with the pattern seed; user-forced blocks (Echo level or Tremolo-Pan depth 128 and above, Tremolo-Pan mode 254) and locked or user-owned events are left alone; re-running replaces the pass's blocks and an all-zero setting clears them. `ProjectSession::setFx(pass, options)` re-runs it as one undo entry and republishes; generation, mutation and edits keep applying the stored settings.
+- Global fallbacks are `render::PlaybackOptions` (echo rate, decay, tone; trem mode, rate, depth) passed to `makePlayback`, not `RenderParams`; repeats are expanded into the playback up front, so the audio thread does no work for them. `RenderParams::fxMask` (`fxbit::kEcho`, `kTremPan`, `kStutter`, `kRoll`) bypasses an effect at run time (the host `allow_*` parameters); the replaced voices play instead.
+- Echo repeats are tone-filtered with a one-pole low-pass per repeat, never wrap past the loop end and never steal a primary voice. No state section (tag 17) is built; the parameters carry the state. The UI call-out is not built.

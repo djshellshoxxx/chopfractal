@@ -737,3 +737,41 @@ CHOP_TEST(an_exhausted_voice_pool_never_hard_cuts_a_sounding_voice) {
   for (std::size_t k = 1; k < out.size(); ++k) biggest = std::max(biggest, std::fabs(out[k] - out[k - 1]));
   CHECK(biggest < 0.2f);  // every steal fades; no full-level step
 }
+
+CHOP_TEST(process_performs_no_heap_allocation_with_the_quality_stage_and_every_gesture_effect) {
+  Renderer r;
+  Config cfg;
+  r.prepare(cfg);
+  FlatEventList events;
+  for (std::uint64_t i = 1; i <= 40; ++i) {
+    FlatEvent e = ev(i, 20000, static_cast<Ticks>(i * 80), 400);
+    e.tx.reverse = (i % 5) == 0;
+    e.tx.retrigger = static_cast<std::uint8_t>(1 + i % 4);
+    if (i % 4 == 0) e.echo = EchoFx{3, 1, 60};
+    if (i % 4 == 1) e.tremPan = TremPanFx{2, 1, 80};
+    if (i % 4 == 2) e.stutter = StutterFx{3, 7, 70, 40, -20, -50, 80, 60};
+    if (i % 4 == 3) e.roll = RollFx{2, 9, 30, 100, 30, kRollPalindrome | kRollSmooth, 20};
+    events.push_back(e);
+  }
+  r.mailbox().publish(playback(makeSource(2, 44100, 24000, ramp), events));
+  std::vector<float> x(512, 0.1f), oL(512), oR(512);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  RenderParams p;
+  p.slicePolish = true;
+  r.process(tb, p, in, out, 2, 512);  // warm-up: first acquire
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 400; ++i) {
+    tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
+    if (i == 150) p.fxMask = 0;           // toggling the bypass mid-playback
+    if (i == 250) p.fxMask = fxbit::kAll;
+    if (i == 300) p.slicePolish = false;
+    r.process(tb, p, in, out, 2, 512);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+}

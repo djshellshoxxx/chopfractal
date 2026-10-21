@@ -44,6 +44,9 @@ Result<ExportJob> ExportJob::planWav(const ProjectSession& session, std::string 
   job.target_ = std::move(path);
   job.wavOptions_ = o;
   job.playback_ = playback;
+  job.renderParams_ = session.renderParams();
+  job.renderParams_.enabled = true;
+  job.renderParams_.dryMix = 0.f;
   return job;
 }
 
@@ -111,6 +114,7 @@ Result<ExportReport> ExportJob::runWav(ExportProgress& progress) const {
   rs.bpm = o.bpm;
   rs.cycles = o.loops;
   rs.tailSeconds = o.tailSeconds;
+  rs.params = renderParams_;
   auto audio = render::renderOffline(playback_, rs, [&progress](double f) {
     report(progress, static_cast<float>(f * 0.9));
     return !progress.cancel.load();

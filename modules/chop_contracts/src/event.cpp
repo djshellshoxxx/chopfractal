@@ -21,6 +21,50 @@ constexpr std::size_t kMinEventBytes = 68;
 
 }  // namespace
 
+EchoFx sanitize(EchoFx fx) {
+  fx.repeats = std::min<std::uint8_t>(fx.repeats, kEchoMaxRepeats);
+  if (fx.rateIndex > 3 && fx.rateIndex != 255) fx.rateIndex = 255;
+  if (fx.level != 255) {
+    if (fx.level > 228) fx.level = 228;
+    else if (fx.level > 100 && fx.level < 128) fx.level = 100;
+  }
+  return fx;
+}
+
+TremPanFx sanitize(TremPanFx fx) {
+  if (fx.mode > 2 && fx.mode != 254 && fx.mode != 255) fx.mode = 255;
+  if (fx.rateIndex > 3 && fx.rateIndex != 255) fx.rateIndex = 255;
+  if (fx.depth != 255) {
+    if (fx.depth > 228) fx.depth = 228;
+    else if (fx.depth > 100 && fx.depth < 128) fx.depth = 100;
+  }
+  return fx;
+}
+
+StutterFx sanitize(StutterFx fx) {
+  fx.rate = std::min<std::uint8_t>(fx.rate, kStutterDivisions - 1);
+  fx.rateEnd = std::min<std::uint8_t>(fx.rateEnd, kStutterDivisions - 1);
+  fx.gate = std::min<std::uint8_t>(std::max<std::uint8_t>(fx.gate, 10), 100);
+  fx.tail = std::min<std::uint8_t>(fx.tail, 100);
+  fx.probability = std::min<std::uint8_t>(fx.probability, 100);
+  fx.pan = std::min<std::uint8_t>(fx.pan, 100);
+  if (fx.pitch < -120) fx.pitch = -120;
+  if (fx.pitch > 120) fx.pitch = 120;
+  return fx;
+}
+
+RollFx sanitize(RollFx fx) {
+  fx.rate = std::min<std::uint8_t>(fx.rate, kStutterDivisions - 1);
+  fx.rateEnd = std::min<std::uint8_t>(fx.rateEnd, kStutterDivisions - 1);
+  fx.velStart = std::min<std::uint8_t>(fx.velStart, 100);
+  fx.velEnd = std::min<std::uint8_t>(fx.velEnd, 100);
+  fx.freeze = std::min<std::uint8_t>(fx.freeze, 100);
+  fx.flags &= static_cast<std::uint8_t>(kRollPalindrome | kRollSmooth);
+  if (fx.pitch < -120) fx.pitch = -120;
+  if (fx.pitch > 120) fx.pitch = 120;
+  return fx;
+}
+
 Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks windowStart, Ticks windowDuration,
                    SampleRange ancestor, const ChopSnapshot& chops, const FlattenLimits& lim,
                    std::uint64_t probabilitySeed, int depth) {
@@ -55,6 +99,10 @@ Status flattenInto(FlatEventList& out, const std::vector<Event>& events, Ticks w
     f.duration = e.duration;
     f.tx = e.tx;
     f.fx = e.fx;
+    f.echo = e.echo;
+    f.tremPan = e.tremPan;
+    f.stutter = e.stutter;
+    f.roll = e.roll;
     f.fadeInFrames = chop->fadeInFrames;
     f.fadeOutFrames = chop->fadeOutFrames;
     f.depth = static_cast<std::uint8_t>(depth);
@@ -87,6 +135,9 @@ Status validateEvent(const Event& e, int depth) {
       !(fx.crush >= 0.f && fx.crush <= 1.f) || !(std::fabs(fx.glideSemitones) <= limits::kMaxGlideSemitones))
     return makeError(ErrorCode::OutOfRange, who + " effect out of range");
   if (!(e.probability >= 0.f && e.probability <= 1.f)) return makeError(ErrorCode::OutOfRange, who + " probability out of range");
+  if ((e.echo && !(*e.echo == sanitize(*e.echo))) || (e.tremPan && !(*e.tremPan == sanitize(*e.tremPan))) ||
+      (e.stutter && !(*e.stutter == sanitize(*e.stutter))) || (e.roll && !(*e.roll == sanitize(*e.roll))))
+    return makeError(ErrorCode::OutOfRange, who + " has an out-of-range gesture effect");
   if (e.child) {
     if (depth + 1 > limits::kMaxNestedDepth) return makeError(ErrorCode::LimitExceeded, who + " nests too deeply", limits::kMaxNestedDepth);
     if (e.child->windowDuration != e.duration) return makeError(ErrorCode::Corrupt, who + " child window mismatch");
@@ -114,15 +165,46 @@ void writeEvent(bytes::Writer& w, const Event& e) {
   w.f32(e.probability);
   const std::uint8_t flags = static_cast<std::uint8_t>((e.enabled ? 1 : 0) | (e.locked ? 2 : 0) | (e.userOwned ? 4 : 0) |
                                                        (e.sourceOverride ? 8 : 0) | (e.childActive ? 16 : 0) |
-                                                       (e.fx.active() ? 32 : 0));
+                                                       (e.fx.active() ? 32 : 0) | (e.echo ? kEventHasEcho : 0) | (e.tremPan ? kEventHasTremPan : 0));
   w.u8(flags);
-  w.u8(e.child ? 1 : 0);
+  w.u8(static_cast<std::uint8_t>((e.child ? kExtHasChild : 0) | (e.stutter ? kExtHasStutter : 0) | (e.roll ? kExtHasRoll : 0)));
   if (e.fx.active()) {
     w.u8(static_cast<std::uint8_t>(e.fx.filter));
     w.f32(e.fx.cutoff);
     w.f32(e.fx.resonance);
     w.f32(e.fx.glideSemitones);
     w.f32(e.fx.crush);
+  }
+  if (e.echo) {
+    w.u8(e.echo->repeats);
+    w.u8(e.echo->rateIndex);
+    w.u8(e.echo->level);
+  }
+  if (e.tremPan) {
+    w.u8(e.tremPan->mode);
+    w.u8(e.tremPan->rateIndex);
+    w.u8(e.tremPan->depth);
+  }
+  if (e.stutter) {
+    const StutterFx& f = *e.stutter;
+    w.u8(f.rate);
+    w.u8(f.rateEnd);
+    w.u8(f.gate);
+    w.u8(f.tail);
+    w.u8(static_cast<std::uint8_t>(f.decay));
+    w.u8(static_cast<std::uint8_t>(f.pitch));
+    w.u8(f.probability);
+    w.u8(f.pan);
+  }
+  if (e.roll) {
+    const RollFx& f = *e.roll;
+    w.u8(f.rate);
+    w.u8(f.rateEnd);
+    w.u8(f.velStart);
+    w.u8(f.velEnd);
+    w.u8(f.freeze);
+    w.u8(f.flags);
+    w.u8(static_cast<std::uint8_t>(f.pitch));
   }
   if (e.child) {
     w.u64(e.child->seed);
@@ -153,8 +235,17 @@ bool readEvent(bytes::Reader& r, Event& out, int depth) {
   out.userOwned = (flags & 4) != 0;
   out.sourceOverride = (flags & 8) != 0;
   out.childActive = (flags & 16) != 0;
-  const bool hasChild = r.u8() != 0;
+  const std::uint8_t ext = r.u8();
+  if (ext & ~kExtKnownBits) {  // an extension bit this build does not know: refuse rather than misread the rest
+    r.fail();
+    return false;
+  }
+  const bool hasChild = (ext & kExtHasChild) != 0;
   out.fx = EventFx{};
+  out.echo.reset();
+  out.tremPan.reset();
+  out.stutter.reset();
+  out.roll.reset();
   if (flags & 32) {
     const std::uint8_t ft = r.u8();
     if (ft > 2) {
@@ -166,6 +257,43 @@ bool readEvent(bytes::Reader& r, Event& out, int depth) {
     out.fx.resonance = r.f32();
     out.fx.glideSemitones = r.f32();
     out.fx.crush = r.f32();
+  }
+  if (flags & kEventHasEcho) {
+    EchoFx f;
+    f.repeats = r.u8();
+    f.rateIndex = r.u8();
+    f.level = r.u8();
+    out.echo = sanitize(f);
+  }
+  if (flags & kEventHasTremPan) {
+    TremPanFx f;
+    f.mode = r.u8();
+    f.rateIndex = r.u8();
+    f.depth = r.u8();
+    out.tremPan = sanitize(f);
+  }
+  if (ext & kExtHasStutter) {
+    StutterFx f;
+    f.rate = r.u8();
+    f.rateEnd = r.u8();
+    f.gate = r.u8();
+    f.tail = r.u8();
+    f.decay = static_cast<std::int8_t>(r.u8());
+    f.pitch = static_cast<std::int8_t>(r.u8());
+    f.probability = r.u8();
+    f.pan = r.u8();
+    out.stutter = sanitize(f);
+  }
+  if (ext & kExtHasRoll) {
+    RollFx f;
+    f.rate = r.u8();
+    f.rateEnd = r.u8();
+    f.velStart = r.u8();
+    f.velEnd = r.u8();
+    f.freeze = r.u8();
+    f.flags = r.u8();
+    f.pitch = static_cast<std::int8_t>(r.u8());
+    out.roll = sanitize(f);
   }
   if (!r.ok()) return false;
   if (hasChild) {

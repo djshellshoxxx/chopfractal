@@ -8,7 +8,9 @@
   "build_target": "chopfractal::audio_renderer",
   "public_headers": [
     "include/chopfractal/audio_renderer/renderer.hpp",
-    "include/chopfractal/audio_renderer/mailbox.hpp"
+    "include/chopfractal/audio_renderer/mailbox.hpp",
+    "include/chopfractal/audio_renderer/limiter.hpp",
+    "include/chopfractal/audio_renderer/slice_quality.hpp"
   ],
   "dependencies": [
     {
@@ -26,7 +28,7 @@
   "real_time_safe": true,
   "migration_guide": "MIGRATION.md",
   "standalone_test_command": "cmake -S modules/audio_renderer -B build/audio_renderer && cmake --build build/audio_renderer && ctest --test-dir build/audio_renderer",
-  "summary": "Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path.",
+  "summary": "Voice playback and event transforms: sample-accurate host-synced scheduler, bounded voice pool with stealing, reverse/pitch(resample)/gate/fades/level/pan, per-event effects (state-variable filter, tape glide, crunch), retrigger, dry mix and output gain, lock-free handoff of immutable playback data, auditioning, and an offline renderer that shares the live `process()` path. Slice-quality stage (micro-fades, transient-aware starts, voice choke, level trim), Echo, Tremolo-Pan, Stutter and Roll expansion with run-time bypass, match gain and a look-ahead true-peak safety limiter with a latency-compensated, primed offline export.",
   "public_api": [
     "`makePlayback(source, flatEvents, lengthTicks)` validates and prepares immutable data; `makePassThroughPlayback(source)`",
     "`Renderer::prepare/process/reset/requestPreview/activeVoices` and `mailbox().publish()`",
