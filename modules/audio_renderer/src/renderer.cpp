@@ -49,6 +49,9 @@ struct Voice {
   int holdFrames = 1;
   int holdCount = 0;
   float heldL = 0.f, heldR = 0.f;
+  // Engine v2 hints from the event (0 / false = legacy behaviour).
+  std::uint8_t chokeGroup = 0;
+  bool smoothFades = false;
 };
 
 struct Trigger {
@@ -57,6 +60,16 @@ struct Trigger {
 };
 
 bool finiteIn(float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; }
+
+float smoothstep01(float x) { return x * x * (3.f - 2.f * x); }  // x in [0, 1]
+
+// Which sounding groups a new hit of group `incoming` cuts: a kick or snare retrigger cuts its own previous hit,
+// a closed hat cuts earlier closed hats and open hats, an open hat cuts earlier open hats.
+bool chokes(std::uint8_t incoming, std::uint8_t sounding) {
+  if (incoming == 0 || sounding == 0) return false;
+  if (incoming == 3) return sounding == 3 || sounding == 4;
+  return incoming == sounding;
+}
 
 }  // namespace
 
@@ -265,10 +278,15 @@ struct Renderer::Impl {
 
   void startFromEvent(const SourceData& src, const FlatEvent& e, double ticksPerFrame) {
     if (e.region.empty() || e.region.start < 0 || e.region.end > src.frames) return;
+    if (e.chokeGroup != 0)
+      for (Voice& old : voices)
+        if (old.active && !old.fading && chokes(e.chokeGroup, old.chokeGroup)) releaseVoice(old);  // short fade, no click
     Voice* v = allocateVoice();
     if (!v) return;
     const std::int64_t gate = static_cast<std::int64_t>(std::llround(static_cast<double>(e.duration) / ticksPerFrame));
     startVoice(*v, src, e.region, e.tx, gate, e.fadeInFrames, e.fadeOutFrames, e.fx);
+    v->chokeGroup = e.chokeGroup;
+    v->smoothFades = e.smoothFades;
   }
 
   void drainPreview(const Playback* pb, bool allow) {
@@ -321,16 +339,27 @@ struct Renderer::Impl {
       }
 
       float env = 1.f;
-      if (v.attack > 0 && v.age < v.attack) env = static_cast<float>(v.age) / static_cast<float>(v.attack);
+      if (v.attack > 0 && v.age < v.attack) {
+        env = static_cast<float>(v.age) / static_cast<float>(v.attack);
+        if (v.smoothFades) env = smoothstep01(env);
+      }
       const std::int64_t toGateEnd = v.gateFrames - v.age;
-      if (toGateEnd < v.release) env = std::min(env, static_cast<float>(toGateEnd) / static_cast<float>(v.release));
+      if (toGateEnd < v.release) {
+        float rel = static_cast<float>(toGateEnd) / static_cast<float>(v.release);
+        if (v.smoothFades) rel = smoothstep01(rel);
+        env = std::min(env, rel);
+      }
       const double curStep = v.step * v.rateScale;
       const double remaining = curStep > 0.0 ? (static_cast<double>(v.regionEnd - 1) - v.pos) / curStep : (v.pos - static_cast<double>(v.regionStart)) / -curStep;
       // Fade out at the region end, but never over more than half of a short region (a 1-frame region has no fade).
       const double regionLen = static_cast<double>(v.regionEnd - v.regionStart);
       if (regionLen > 1.0) {
         const double endFade = std::min(static_cast<double>(v.release), std::max(1.0, 0.5 * regionLen));
-        if (remaining < endFade) env = std::min(env, static_cast<float>(std::max(0.0, remaining) / endFade));
+        if (remaining < endFade) {
+          float rel = static_cast<float>(std::max(0.0, remaining) / endFade);
+          if (v.smoothFades) rel = smoothstep01(rel);
+          env = std::min(env, rel);
+        }
       }
       if (v.fading) {
         env *= static_cast<float>(v.fadeLeft) / static_cast<float>(v.fadeTotal);
