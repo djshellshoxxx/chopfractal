@@ -112,7 +112,8 @@ CHOP_TEST(drag_handles_produce_files_and_follow_the_pattern_state) {
   CHECK(wav.existsAsFile() && wav.getFileExtension() == ".wav");
 }
 
-CHOP_TEST(arrangement_rows_are_edited_filled_and_exported_with_progress_and_cancel) {
+// The arrangement is edited and exported in the Arrange drawer only; the export drawer has no second copy of it.
+CHOP_TEST(arrangement_lives_in_the_arrange_drawer_and_not_in_the_export_drawer) {
   if (!haveDisplay()) return;
   IsolatedUser user;
   EditorRig rig;
@@ -121,39 +122,13 @@ CHOP_TEST(arrangement_rows_are_edited_filled_and_exported_with_progress_and_canc
   rig.ed->openDrawer("export");
   rig.ed->exportDrawer().refresh();
   pump(60);
-  auto& d = rig.ed->exportDrawer();
-  CHECK(d.arrangementView().rows.empty());
-  auto* add = findButton(rig.ed->exportDrawer(), "Add");
-  auto* autoFill = findButton(rig.ed->exportDrawer(), "Auto fill 16 bars");
-  auto* exportArr = findButton(rig.ed->exportDrawer(), "Export arrangement");
-  auto* remove = findButton(rig.ed->exportDrawer(), "Remove");
-  auto* up = findButton(rig.ed->exportDrawer(), "Up");
-  CHECK(add && autoFill && exportArr && remove && up);
-  if (!(add && autoFill && exportArr && remove && up)) return;
-  CHECK(!exportArr->isEnabled());  // an empty arrangement cannot be exported
-  CHECK(!remove->isEnabled());
-  add->onClick();
-  add->onClick();
-  CHECK_EQ(d.arrangementView().rows.size(), 2u);
-  CHECK(exportArr->isEnabled());
-  up->onClick();  // the new selection is the second row, which moves up
-  rig.proc.withSession([&](cf::composition::ProjectSession& s) { CHECK_EQ(s.arrangement().sections.size(), 2u); });
-  remove->onClick();
-  CHECK_EQ(d.arrangementView().rows.size(), 1u);
-  autoFill->onClick();
-  CHECK(d.arrangementView().rows.size() >= 2u);
-
-  // Export through the session API, with the folder chosen by the test.
-  const juce::File out = user.root.getChildFile("arr");
-  out.createDirectory();
-  CHECK(rig.ed->commands().startArrangementExport(out.getFullPathName().toStdString()).ok());
-  CHECK(waitFor([&] { return d.cancelVisible(); }, 3000) || !rig.ed->commands().arrangementState().running);
-  if (d.cancelVisible()) {
-    CHECK(!exportArr->isEnabled());
-    rig.ed->commands().cancelArrangement();
-  }
-  CHECK(waitFor([&] { return !d.cancelVisible() && !rig.ed->commands().arrangementState().running; }, 15000));
-  CHECK(rig.proc.statusMessage().isNotEmpty());
+  for (const char* name : {"Add", "Remove", "Up", "Down", "Use scene chain", "Auto fill 16 bars", "Export arrangement", "Export Arrangement"})
+    CHECK(findButton(rig.ed->exportDrawer(), name) == nullptr);
+  CHECK(findCombo(rig.ed->exportDrawer(), "Arrangement transition") == nullptr);
+  rig.ed->openDrawer("arrange");
+  pump(60);
+  CHECK(findButton(rig.ed->perform().arrangement(), "Export Arrangement") != nullptr);
+  CHECK(findButton(rig.ed->perform().arrangement(), "Auto fill 16 bars") != nullptr);
 }
 
 CHOP_TEST(export_drawer_is_laid_out_at_both_sizes_and_every_control_has_a_tooltip) {

@@ -18,6 +18,9 @@ class RulesPanel : public EditorPanelBase {
   void paint(juce::Graphics&) override;
   const chopfractal::ui::RuleEditorModel& draft() const { return draft_; }
 
+   // The editor tells the panel whether its drawer is open: closed with unapplied edits, the status bar says so.
+  void setDrawerOpen(bool open);
+
  private:
   // A ListBox model over strings (rule rows, problems, blocked changes).
   struct TextList : juce::ListBoxModel {
@@ -63,6 +66,8 @@ class RulesPanel : public EditorPanelBase {
   void refreshProblems();
   void refreshRoles();
   void refreshFooter();
+  void updateStatusSuffix();
+  bool drawerOpen_ = false;
   void loadForm();    // selected rule -> form widgets
   void commitForm();  // form widgets -> draft
   void layoutBody();

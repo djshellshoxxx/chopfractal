@@ -23,7 +23,8 @@ class ShortcutsPanel : public juce::Component {
         {EditorAction::LaneDown, "Hit in the lane below"}, {EditorAction::Audition, "Audition the selected hit"}, {EditorAction::Mute, "Mute or unmute selected hit"},
         {EditorAction::Duplicate, "Duplicate selected hit"}, {EditorAction::Delete, "Delete selected hit"}, {EditorAction::ZoomIn, "Zoom into selected hit"},
         {EditorAction::Collapse, "Collapse selected hit"}, {EditorAction::ToggleLock, "Lock or unlock bar"}, {EditorAction::Escape, "Clear selection"},
-        {EditorAction::SpaceHint, "Play or stop (standalone)"}};
+        {EditorAction::SpaceHint, "Play or stop (standalone)"}, {EditorAction::WaveZoomIn, "Zoom the waveform in (waveform focused)"},
+        {EditorAction::WaveZoomOut, "Zoom the waveform out"}, {EditorAction::WaveFit, "Show the whole sample"}};
     return r;
   }
   static juce::String text() {

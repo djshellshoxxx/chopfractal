@@ -67,6 +67,12 @@ CHOP_TEST(key_map_covers_the_documented_shortcuts_and_nothing_else) {
   CHECK(mapKey(key(juce::KeyPress::backspaceKey), true) == EditorAction::Delete);
   CHECK(mapKey(key(juce::KeyPress::escapeKey), true) == EditorAction::Escape);
   CHECK(mapKey(key(juce::KeyPress::spaceKey), true) == EditorAction::SpaceHint);
+  CHECK(mapKey(ch('+', true), true) == EditorAction::WaveZoomIn);
+  CHECK(mapKey(ch('='), true) == EditorAction::WaveZoomIn);
+  CHECK(mapKey(ch('-'), true) == EditorAction::WaveZoomOut);
+  CHECK(mapKey(key(juce::KeyPress::homeKey), true) == EditorAction::WaveFit);
+  CHECK(!mapKey(ch('-'), false) && !mapKey(key(juce::KeyPress::homeKey), false));  // a slider keeps them
+  CHECK(shortcutText(EditorAction::WaveZoomIn) == "+" && shortcutText(EditorAction::WaveFit) == "Home");
 }
 
 CHOP_TEST(key_map_leaves_host_shortcuts_and_unfocused_canvas_keys_alone) {

@@ -192,6 +192,9 @@ PadsPanel::PadsPanel(EditorModel& m, EditorCommands& c, PerformCommands& perform
 
   modeAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, "perf_mode", mode_);
   curveAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, "perf_velocity_curve", curve_);
+  tips_ = std::make_unique<ParamTip>(apvts);
+  tips_->bind(mode_, "perf_mode", mode_.getTooltip());
+  tips_->bind(curve_, "perf_velocity_curve", curve_.getTooltip());
 
   add({&grid_, &pageLabel_, &page_c_, &modeLabel_, &mode_, &curveLabel_, &curve_, &baseLabel_, &baseNote_, &channelLabel_, &channel_, &record_, &quantizeLabel_, &quantize_,
        &mergeLabel_, &merge_, &discard_, &learn_, &midiIn_, &hint_});

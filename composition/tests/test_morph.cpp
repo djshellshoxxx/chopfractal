@@ -284,3 +284,35 @@ CHOP_TEST(morph_with_gesture_effects_commits_a_valid_pattern) {
   CHECK(s.commitMorph().ok());
   CHECK(pattern::validate(*s.pattern()).ok());
 }
+
+// Slider drags in the inspector preview a hit edit on the audio side only: no pattern change, no undo step, no history node.
+CHOP_TEST(preview_edit_publishes_audio_without_touching_the_pattern_or_history) {
+  ProjectSession s;
+  CHECK(fixture::ready(s, true, 31, 2));
+  const auto before = patternBytes(s);
+  const auto playbackBefore = s.playback();
+  const std::size_t nodes = s.history().size();
+  EventId target;
+  for (const auto& bar : s.pattern()->bars)
+    for (const auto& beat : bar.beats)
+      if (!target.valid() && !beat.events.empty()) target = beat.events[0].id;
+  CHECK(target.valid());
+  auto quiet = [&](float level) {
+    return s.previewEdit([&](const pattern::Pattern& p, const ChopSnapshot&) {
+      const Event* e = pattern::findEvent(p, target);
+      EventTransform tx = e->tx;
+      tx.level = level;
+      return pattern::setEventTransform(p, target, tx);
+    });
+  };
+  CHECK(quiet(0.25f).ok());
+  CHECK(s.playback() != playbackBefore);  // the renderer got a new playback
+  CHECK(patternBytes(s) == before);       // the stored pattern did not move
+  CHECK_EQ(s.history().size(), nodes);
+  CHECK(quiet(0.5f).ok());  // repeated previews are fine and always start from the stored pattern
+  CHECK(patternBytes(s) == before);
+  CHECK(s.cancelEditPreview().ok());  // dropping the preview restores the stored pattern's audio
+  CHECK(!s.previewEdit([&](const pattern::Pattern& p, const ChopSnapshot&) { return pattern::setEventTransform(p, EventId{9999999}, EventTransform{}); }).ok());
+  ProjectSession none;
+  CHECK(!none.previewEdit([](const pattern::Pattern& p, const ChopSnapshot&) -> Result<pattern::Pattern> { return p; }).ok());
+}

@@ -1,4 +1,5 @@
 #pragma once
+#include "ParamTip.h"
 // Transport, the main action buttons, the seed, and the host-automatable parameter controls (their attachments live
 // here). Widgets are declared before the attachments that bind them, so the attachments are destroyed first.
 #include <memory>
@@ -27,6 +28,7 @@ class ControlsPanel : public EditorPanelBase {
   void addToggle(ParamToggle&, const char* paramId, const juce::String& title);
 
   Attachment& apvts_;
+  ParamTip tips_;
   juce::TextButton followHost_{"Follow DAW"};
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
   juce::TextButton mutate_{"Mutate"}, dice_{"New Seed"};

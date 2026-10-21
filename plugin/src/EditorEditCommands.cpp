@@ -196,6 +196,28 @@ void EditorCommands::setHitsProbability(const std::vector<cf::EventId>& ids, flo
   });
 }
 
+void EditorCommands::previewHitsTransform(const std::vector<cf::EventId>& ids, const std::function<void(cf::EventTransform&)>& mutate) {
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    s.previewEdit([&](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) {
+      return forEachHit(p, ids, [&](const cf::pattern::Pattern& q, cf::EventId id) -> PatternResult {
+        const cf::Event* e = cf::pattern::findEvent(q, id);
+        if (!e) return cf::makeError(cf::ErrorCode::NotFound, "That hit no longer exists.");
+        cf::EventTransform tx = e->tx;
+        mutate(tx);
+        return cf::pattern::setEventTransform(q, id, tx);
+      });
+    });
+  });
+}
+
+void EditorCommands::previewHitsProbability(const std::vector<cf::EventId>& ids, float probability) {
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    s.previewEdit([&](const cf::pattern::Pattern& p, const cf::ChopSnapshot&) {
+      return forEachHit(p, ids, [&](const cf::pattern::Pattern& q, cf::EventId id) { return cf::pattern::setEventProbability(q, id, probability); });
+    });
+  });
+}
+
 void EditorCommands::setHitsLane(const std::vector<cf::EventId>& ids, int lane) {
   editHits([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) {
     return forEachHit(p, ids, [&](const cf::pattern::Pattern& q, cf::EventId id) -> PatternResult {

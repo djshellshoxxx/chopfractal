@@ -1,4 +1,5 @@
 #pragma once
+#include "ParamTip.h"
 // Pads drawer (F07 section 12): the on-screen 4x4 pads for the chops (velocity from where the pad is pressed), Poly / Mono /
 // Gate and the velocity curve (host parameters), base note, MIDI channel, record take to the grid with quantize and merge,
 // choke groups, and a MIDI display with Learn. Labels, flags and titles come from ui::buildPadView().
@@ -78,4 +79,5 @@ class PadsPanel : public DrawerPanel {
   juce::ToggleButton record_{"Record Take"}, learn_{"Learn"};
   juce::TextButton discard_{"Discard Take"};
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttach_, curveAttach_;
+  std::unique_ptr<ParamTip> tips_;
 };

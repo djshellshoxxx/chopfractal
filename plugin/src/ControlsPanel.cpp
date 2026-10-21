@@ -1,11 +1,13 @@
 #include "ControlsPanel.h"
 
+#include "ControlHelp.h"
+
 #include <initializer_list>
 
 namespace cf = chopfractal;
 
 ControlsPanel::ControlsPanel(EditorModel& model, EditorCommands& commands, juce::AudioProcessorValueTreeState& apvts)
-    : EditorPanelBase(model, commands, "ControlsPanel"), apvts_(apvts) {
+    : EditorPanelBase(model, commands, "ControlsPanel"), apvts_(apvts), tips_(apvts) {
   // Transport, undo/redo, Generate, Load Loop / Detect Chops and the hit-editing buttons live in the shell (TopBar, MacroStrip, ShellChrome).
   for (juce::Button* b : std::initializer_list<juce::Button*>{&mutate_, &dice_}) {
     addAndMakeVisible(*b);
@@ -57,6 +59,7 @@ void ControlsPanel::addSlider(ParamSlider& s, const char* paramId, const juce::S
   s.label.setText(title, juce::dontSendNotification);
   s.label.attachToComponent(&s.slider, true);
   s.attachment = std::make_unique<Attachment::SliderAttachment>(apvts_, paramId, s.slider);
+  tips_.bind(s.slider, paramId, control_help::forName(title));
 }
 
 void ControlsPanel::addToggle(ParamToggle& t, const char* paramId, const juce::String& title) {
@@ -64,6 +67,7 @@ void ControlsPanel::addToggle(ParamToggle& t, const char* paramId, const juce::S
   t.button.setTitle(title);
   addAndMakeVisible(t.button);
   t.attachment = std::make_unique<Attachment::ButtonAttachment>(apvts_, paramId, t.button);
+  tips_.bind(t.button, paramId, control_help::forName(title));
 }
 
 void ControlsPanel::modelChanged(Change c) {

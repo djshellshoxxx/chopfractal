@@ -23,7 +23,9 @@ class ParamRow : public juce::Component {
     slider_.valueFromTextFunction = [](const juce::String& t) { return t.retainCharacters("0123456789.-+").getDoubleValue(); };
     slider_.onDragEnd = [this] { commit(); };
     slider_.onValueChange = [this] {
-      if (!syncing_ && !slider_.isMouseButtonDown()) commit();
+      if (syncing_) return;
+      if (!slider_.isMouseButtonDown()) commit();
+      else if (onLive) live();
     };
     addAndMakeVisible(slider_);
   }
@@ -44,8 +46,15 @@ class ParamRow : public juce::Component {
     slider_.setBounds(a);
   }
   std::function<void(double)> onCommit;
+  std::function<void(double)> onLive;  // while the pointer drags: a preview of the value (no undo step), at most every 40 ms
 
  private:
+  void live() {
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (now - lastLiveMs_ < 40.0) return;
+    lastLiveMs_ = now;
+    onLive(slider_.getValue());
+  }
   void commit() {
     if (syncing_) return;
     mixed_ = false;
@@ -56,5 +65,6 @@ class ParamRow : public juce::Component {
   juce::Label name_;
   juce::Slider slider_;
   bool mixed_ = false, syncing_ = false;
+  double lastLiveMs_ = 0.0;
   int labelW_ = 78;
 };

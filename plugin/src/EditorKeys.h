@@ -9,7 +9,8 @@
 enum class EditorAction {
   Generate, Mutate, Mute, ZoomIn, Collapse, ToggleLock, Undo, Redo,
   PrevHit, NextHit, LaneUp, LaneDown, Audition, Delete, Duplicate, Escape, SpaceHint,
-  OpenPalette
+  OpenPalette,
+  WaveZoomIn, WaveZoomOut, WaveFit  // waveform keys: + / = , - and Home, claimed only while the waveform has the focus
 };
 
 // `canvasFocus`: the focus is on the editor or one of the four canvases. Arrows, Enter, Delete, Backspace and Escape are

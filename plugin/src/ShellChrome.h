@@ -1,4 +1,5 @@
 #pragma once
+#include "ParamTip.h"
 // The static furniture of the main view, painted behind the waveform and the pattern grid: the Source and Pattern
 // panels with their toolbars, the source ruler, the chop strip (one cell per chop with number and role), the pattern bar
 // ruler and the per-role lane headers. It also owns the toolbar widgets of those two panels (Load Loop, Detect Chops,
@@ -24,6 +25,7 @@ class ShellChrome : public EditorPanelBase {
   void syncWaveButtons();
 
   juce::AudioProcessorValueTreeState& apvts_;
+  ParamTip tips_;
   shell::ShellRects rects_;
   bool advanced_ = false;
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, zoom_{"Zoom In"}, collapse_{"Collapse"}, lock_{"Lock Bar"};

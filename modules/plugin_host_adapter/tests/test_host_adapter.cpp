@@ -331,3 +331,22 @@ CHOP_TEST(pad_parameters_map_to_the_renderer_pad_params) {
   v.set(kPerfVelocityCurve, 2.0);
   CHECK(toPadParams(v).mode == render::PadMode::Mono && toPadParams(v).curve == render::VelocityCurve::Hard);
 }
+
+// F04 tooltip value lines: pinned strings for each kind, and every manifest row produces a sane line at its default.
+CHOP_TEST(describe_param_formats_every_kind) {
+  CHECK(describeParam(*findParam("density"), 0.5) == "Density: 50% (range 0% to 100%, default 50%)");
+  CHECK(describeParam(*findParam("output_gain_db"), -6.0) == "Output Gain: -6.00 dB (range -60 to 12 dB, default 0 dB)");
+  CHECK(describeParam(*findParam("pattern_bars"), 2.0) == "Pattern Length: 4 bars (choices: 1, 2, 4, 8; default 4)");
+  CHECK(describeParam(*findParam("effect_enable"), 1.0) == "Effect Enable: on (default on)");
+  CHECK(describeParam(*findParam("allow_echo"), 0.0) == "Allow Echo: off (default off)");
+  CHECK(describeParam(*findParam("echo_amount"), 40.0) == "Echo Amount: 40% (range 0% to 100%, default 40%)");  // stored 0..100, shown as stored
+  CHECK(describeParam(*findParam("stutter_decay_db"), -1.5) == "Stutter Decay: -1.50 dB (range -12 to 6 dB, default -1.5 dB)");
+  CHECK(describeParam(*findParam("density"), std::numeric_limits<double>::quiet_NaN()).find("50%") != std::string::npos);  // NaN -> default
+  CHECK(describeParam(*findParam("density"), 7.0).find("Density: 100%") == 0);                                         // clamped
+  for (const ParamDef& d : parameterManifest()) {
+    const std::string line = describeParam(d, d.defaultValue);
+    CHECK(line.rfind(d.name, 0) == 0);
+    CHECK(line.back() == ')');
+    CHECK(line.find("default") != std::string::npos);
+  }
+}

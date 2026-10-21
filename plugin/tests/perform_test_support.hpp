@@ -48,8 +48,16 @@ inline void checkDescribed(juce::Component& root, const char* what) {
 }
 
 // Button::triggerClick posts a message, so the click lands once the loop has run.
+// Waits until the button has actually delivered its click (a fixed short pump races under load: the full suite flaked on it).
 inline void tap(juce::Button* b) {
+  struct Clicked : juce::Button::Listener {
+    bool seen = false;
+    void buttonClicked(juce::Button*) override { seen = true; }
+  } listener;
+  b->addListener(&listener);
   b->triggerClick();
+  waitFor([&] { return listener.seen; }, 3000);
+  b->removeListener(&listener);
   pump(5);
 }
 

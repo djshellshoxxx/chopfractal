@@ -496,6 +496,7 @@ bool PerformCommands::pollArrangementJob() {
     auto* job = s.arrangementJob();
     if (!job || !job->done()) return;
     const auto& result = job->result();
+    if (result.status.ok() && cmd_.onMilestone) cmd_.onMilestone(QuickStep::Export);
     if (result.status.ok())
       message = juce::String::fromUTF8(cf::ui::arrangementExportedMessage(juce::File(juce::String::fromUTF8(result.wavPath.c_str())).getFileName().toStdString(), result.bars, result.seconds).c_str());
     else if (result.status.error().code == cf::ErrorCode::Cancelled)

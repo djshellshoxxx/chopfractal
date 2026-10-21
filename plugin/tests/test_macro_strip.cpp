@@ -49,3 +49,27 @@ CHOP_TEST(macro_strip_knobs_follow_the_parameters_reset_on_double_click_and_have
     CHECK(s.getProperties()[cdl::kDriftProperty].isDouble());  // the drift tick marks the value the session opened with
   }
 }
+
+// Opening the editor must not change the sound: the Stutter knob's first attachment update used to switch Allow Stutter on.
+CHOP_TEST(opening_the_editor_leaves_allow_stutter_off_and_only_a_raise_by_the_person_switches_it_on) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  auto allow = [&] { return static_cast<double>(*p.apvts.getRawParameterValue("allow_stutter")); };
+  CHECK(allow() == 0.0);
+  {
+    ChopFractalEditor editor(p);
+    pump(60);
+    CHECK(allow() == 0.0);  // the default Stutter amount is 25 and the editor attached the knob to it
+    MacroKnob* stutter = nullptr;
+    for (auto& k : editor.macroStrip().knobs())
+      if (k->def() && juce::String(k->def()->id) == "stutter_amount") stutter = k.get();
+    CHECK(stutter != nullptr);
+    if (!stutter) return;
+    auto* amount = p.apvts.getParameter("stutter_amount");
+    amount->setValueNotifyingHost(amount->convertTo0to1(60.0f));  // automation or a preset: not a person at the knob
+    pump(60);
+    CHECK(allow() == 0.0);
+    stutter->enableStutterIfRaised();  // what a drag, wheel or key press on the knob runs
+    CHECK(allow() == 1.0);
+  }
+}

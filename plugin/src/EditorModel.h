@@ -151,6 +151,9 @@ class EditorModel {
 
   juce::String statusLine() const;  // the status message
   void setStatus(const juce::String&, Severity = Severity::Info);
+  // A standing note shown after the status message (for example "Unapplied rule changes"); empty clears it.
+  const juce::String& statusSuffix() const { return statusSuffix_; }
+  void setStatusSuffix(const juce::String&);
   void setProgress(const juce::String&);  // status line without a log entry (export and arrangement progress)
   Severity statusSeverity() const { return proc_.statusSeverity(); }
   // F05 feedback readouts
@@ -185,6 +188,7 @@ class EditorModel {
   juce::String signature_;
   const void* peaksSource_ = nullptr;
   int peaksWidth_ = 0;
+  juce::String statusSuffix_;
   int waveWidthPx_ = 0;
   std::int64_t waveStart_ = 0, waveEnd_ = 0;  // 0 / 0: the whole clip
   const void* waveSource_ = nullptr;

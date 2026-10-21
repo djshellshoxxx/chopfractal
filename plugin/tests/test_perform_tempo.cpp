@@ -56,6 +56,7 @@ CHOP_TEST(tempo_match_asks_runs_the_job_keeps_the_chops_and_undo_stretch_goes_ba
   selectItem(*findCombo(panel, "Loop length"), "Custom BPM");
   findTextEditor(panel, "Source BPM")->setText("96", true); pump(5);
   findTextEditor(panel, "Target BPM")->setText("120", true); pump(5);
+  pump(150);  // let the processor's 30 Hz output stage settle before the pattern is captured
   const auto before = patternBytes(f.proc);
   int chopsBefore = 0;
   f.proc.withSession([&](cf::composition::ProjectSession& s) { chopsBefore = static_cast<int>(s.chops()->chops.size()); });

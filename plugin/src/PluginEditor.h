@@ -29,6 +29,7 @@
 #include "PresetBrowser.h"
 #include "PerformDrawers.h"
 #include "RulesPanel.h"
+#include "SoundPanel.h"
 #include "PluginProcessor.h"
 #include "QuickStartCard.h"
 #include "QuickStartTracker.h"
@@ -52,6 +53,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void paint(juce::Graphics& g) override;
   void resized() override;
   bool keyPressed(const juce::KeyPress&) override;
+  // The key map with the focused component given (keyPressed passes the real one); tests pass the waveform to check its keys.
+  bool handleKey(const juce::KeyPress&, juce::Component* focused);
 
   // ---- drawer registration (second wave panels plug in here) ----
   void registerDrawer(const juce::String& id, const juce::String& title, juce::Component& content, int preferredWidth = 320, bool showButton = true);
@@ -78,6 +81,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   int uiScalePercent() const { return uiScalePercent_; }
   void setReducedMotion(bool on);
   SettingsDrawer& settingsDrawer() { return settings_; }
+  SoundPanel& soundPanel() { return sound_; }
   const shell::ShellRects& shellRects() const { return rects_; }
 
   // Public so tests can drive them without modal dialogs.
@@ -160,6 +164,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   InspectorPanel inspector_;
   FxRackPanel fxRack_;
   RulesPanel rules_;
+  SoundPanel sound_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
   PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model

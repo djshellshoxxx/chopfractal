@@ -494,6 +494,15 @@ Status ProjectSession::edit(const std::function<Result<pattern::Pattern>(const p
   return finalize(fn(patterns_.current(), *chops_), nullptr);
 }
 
+Status ProjectSession::previewEdit(const std::function<Result<pattern::Pattern>(const pattern::Pattern&, const ChopSnapshot&)>& fn) {
+  if (!patterns_.hasPattern() || !chops_) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
+  if (morphActive_ || scenePhase_ != ScenePhase::Off) return makeError(ErrorCode::Blocked, "Stop the morph or the scenes before editing a hit.");
+  auto result = fn(patterns_.current(), *chops_);
+  if (!result.ok()) return result.error();
+  if (fx_.any()) result = pattern::applyFxPass(result.value(), fx_);  // same gesture effects as the committed edit
+  return installPlayback(result.value());
+}
+
 Status ProjectSession::commitEdit(const std::string& label) {
   if (!patterns_.hasPattern()) return makeError(ErrorCode::InvalidArgument, "there is no pattern to snapshot");
   recordHistory(label.empty() ? "Edit" : label);

@@ -400,6 +400,11 @@ class ProjectSession {
   Status collapse(EventId event);
   // Any pure pattern_engine edit (move, lock, set transform, duplicate bar, ...) goes through here.
   Status edit(const std::function<Result<pattern::Pattern>(const pattern::Pattern&, const ChopSnapshot&)>& fn);
+  // Audio-only preview of a pure edit while a slider is dragged: the result is validated and published to the renderer, but the pattern,
+  // the undo stack and the family tree are untouched. The edit that follows on release (edit + commitEdit) replaces it;
+  // cancelEditPreview() drops it. Returns the same errors as edit().
+  Status previewEdit(const std::function<Result<pattern::Pattern>(const pattern::Pattern&, const ChopSnapshot&)>& fn);
+  Status cancelEditPreview() { return republish(); }  // publishes the stored pattern again
   Status commitEdit(const std::string& label = {});  // settled manual edits become one history node
   bool undo();
   bool redo();
