@@ -28,7 +28,8 @@
   "summary": "Deterministic Standard MIDI File (format 0) encoder and decoder for note sequences with tempo and time-signature events. The tick grid equals the pattern engine's, so exported hits land on exact ticks.",
   "public_api": [
     "`encode(FileSpec)` -> .mid bytes; `decode(bytes)` -> FileSpec (for verification)",
-    "`FileSpec{bpm, timeSignature, trackName, notes[]}`, `Note{note, velocity, start, duration, channel}`"
+    "`FileSpec{bpm, timeSignature, trackName, notes[]}`, `Note{note, velocity, start, duration, channel}`",
+    "`FileSpec::markers` (meta 0xFF 0x06 at a tick, decoded back) and `FileSpec::endTick` (end of track on a bar boundary); absent, the bytes are unchanged"
   ],
   "limits": [
     "960 ticks per quarter; notes 0..127, velocity 1..127, at most 65536 notes; same-pitch overlaps are clipped and zero-length results dropped"

@@ -14,6 +14,7 @@
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 #include <chopfractal/level_match/level_match.hpp>
 #include <chopfractal/pattern_engine/fx_pass.hpp>
+#include <chopfractal/pattern_engine/morph.hpp>
 #include <chopfractal/pattern_engine/pattern.hpp>
 #include <chopfractal/pattern_engine/session.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
@@ -27,6 +28,9 @@
 #include <chopfractal/composition/stretch.hpp>
 #include <chopfractal/chop_insight/insight.hpp>
 #include <chopfractal/evolve/evolve.hpp>
+#include <chopfractal/scenes/scenes.hpp>
+#include <chopfractal/composition/arrangement.hpp>
+#include <chopfractal/composition/arrangement_job.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
 #include <chopfractal/groove/groove.hpp>
 #include <chopfractal/wav_export/wav.hpp>
@@ -88,12 +92,45 @@ struct ExportReport {
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
 };
+// MIDI velocity from the event level `l` (F13): Linear clamp(l*127), Soft 127*min(l,1)^2, Hard 127*sqrt(min(l,1)), Fixed.
+enum class VelocityCurve : std::uint8_t { Linear = 0, Soft = 1, Hard = 2, Fixed = 3 };
+struct MidiExportOptions {
+  int baseNote = 36;                      // 0..127; chop n (snapshot order) -> baseNote + n
+  double bpm = 120.0;                     // 20..999, written as the tempo event
+  int loops = 1;                          // 1..16 repeats of the pattern
+  VelocityCurve curve = VelocityCurve::Linear;
+  int fixedVelocity = 100;                // 1..127, used by Fixed
+  int channel = 0;                        // 0..15 (the UI shows 1..16)
+  std::string trackName = "chopfractal";  // at most 60 bytes
+};
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
   int loops = 1;                // 1..16 repeats of the pattern in pattern.mid
   bool overwrite = false;
   std::string name = "chopfractal";
+  VelocityCurve curve = VelocityCurve::Linear;  // defaults reproduce the pre-F13 pattern.mid byte for byte
+  int fixedVelocity = 100;
+  int channel = 0;
+};
+// MIDI velocity 1..127 for an event level under a curve (`fixedVelocity` is used by Fixed only).
+int midiVelocity(float level, VelocityCurve curve, int fixedVelocity = 100);
+constexpr std::size_t kMaxDragFiles = 64;           // 63 slices + the MIDI file
+constexpr double kMaxDragAudioSeconds = 120.0;      // a dragged WAV longer than this is refused by the UI
+struct KitFile {
+  std::string name;
+  std::vector<std::uint8_t> bytes;
+};
+// The MIDI export preferences that are saved with the project (they ride in the Export block of the extras section).
+struct MidiExportSettings {
+  int baseNote = 36;  // 0..127
+  VelocityCurve curve = VelocityCurve::Linear;
+  int fixedVelocity = 100;  // 1..127
+  int loops = 1;            // 1..16
+  int channel = 0;          // 0..15
+  friend bool operator==(const MidiExportSettings& a, const MidiExportSettings& b) {
+    return a.baseNote == b.baseNote && a.curve == b.curve && a.fixedVelocity == b.fixedVelocity && a.loops == b.loops && a.channel == b.channel;
+  }
 };
 
 // ---- project extras (state v2, docs/specs/roadmap/F01-state-v2-and-persistence.md section 4) ----
@@ -102,8 +139,9 @@ struct ExportUiSettings {
   int formatIndex = 1;  // 16-bit, 24-bit, 32-bit float
   int rateIndex = 1;    // 44.1, 48, 88.2, 96 kHz
   int loopsIndex = 1;   // {1, 2, 4, 8, 16}
+  MidiExportSettings midi;  // F13; written after the three indexes only when it differs from the default
   friend bool operator==(const ExportUiSettings& a, const ExportUiSettings& b) {
-    return a.formatIndex == b.formatIndex && a.rateIndex == b.rateIndex && a.loopsIndex == b.loopsIndex;
+    return a.formatIndex == b.formatIndex && a.rateIndex == b.rateIndex && a.loopsIndex == b.loopsIndex && a.midi == b.midi;
   }
 };
 struct UiPrefs {
@@ -157,6 +195,8 @@ using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
 constexpr std::uint8_t kTagRouting = 9;       // owned by F11 Multi-output stems (composition/src/routing.cpp)
 constexpr std::uint8_t kTagPads = 10;         // owned by F07 Performance pads (composition/src/pads.cpp)
+constexpr std::uint8_t kTagScenes = 11;       // owned by F09 Evolve scenes (composition/src/scenes.cpp)
+constexpr std::uint8_t kTagArrangement = 16;  // owned by F18 Arrangement export (composition/src/arrangement_session.cpp)
 constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
@@ -213,6 +253,47 @@ struct LoadOptions {
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
 using SourceResolver = std::function<std::shared_ptr<const render::SourceData>(const source::SourceInfo&)>;
+
+// ---- Evolve scenes (F09; composition/src/scenes.cpp) ----
+struct SceneExportOptions {
+  bool list = true;      // scenes.tsv
+  bool midi = true;      // scene_NN_<name>.mid per scene (repeats capped at 16)
+  bool wav = false;      // scenes.wav: every scene rendered and laid end to end, tails overlapping the next scene
+  double bpm = 120.0;    // 20..999
+  int baseNote = 36;     // 0..127
+  wav::Options wavOptions;
+  bool overwrite = false;
+};
+struct SceneStatus {
+  bool running = false;              // scenes are being sequenced (including "waiting for the first loop boundary")
+  bool holding = false;              // the sequence finished; the last scene keeps looping until stopScenes()
+  scenes::SceneId playing = 0;       // 0 while the first scene waits for its boundary
+  scenes::SceneId armed = 0;         // the scene that starts at the next loop boundary
+  int loopIndex = 0;                 // loops of `playing` completed so far
+  int loops = 0;                     // loops `playing` lasts
+  bool recording = false;
+  bool waitingForTransport = false;  // running, but the host transport is stopped
+};
+
+// ---- Arrangement export (F18; composition/src/arrangement_session.cpp) ----
+struct ArrangementExportSettings {
+  std::string root;          // export folder, created when missing
+  double bpm = 120.0;        // 20..999, rounded to a whole BPM as playback does
+  wav::Options wavOptions;   // format and render sample rate
+  bool levelMatch = false;   // F16: recompute a match gain per scene
+  double matchTrimDb = 0.0;
+  std::function<void(float)> observer;  // test hook: called on the worker after every progress update
+};
+// One line of the arrangement list as the dialog shows it (the view model formats the text).
+struct ArrangementRow {
+  std::uint32_t sceneId = 0;
+  int sceneNumber = 0;        // 1-based position in the scene list, 0 when the scene was deleted
+  std::string sceneName;      // empty when deleted
+  int patternBars = 0;        // 0 when deleted
+  int bars = 4, repeats = 1;
+  bool deleted = false;       // the scene no longer exists: shown as "Scene deleted", export blocked
+  bool fits = true;           // the scene still flattens against today's chops
+};
 
 class ProjectSession {
  public:
@@ -294,8 +375,63 @@ class ProjectSession {
   Status commitEdit(const std::string& label = {});  // settled manual edits become one history node
   bool undo();
   bool redo();
-  Status storeSnapshot(std::size_t slot) { return patterns_.storeSnapshot(slot); }
+  Status storeSnapshot(std::size_t slot);  // refreshes a running morph (composition/src/morph.cpp)
   Status recallSnapshot(std::size_t slot);
+
+  // ---- A/B morph (F10; composition/src/morph.cpp) ----
+  // Blends the stored A and B patterns by `t` (0 = A, 1 = B) into a PREVIEW that only the audio side sees: pattern(),
+  // history, undo and the saved state are untouched until commitMorph(). Every command that changes the pattern ends the
+  // morph (a notice says so); Evolve and morph exclude each other.
+  Status beginMorph(double t = 0.5);  // both slots required; installs the preview playback
+  Status setMorph(double t);          // 0..1, NaN is InvalidArgument; no history, no undo entry
+  bool morphActive() const { return morphActive_; }
+  double morphAmount() const { return morphT_; }
+  // The pattern the panels draw: the scene that plays, or the morph preview while it is active, else pattern().
+  const pattern::Pattern* displayPattern() const;
+  // Freezes the blend (unmatched hits resolved), records it as a family-tree node "Morph A>B NN%" and one undo step.
+  Status commitMorph(const std::string& label = {});
+  void cancelMorph();  // back to the real pattern; no notice
+
+  // ---- Evolve scenes (F09; composition/src/scenes.cpp) ----
+  // A scene is a stored pattern plus loops and what follows it. Playback is an OVERRIDE: pattern(), history, undo, A/B
+  // slots and the saved pattern never change while scenes play; any command that changes the pattern stops the scenes.
+  // The processor calls onSceneBoundary after onLoopBoundary and onTransportChanged on host play/stop edges.
+  void attachArmMailbox(render::Mailbox<render::ArmedSwitch>* mailbox);
+  const scenes::SceneList& sceneList() const { return scenes_; }
+  bool sceneFits(scenes::SceneId id) const;  // the stored pattern still flattens against today's chops
+  Result<scenes::SceneId> captureScene(const std::string& name = {});  // the real pattern (never the Chaos / morph / scene overlay)
+  Status updateScene(scenes::SceneId id);    // replaces the scene's pattern with the current one; stops playback first
+  Status editScene(scenes::SceneId id, const std::function<void(scenes::Scene&)>& edit);  // name, loops, next, jumpTo only
+  Status removeScene(scenes::SceneId id);
+  Status moveScene(scenes::SceneId id, int newIndex);
+  Status clearScenes();
+  Status setSceneWrap(bool wrap);
+  Status setRecordScenes(bool on);
+  bool recordingScenes() const { return recordScenes_; }
+  Status playScenes(scenes::SceneId first = 0, Quantize when = Quantize::LoopBoundary);
+  Status stopScenes();  // back to the real pattern; no notice
+  void onSceneBoundary(std::uint64_t appliedToken);  // once per observed pattern-loop boundary, same lock as onLoopBoundary
+  void onTransportChanged(bool playing, std::uint64_t appliedToken = 0);  // host play/stop edges
+  SceneStatus sceneStatus() const;
+  Status keepScene(scenes::SceneId id, const std::string& label = {});  // stops playback, finalize(scene pattern)
+  Result<ExportReport> exportScenes(const std::string& directory, const SceneExportOptions& options) const;
+
+  // ---- Arrangement export (F18; composition/src/arrangement_session.cpp) ----
+  // The arrangement list is project state (section tag 16, absent while it is the default). It names scenes by id; a deleted
+  // scene keeps its row (flagged) and blocks the export. The export runs on one worker thread over an immutable snapshot.
+  const Arrangement& arrangement() const { return arrangement_; }
+  Status setArrangement(const Arrangement& a);  // stored even when the total is not 8..32
+  std::vector<ArrangementRow> arrangementRows() const;
+  Status fillArrangementFromChain();            // Use scene chain
+  Status autoFillArrangement();                 // Auto fill 16 bars
+  // The immutable snapshot a job renders (message thread). Validates in the order of the spec's messages.
+  Result<ArrangementPlan> planArrangementExport(const Arrangement& a, const std::string& name, const ArrangementExportSettings& settings) const;
+  // Validates (same order as the messages in the spec), snapshots and starts the worker. Returns "An arrangement export is
+  // already running." while a job runs; a finished job is replaced.
+  Status startArrangementExport(const Arrangement& a, const std::string& name, const ArrangementExportSettings& settings);
+  ArrangementJob* arrangementJob() const { return arrangementJob_.get(); }
+  void cancelArrangementExport();
+  void releaseArrangementJob();                 // after the result was read; cancels and joins a running one
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -377,6 +513,21 @@ class ProjectSession {
   // slice_NN_<role>.wav for every chop, pattern.mid replaying the pattern on those slices, and kit.txt.
   Result<ExportReport> exportKit(const std::string& directory, const KitOptions& options) const;
 
+  // ---- MIDI / audio drag-out and per-variation export (F13; composition/src/midi_drag.cpp) ----
+  // Nothing here touches the session, history or undo. The `Current` forms are renderMidi / renderWavBytes with the
+  // full option struct. A variation is read from its history node (the live pattern for the active node), repaired
+  // with sanitize() against today's chops, and rendered through the same playback path as the live pattern (groove
+  // baked per its setting); without decoded audio the MIDI still works from the chop map alone (retrigger sub-hits only).
+  Result<std::vector<std::uint8_t>> renderCurrentMidi(const MidiExportOptions& options) const;
+  Result<std::vector<std::uint8_t>> renderCurrentWav(const ExportWavOptions& options) const { return renderWavBytes(options); }
+  // `skippedEvents` receives how many events were dropped because their chop no longer exists.
+  Result<std::vector<std::uint8_t>> renderVariationMidi(history::NodeId node, const MidiExportOptions& options, int* skippedEvents = nullptr) const;
+  Result<std::vector<std::uint8_t>> renderVariationWav(history::NodeId node, const ExportWavOptions& options) const;
+  Result<ExportReport> exportVariationMidi(history::NodeId node, const std::string& path, const MidiExportOptions& options, bool overwrite) const;
+  Result<ExportReport> exportVariationWav(history::NodeId node, const std::string& path, const ExportWavOptions& options) const;
+  // Slice WAV bytes (same encode as exportKit: 24-bit, fades 32/64 frames) in chop order, then `<name>.mid`.
+  Result<std::vector<KitFile>> renderKitFiles(const KitOptions& options) const;
+
   // ---- project state ----
   const ProjectExtras& extras() const { return extras_; }
   // Validates, stores. No history node, no undo step, no republish.
@@ -455,6 +606,57 @@ class ProjectSession {
   mutable std::uint64_t annotatedKey_ = 0;
   groove::Groove groove_;
   SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
+  // scenes (F09)
+  enum class ScenePhase : std::uint8_t { Off, Pending, Running, Held };
+  struct BuiltScene {
+    std::shared_ptr<const pattern::Pattern> pattern;
+    std::shared_ptr<const render::Playback> playback;
+  };
+  void stopScenesForEdit();  // pattern-changing entry points; the caller publishes the real playback itself
+  bool endScenes(const char* noticeText, bool restore);
+  void cancelArm();
+  Status armScene(scenes::SceneId id);
+  bool adoptArmed(std::uint64_t appliedToken);
+  void installScene(scenes::SceneId id, const BuiltScene& built);
+  Result<BuiltScene> buildScene(const scenes::Scene& scene) const;
+  void rebuildPlaylist(bool warn);
+  Status refreshScenes();
+  Status storeScenesSection();
+  Status decodeScenes(const StateSection& s);
+  void clearSceneState();
+  Result<scenes::SceneId> captureImpl(const std::string& name, std::uint64_t evolveStep, int loops);
+  void recordEvolveScene(std::uint64_t stepIndex);
+  Result<std::vector<std::uint8_t>> midiFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& options) const;
+  scenes::SceneList scenes_;
+  scenes::SceneList playlist_;  // the scenes that fit today's chops, patterns left out (the sequencer needs only the metadata)
+  scenes::Sequencer sequencer_;
+  ScenePhase scenePhase_ = ScenePhase::Off;
+  render::Mailbox<render::ArmedSwitch>* armMailbox_ = nullptr;
+  std::uint64_t armCounter_ = 0;  // last token issued (arms and cancels share one increasing sequence)
+  std::uint64_t armedToken_ = 0;  // token of the pending arm, 0 = none
+  scenes::SceneId armedScene_ = 0;
+  BuiltScene armedBuilt_;         // keeps the armed Playback alive until it is in the main mailbox
+  std::shared_ptr<const pattern::Pattern> sceneOverride_;
+  scenes::SceneId playingScene_ = 0;
+  bool recordScenes_ = false;
+  bool hostPlaying_ = false;
+  mutable ChopSnapshotPtr fitChops_;
+  mutable std::map<scenes::SceneId, bool> fitCache_;
+
+  // arrangement (F18)
+  Status storeArrangementSection();
+  Status decodeArrangement(const StateSection& s);
+  Result<midi::FileSpec> midiSpecFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& options) const;
+  Arrangement arrangement_;
+  std::unique_ptr<ArrangementJob> arrangementJob_;
+
+  // morph (F10)
+  bool endMorph(bool withNotice);  // drops the preview state only; callers that change the pattern republish themselves
+  Status refreshMorph();           // rebuilds and republishes the preview from the current slots and amount
+  Result<pattern::Pattern> morphPattern(double t, bool freeze) const;
+  bool morphActive_ = false;
+  double morphT_ = 0.5;
+  std::shared_ptr<const pattern::Pattern> morphPreview_;
   Status decodeGroove(const StateSection& s);
   Status decodePads(const StateSection& s);
   Status decodeRouting(const StateSection& s);

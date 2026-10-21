@@ -128,6 +128,47 @@ Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& 
   return out;
 }
 
+Result<std::vector<std::uint8_t>> encodeWithCues(const std::vector<std::vector<float>>& planar, const Options& o, const std::vector<CuePoint>& cues, EncodeReport* report) {
+  auto base = encode(planar, o, report);
+  if (!base.ok() || cues.empty()) return base;
+  if (cues.size() > kMaxCuePoints) return makeError(ErrorCode::LimitExceeded, "too many cue points", static_cast<std::int64_t>(kMaxCuePoints));
+  const std::uint64_t frames = planar[0].size();
+  for (const CuePoint& c : cues)
+    if (c.sampleOffset > frames) return makeError(ErrorCode::OutOfRange, "a cue point lies past the end of the audio");
+  std::vector<std::uint8_t> out = std::move(base.value());
+  tag(out, "cue ");
+  put32(out, static_cast<std::uint32_t>(4 + 24 * cues.size()));
+  put32(out, static_cast<std::uint32_t>(cues.size()));
+  for (std::size_t i = 0; i < cues.size(); ++i) {
+    put32(out, static_cast<std::uint32_t>(i + 1));  // dwName: the cue id
+    put32(out, static_cast<std::uint32_t>(cues[i].sampleOffset));  // dwPosition: play order position (sample)
+    tag(out, "data");                               // fccChunk
+    put32(out, 0);                                  // dwChunkStart: the data chunk is not a wave list
+    put32(out, 0);                                  // dwBlockStart
+    put32(out, static_cast<std::uint32_t>(cues[i].sampleOffset));  // dwSampleOffset
+  }
+  std::vector<std::uint8_t> list;
+  tag(list, "adtl");
+  for (std::size_t i = 0; i < cues.size(); ++i) {
+    std::string text = cues[i].label.substr(0, 100);
+    for (char& ch : text)
+      if (static_cast<unsigned char>(ch) < 0x20) ch = ' ';
+    const std::uint32_t size = static_cast<std::uint32_t>(4 + text.size() + 1);
+    tag(list, "labl");
+    put32(list, size);
+    put32(list, static_cast<std::uint32_t>(i + 1));
+    list.insert(list.end(), text.begin(), text.end());
+    list.push_back(0);
+    if (size & 1) list.push_back(0);  // chunks are padded to an even length; the size field excludes the pad
+  }
+  tag(out, "LIST");
+  put32(out, static_cast<std::uint32_t>(list.size()));
+  out.insert(out.end(), list.begin(), list.end());
+  const std::uint32_t riff = static_cast<std::uint32_t>(out.size() - 8);
+  for (int i = 0; i < 4; ++i) out[4 + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(riff >> (8 * i));
+  return out;
+}
+
 Result<Decoded> decode(const std::uint8_t* d, std::size_t n) {
   if (!d || n < 44 || std::memcmp(d, "RIFF", 4) != 0 || std::memcmp(d + 8, "WAVE", 4) != 0)
     return makeError(ErrorCode::Corrupt, "not a WAV file");

@@ -24,6 +24,18 @@ float signedDraw(std::uint64_t key) {
 }
 double unitDraw(std::uint64_t key) { return static_cast<double>(mix64(key) >> 11) * (1.0 / 9007199254740992.0); }
 
+// Sub-hit k of n of a retriggered event: evenly spaced across the event, level supplied by the caller. A sub-hit past
+// the loop end wraps to the loop start when lengthTicks > 0.
+FlatEvent retriggerSubHit(const FlatEvent& e, int k, int n, float level, Ticks lengthTicks) {
+  FlatEvent h = e;
+  h.tx.retrigger = 1;
+  const Ticks start = e.start + e.duration * k / n;
+  h.start = lengthTicks > 0 ? start % lengthTicks : start;
+  h.duration = e.duration * (k + 1) / n - e.duration * k / n;
+  h.tx.level = level;
+  return h;
+}
+
 struct Item {
   FlatEvent e;
   PreparedSlice s;
@@ -155,11 +167,7 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
     float level = e.tx.level;
     for (int k = 0; k < n; ++k) {
       Item it;
-      it.e = e;
-      it.e.tx.retrigger = 1;
-      it.e.start = (e.start + e.duration * k / n) % lengthTicks;  // a sub-hit past the loop end wraps to the loop start
-      it.e.duration = e.duration * (k + 1) / n - e.duration * k / n;
-      it.e.tx.level = level;
+      it.e = retriggerSubHit(e, k, n, level, lengthTicks);
       level *= kRetriggerDecay;
       if (it.e.duration <= 0) continue;
       it.s.regionStart = an.start;
@@ -292,6 +300,22 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
     for (const FlatEvent& e : pb->events) pb->eventBus.push_back(routing->busFor(e.chop));
   }
   return std::shared_ptr<const Playback>(std::move(pb));
+}
+
+FlatEventList expandRetriggers(const FlatEventList& events, Ticks lengthTicks) {
+  FlatEventList out;
+  out.reserve(events.size());
+  for (const FlatEvent& e : events) {
+    const int n = std::max<int>(1, e.tx.retrigger);
+    float level = e.tx.level;
+    for (int k = 0; k < n; ++k) {
+      FlatEvent h = retriggerSubHit(e, k, n, level, lengthTicks);
+      level *= kRetriggerDecay;
+      if (h.duration > 0) out.push_back(std::move(h));
+    }
+  }
+  std::stable_sort(out.begin(), out.end(), [](const FlatEvent& a, const FlatEvent& b) { return a.start < b.start; });
+  return out;
 }
 
 Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source) {

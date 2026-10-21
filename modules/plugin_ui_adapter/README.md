@@ -15,12 +15,14 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
 - `buildCaptureView()`, `captureEndNotice()`, `formatCaptureTime()` (input capture control state, labels and notices)
 - `buildPadView()`, `padTakeNotice()`, `padNoteName()`, `padVelocityFromY()`, `padQuantizeFromIndex()` (performance pad grid, labels, settings boxes and take messages)
+- `buildMidiOptionsView()`, `buildDragOutView()`, `dragFileName()`, `midiNoteText()` and the exact drag-out status strings (F13); session-feature view models for F10, F09 and F18 in `session_views.hpp`
 
 Public headers:
 
 - `include/chopfractal/plugin_ui_adapter/views.hpp`
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
+- `include/chopfractal/plugin_ui_adapter/session_views.hpp`
 - `include/chopfractal/plugin_ui_adapter/capture_view.hpp`
 - `include/chopfractal/plugin_ui_adapter/pads_view.hpp`
 - `include/chopfractal/plugin_ui_adapter/outputs_view.hpp`

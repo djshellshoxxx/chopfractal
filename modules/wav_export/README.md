@@ -11,6 +11,7 @@ Deterministic WAV encoder and decoder (16-bit, 24-bit PCM and 32-bit float, mono
 - `encode(planar, Options, EncodeReport*)` -> WAV bytes; `decode(bytes)` -> planar floats
 - `writeFileAtomic(path, bytes, overwrite)` (temp file then rename; never replaces a file unless asked)
 - `sanitizeFileName(text)` -> [a-z0-9_-] name
+- `encodeWithCues(planar, Options, cues)` -> WAV bytes with a standard `cue ` chunk and `LIST/adtl` labels after the data chunk (F18 section markers)
 
 Public headers:
 

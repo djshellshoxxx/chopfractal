@@ -4,10 +4,26 @@
 on:** F00 (ScenePanel, FeaturePanel, command layer), F01 (the `scenes` section, extras tag 11)  **Blocks:** none
 
 ## 0. Implementation status (audited 2026-10-20)
-**Not started.** Evolve itself (`modules/evolve`, `ProjectSession::setEvolve/evolveStep/keepEvolved`, UI toggle, cadence, amount, ramp, failure stop) is built and tested; `evolveStep` now takes the live Chaos value (`evolveStep(double chaos = 0.0)`), which does not change anything below. Scenes, the armed loop-boundary switch and the scene list UI do not exist. Decisions recorded by the audit:
+**Session layer done (see 0.1); the GUI (ScenePanel) is the GUI worker's.** Evolve itself (`modules/evolve`, `ProjectSession::setEvolve/evolveStep/keepEvolved`, UI toggle, cadence, amount, ramp, failure stop) is built and tested; `evolveStep` now takes the live Chaos value (`evolveStep(double chaos = 0.0)`), which does not change anything below. Scenes, the armed loop-boundary switch and the scene list UI do not exist. Decisions recorded by the audit:
 - **State:** the `scenes` section is F01 extras tag 11 (cap 32 MiB, F01 section 4.4), not a separate "StateSection API". Failure policy follows F01: a section that fails to decode is dropped with the Warning `Some scene settings could not be restored.` and the project still loads (the body's "rejects the project load all-or-nothing" is replaced by this, so a damaged scene list can never cost a user their loop).
 - **Chaos:** Chaos v1 is generation-time (F08 audit note), so scenes need no overlay step. Where the body says `buildPlayback` applies the Chaos overlay, read "no overlay".
 - A/B snapshot slots are unaffected; recalling a scene is not a snapshot recall.
+
+### 0.1 Session-layer status (2026-10-21, branch feat/SESS-session-features)
+**Done and tested:** portable module `modules/scenes` (list, codec, `Sequencer`, unit tests, manifest, smoke_transfer); renderer armed switch (`ArmedSwitch`, `Renderer::armMailbox()`, `appliedSwitchToken()`, `mainSeen`, two-span split) isolated in `modules/audio_renderer/src/armed_switch.hpp` with a 20-line hook in `renderer.cpp`, `test_armed_switch.cpp` (exact boundary frame, block sizes 1 to 2048, ring-over, cancel, source/pass-through guard, main-mailbox interplay, TSan stress), the pinned no-arm output hash and the no-allocation test; the session API in `composition/src/scenes.cpp` (capture, update, edit, remove, move, clear, wrap, record, play, stop, boundary and transport hooks, keep, export), the `scenes` section (tag 11), stop-on-edit hooks, the Evolve and morph exclusions, and the scene view model in `plugin_ui_adapter/session_views.hpp`. The plugin processor attaches the arm mailbox and calls `onSceneBoundary` / `onTransportChanged` from `pollAudioFlags()`. **Not done here (GUI worker):** `ScenePanel`, the "Scenes" toggle, `test_scenes_gui.cpp`; section 12 lists the call behind every control.
+
+*Decisions made while implementing (they override the body):*
+1. **First boundary at playback start is not a crossing.** The renderer ignores a boundary that coincides with the first block after (re)start (`wasPlaying` false); the arm waits for the next real crossing. Without this a one-loop scene would be replaced the instant the host starts at ppq 0.
+2. **A sequence that finishes holds the last scene.** `SceneStatus.running` becomes false and `holding` true; the last scene keeps looping and the real pattern returns on `stopScenes()` or any pattern-changing command. `displayPattern()` keeps showing the scene while holding.
+3. **First scene.** `playScenes(first, LoopBoundary)` with the host playing arms it (phase Pending: `running`, `playing == 0`, `armed == first`); with the host stopped, or `Immediate`, it is installed at once. A stop edge while Pending installs it at once. With no audio side attached (headless tests) every boundary installs the next scene directly (the "late arm" path).
+4. **Fit.** A scene fits when its stored bytes flatten against today's chops without repair. `playScenes` plays only fitting scenes (one Warning each for the others, `Scene N no longer fits the chops and was skipped.`) and refuses with `No scene fits the current chops; scene playback stopped.` when none fit. A Jump to a skipped scene becomes Advance. `sceneFits(id)` (cached per chop snapshot) feeds the `(does not fit the chops)` row suffix. A marker or groove change under a playing scene rebuilds the playing and the armed Playback from the stored bytes; if the playing scene no longer fits, playback stops with `Scene playback stopped because the chops changed.`.
+5. **Scenes belong to the source.** `loadSource` / `clearSource` / `reset` clear the list (chop ids restart); `loadState` replaces it; a tempo-match stretch keeps it.
+6. **Transport.** `onTransportChanged(false, appliedToken)` first consumes a switch the renderer already applied (token >= armed token), then resets the loop counter and cancels the arm; `onTransportChanged(true)` re-arms a one-loop scene. The processor passes `renderer_.appliedSwitchToken()` and calls `onSceneBoundary` once per observed crossing (at most 16 per tick).
+7. **Exclusions.** `playScenes` switches Evolve off (Info `Evolve was switched off: scenes and Evolve cannot run together.`); `setEvolve(enabled)` stops scenes (Info `Scene playback stopped: Evolve was switched on.`) and restores the real pattern; `beginMorph` is refused while scenes run (`Stop scene playback before morphing.`), `playScenes` during a morph with `Cancel the morph before playing scenes.`. `playScenes` turns recording off.
+8. **Different lengths.** A scene of another length joins at the host's loop phase (host position modulo its length); the switch tick is the next multiple of the PLAYING scene's length. Keep scenes the same length for clean downbeats.
+9. **Update and Keep stop playback first** (restoring the real pattern); Delete, Move, Clear All are refused while running (`Stop scene playback first.`) but allowed while holding.
+10. **Export.** MIDI repeats are capped at 16 per scene (the MIDI export limit); `scenes.wav` is capped at 20 minutes; scenes that no longer fit are left out of the MIDI and audio files; `evolve_step` in `scenes.tsv` is the 0-based stored index; all files are written only after every one rendered, and an existing file refuses the whole export unless `overwrite`. Exports of the current pattern (WAV, MIDI, drag-out) follow what plays: stop scenes first to export the real pattern.
+11. `editScene` changes only name, loops, next and jumpTo (the stored pattern and its facts are not editable), and re-reads the loop count of a running sequence.
 
 ## 1. Summary and user value
 Evolve makes a beat wander, but a good wander is lost the moment it passes. F09 records an Evolve run as numbered **scenes** (each a pattern snapshot plus its seed), lets the producer
@@ -242,18 +258,18 @@ start again: sequencing resumes. (6) Press Generate: scenes stop with the notice
 `scenes.wav`, compare with the live playback by ear. (9) Save, close, reopen: list identical, playback stopped.
 
 ## 8. Acceptance criteria
-- [ ] Up to 32 scenes can be captured manually or recorded from Evolve steps (start scene included), each with name, loops 1..64, next/repeat/stop/jump, and survive save/reload
+- [x] Up to 32 scenes can be captured manually or recorded from Evolve steps (start scene included), each with name, loops 1..64, next/repeat/stop/jump, and survive save/reload
       byte-exactly.
-- [ ] With the host playing, each scene switch happens on the exact loop-boundary frame (+-1) for every host block size tested, with no old-scene event after the boundary and sounding
+- [x] With the host playing, each scene switch happens on the exact loop-boundary frame (+-1) for every host block size tested, with no old-scene event after the boundary and sounding
       voices ringing over.
-- [ ] A switch never reverts, kills voices or double-applies when the message thread later publishes the same playback; a stale arm can never overwrite an edit (`publish` cancels it).
-- [ ] While scenes play, `pattern()`, history, A/B slots, undo depth and saved state are unchanged; any pattern-changing command stops playback with the specified notice.
-- [ ] Evolve and scene playback are mutually exclusive with the specified messages; recording stops itself at 32.
-- [ ] `Keep Scene` yields one history node and one undo step; deleting tree nodes never touches scenes.
-- [ ] Export writes deterministic `scenes.tsv`, per-scene MIDI and optional `scenes.wav`, never overwriting without confirmation.
-- [ ] Projects without scenes: no `scenes` section, bit-identical audio and state; golden hashes `2397844821793184813`, `12084884237330071892`, `13710596758976548913`,
+- [x] A switch never reverts, kills voices or double-applies when the message thread later publishes the same playback; a stale arm can never overwrite an edit (`publish` cancels it).
+- [x] While scenes play, `pattern()`, history, A/B slots, undo depth and saved state are unchanged; any pattern-changing command stops playback with the specified notice.
+- [x] Evolve and scene playback are mutually exclusive with the specified messages; recording stops itself at 32.
+- [x] `Keep Scene` yields one history node and one undo step; deleting tree nodes never touches scenes.
+- [x] Export writes deterministic `scenes.tsv`, per-scene MIDI and optional `scenes.wav`, never overwriting without confirmation.
+- [x] Projects without scenes: no `scenes` section, bit-identical audio and state; golden hashes `2397844821793184813`, `12084884237330071892`, `13710596758976548913`,
       `18237151833431327128` unchanged; renderer output without an armed switch bit-identical to before.
-- [ ] `process()` remains allocation- and lock-free with the armed path; TSan clean; module added with manifest and passing `check_modules.py`, `check_includes.py`, `smoke_transfer.sh`.
+- [x] `process()` remains allocation- and lock-free with the armed path; TSan clean; module added with manifest and passing `check_modules.py`, `check_includes.py`, `smoke_transfer.sh`.
 
 ## 9. Files touched
 | Path | New/Mod | Change |
@@ -289,3 +305,24 @@ start again: sequencing resumes. (6) Press Generate: scenes stop with the notice
    `playScenes`, `onSceneBoundary`, `onTransportChanged`, stop-on-edit hooks, processor wiring + integration tests. 5. Evolve recording hook + exclusivity. 6. Export (`buildPatternMidi`
    factor, TSV, MIDI, WAV) + tests. 7. ScenePanel + GUI tests. 8. Docs, QA matrix, snapshot review.
 
+## 12. Commands the GUI must call
+All calls run on the message thread under `proc.withSession(...)`. Row and button state comes from `ui::buildSceneView(...)` (fill `SceneViewInput` from `sceneList()`, `sceneStatus()`, `sceneFits(id)`, `pattern() != nullptr`, `hasSource()`, `evolveRunning()`); texts from `plugin_ui_adapter/session_views.hpp`. Poll `sceneStatus()` at 10 Hz for the status label.
+| Control | Call |
+|---|---|
+| Toggle "Scenes" | show / hide ScenePanel only (no session call) |
+| List rows, empty state, status label, enable rules, tooltips | `ui::buildSceneView(input)`; draw `displayPattern()` in PatternPanel and the Orbit view |
+| "Capture Scene" | `captureScene()`; show `ui::sceneCapturedMessage(number)` from the notice, or `error().message` |
+| Detail form | "Scene name" / "Scene loops" / "After this scene" / "Jump target" -> `editScene(id, [&](Scene& s){ s.name = ...; s.loops = ...; s.next = ...; s.jumpTo = ...; })`; read-only label from `Scene::seed`, `eventCount`, `bars` |
+| "Update Scene" | `updateScene(id)` (stops scene playback first) |
+| "Keep Scene" | `keepScene(id)`; the Info notice `Kept Scene N as a new variation.` arrives through `takeNotices()` |
+| "Move Up" / "Move Down" | `moveScene(id, index -/+ 1)` |
+| "Delete Scene" | `removeScene(id)` |
+| "Clear All" | AlertWindow `ui::sceneClearPromptTitle()` / `sceneClearPromptBody()` with buttons "Delete All" / "Cancel"; on Delete All `clearScenes()` |
+| "Wrap" | `setSceneWrap(on)` |
+| "Rec Scenes" | `setRecordScenes(on)`; recording stops itself at 32 with the notice `Scene recording stopped: the list is full (32).`; follow `recordingScenes()` |
+| "Play Scenes" | `playScenes(selectedId or 0, Quantize::LoopBoundary)`; on error show `error().message` and keep the toggle off |
+| "Stop Scenes" / Play toggled off | `stopScenes()` |
+| "Export Scenes..." | folder chooser, then `exportScenes(dir, SceneExportOptions{...})`; `ui::sceneExportedMessage(files, dir)`; ask before `overwrite` |
+| Morph row | pass `scenesPlaying = sceneStatus().running \|\| sceneStatus().holding` to `buildMorphView` |
+| Processor (not the panel) | `attachArmMailbox(&renderer.armMailbox())` once; in `pollAudioFlags()` after `onLoopBoundary()`: `onSceneBoundary(renderer.appliedSwitchToken())` per observed crossing; on host play/stop edges `onTransportChanged(playing, renderer.appliedSwitchToken())` (done in `PluginProcessor.cpp`) |
+| Interruptions | drain `takeNotices()`; the scene row and toggles follow `sceneStatus()` |

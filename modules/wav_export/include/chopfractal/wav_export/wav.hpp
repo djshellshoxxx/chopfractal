@@ -37,6 +37,17 @@ constexpr std::uint64_t kMaxDataBytes = 0xFFFFFFFFull - 64;
 Result<std::vector<std::uint8_t>> encode(const std::vector<std::vector<float>>& planar, const Options& options, EncodeReport* report = nullptr);
 Result<Decoded> decode(const std::uint8_t* data, std::size_t size);
 
+// A named position in the audio (a section start). `sampleOffset` is in frames from the start of the data.
+struct CuePoint {
+  std::uint64_t sampleOffset = 0;
+  std::string label;  // control characters become spaces; at most 100 bytes are written
+};
+constexpr std::size_t kMaxCuePoints = 256;
+// encode() followed by a standard `cue ` chunk (one point per entry, id = index + 1) and a `LIST`/`adtl` chunk with one `labl`
+// per point, both after the `data` chunk. Without cues this is exactly encode(). Offsets must not exceed the frame count.
+Result<std::vector<std::uint8_t>> encodeWithCues(const std::vector<std::vector<float>>& planar, const Options& options, const std::vector<CuePoint>& cues,
+                                                 EncodeReport* report = nullptr);
+
 // Writes to a temporary sibling then renames. Fails with Conflict if `path` exists and !overwrite; never
 // leaves the temporary file behind on failure and never touches an existing target on failure.
 Status writeFileAtomic(const std::string& path, const std::vector<std::uint8_t>& bytes, bool overwrite);

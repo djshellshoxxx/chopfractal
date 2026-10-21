@@ -224,6 +224,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   int reportedLatency_ = 0;
   std::atomic<double> patternQuarters_{0.0};
   std::atomic<std::uint32_t> boundaryCount_{0};
+  bool lastHostPlaying_ = false;  // message thread: last transport state handed to the scene sequencer
   std::atomic<std::uint32_t> midpointCount_{0};  // set by the audio thread at each loop midpoint (drives Evolve)
   std::atomic<double> playheadQuarters_{-1.0};
   // Zero follows the DAW. Later commands carry a sequence and a playing bit. Only the audio

@@ -1,6 +1,8 @@
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/midi_export/midi.hpp>
 
+#include "midi_build.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -9,12 +11,6 @@ namespace chopfractal::composition {
 namespace {
 
 namespace fs = std::filesystem;
-
-std::string twoDigits(std::size_t n) {
-  char buf[16];
-  std::snprintf(buf, sizeof buf, "%02zu", n);
-  return buf;
-}
 
 void report(ExportProgress& progress, float fraction) {
   progress.fraction.store(fraction);
@@ -64,11 +60,7 @@ Result<ExportJob> ExportJob::planKit(const ProjectSession& session, std::string 
   const std::string stem = wav::sanitizeFileName(o.name);
 
   // Plan every file name first, then refuse (before anything is written) if any already exists.
-  std::vector<std::string> sliceNames;
-  for (std::size_t i = 0; i < n; ++i) {
-    const std::string role = session.roleMap().roleOf(chops->chops[i].id);
-    sliceNames.push_back("slice_" + twoDigits(i + 1) + "_" + (role.empty() ? std::string("chop") : wav::sanitizeFileName(role)) + ".wav");
-  }
+  const std::vector<std::string> sliceNames = midibuild::sliceFileNames(session.roleMap(), *chops);
   const fs::path dir = fs::u8path(directory);
   std::vector<fs::path> targets;
   for (const std::string& s : sliceNames) targets.push_back(dir / s);
@@ -143,23 +135,7 @@ Result<ExportReport> ExportJob::runKit(ExportProgress& progress) const {
   std::vector<std::vector<std::uint8_t>> sliceBytes;
   for (std::size_t i = 0; i < n; ++i) {
     if (progress.cancel.load()) return cancelled();
-    const ChopInfo& c = chops_->chops[i];
-    const std::int64_t len = c.range.length();
-    std::vector<std::vector<float>> audio(static_cast<std::size_t>(source_->channels));
-    const std::int64_t fin = std::min<std::int64_t>(c.fadeInFrames ? c.fadeInFrames : 32, len / 2);
-    const std::int64_t fout = std::min<std::int64_t>(c.fadeOutFrames ? c.fadeOutFrames : 64, len / 2);
-    for (int ch = 0; ch < source_->channels; ++ch) {
-      const float* src = source_->channel(ch) + c.range.start;
-      auto& dst = audio[static_cast<std::size_t>(ch)];
-      dst.assign(src, src + len);
-      for (std::int64_t k = 0; k < fin; ++k) dst[static_cast<std::size_t>(k)] *= static_cast<float>(k) / static_cast<float>(fin);
-      for (std::int64_t k = 0; k < fout; ++k) dst[static_cast<std::size_t>(len - 1 - k)] *= static_cast<float>(k) / static_cast<float>(fout);
-    }
-    wav::Options wo;
-    wo.sampleRate = source_->sampleRate;
-    wo.format = wav::Format::Pcm24;
-    wo.dither = false;
-    auto b = wav::encode(audio, wo);
+    auto b = midibuild::encodeSlice(*source_, chops_->chops[i]);
     if (!b.ok()) return b.error();
     sliceBytes.push_back(std::move(b.value()));
   }

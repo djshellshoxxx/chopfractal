@@ -10,6 +10,7 @@ Deterministic Standard MIDI File (format 0) encoder and decoder for note sequenc
 
 - `encode(FileSpec)` -> .mid bytes; `decode(bytes)` -> FileSpec (for verification)
 - `FileSpec{bpm, timeSignature, trackName, notes[]}`, `Note{note, velocity, start, duration, channel}`
+- `FileSpec::markers` (meta 0xFF 0x06 at a tick, decoded back) and `FileSpec::endTick` (end of track on a bar boundary); absent, the bytes are unchanged
 
 Public headers:
 

@@ -111,6 +111,7 @@ CHOP_TEST(per_tag_cap_rejects_oversize_and_tags_below_9_are_refused) {
   const auto saved = big.saveState(false);
   CHECK(saved.ok());
   ProjectSession back;
+  back.registerSectionDecoder(11, "", nullptr);  // the scenes decoder would (rightly) drop filler bytes; this test is about the cap
   CHECK(saved.ok() && back.loadState(saved.value().data(), saved.value().size(), {}).ok());
   CHECK(back.section(11) && back.section(11)->bytes.size() == 32u * 1024u * 1024u);
   // At most 32 blocks overall: 22 feature tags fit beside the nine F01 blocks.

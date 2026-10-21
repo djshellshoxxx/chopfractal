@@ -36,6 +36,14 @@ Status check(const ProjectExtras& e) {
   if (e.exportUi.formatIndex < 0 || e.exportUi.formatIndex > 2) return bad(ErrorCode::OutOfRange, "exportUi.formatIndex");
   if (e.exportUi.rateIndex < 0 || e.exportUi.rateIndex > 3) return bad(ErrorCode::OutOfRange, "exportUi.rateIndex");
   if (e.exportUi.loopsIndex < 0 || e.exportUi.loopsIndex > 4) return bad(ErrorCode::OutOfRange, "exportUi.loopsIndex");
+  {
+    const MidiExportSettings& m = e.exportUi.midi;
+    if (m.baseNote < 0 || m.baseNote > 127) return bad(ErrorCode::OutOfRange, "exportUi.midi.baseNote");
+    if (static_cast<std::uint8_t>(m.curve) > 3) return bad(ErrorCode::OutOfRange, "exportUi.midi.curve");
+    if (m.fixedVelocity < 1 || m.fixedVelocity > 127) return bad(ErrorCode::OutOfRange, "exportUi.midi.fixedVelocity");
+    if (m.loops < 1 || m.loops > 16) return bad(ErrorCode::OutOfRange, "exportUi.midi.loops");
+    if (m.channel < 0 || m.channel > 15) return bad(ErrorCode::OutOfRange, "exportUi.midi.channel");
+  }
   const UiPrefs& u = e.ui;
   if (u.viewMode < 0 || u.viewMode > 1) return bad(ErrorCode::OutOfRange, "ui.viewMode");
   if (u.scalePercent < 50 || u.scalePercent > 200) return bad(ErrorCode::OutOfRange, "ui.scalePercent");
@@ -61,6 +69,15 @@ void sanitize(ProjectExtras& e) {
   if (e.exportUi.formatIndex < 0 || e.exportUi.formatIndex > 2) e.exportUi.formatIndex = d.exportUi.formatIndex;
   if (e.exportUi.rateIndex < 0 || e.exportUi.rateIndex > 3) e.exportUi.rateIndex = d.exportUi.rateIndex;
   if (e.exportUi.loopsIndex < 0 || e.exportUi.loopsIndex > 4) e.exportUi.loopsIndex = d.exportUi.loopsIndex;
+  {
+    MidiExportSettings& m = e.exportUi.midi;
+    const MidiExportSettings& dm = d.exportUi.midi;
+    if (m.baseNote < 0 || m.baseNote > 127) m.baseNote = dm.baseNote;
+    if (static_cast<std::uint8_t>(m.curve) > 3) m.curve = dm.curve;
+    if (m.fixedVelocity < 1 || m.fixedVelocity > 127) m.fixedVelocity = dm.fixedVelocity;
+    if (m.loops < 1 || m.loops > 16) m.loops = dm.loops;
+    if (m.channel < 0 || m.channel > 15) m.channel = dm.channel;
+  }
   UiPrefs& u = e.ui;
   if (u.viewMode < 0 || u.viewMode > 1) u.viewMode = d.ui.viewMode;
   if (u.scalePercent < 50 || u.scalePercent > 200) u.scalePercent = d.ui.scalePercent;
@@ -141,8 +158,14 @@ void encodeExtras(const ProjectExtras& e, Blocks& out) {
     put(kTagFractal, b);
   }
   if (e.roleIndex != d.roleIndex) put(kTagRole, {static_cast<std::uint8_t>(e.roleIndex)});
-  if (!(e.exportUi == d.exportUi))
-    put(kTagExport, {static_cast<std::uint8_t>(e.exportUi.formatIndex), static_cast<std::uint8_t>(e.exportUi.rateIndex), static_cast<std::uint8_t>(e.exportUi.loopsIndex)});
+  if (!(e.exportUi == d.exportUi)) {
+    b = {static_cast<std::uint8_t>(e.exportUi.formatIndex), static_cast<std::uint8_t>(e.exportUi.rateIndex), static_cast<std::uint8_t>(e.exportUi.loopsIndex)};
+    if (!(e.exportUi.midi == d.exportUi.midi)) {  // F13: five more bytes behind the block's length, only when they are not the defaults
+      const MidiExportSettings& m = e.exportUi.midi;
+      for (int v : {m.baseNote, static_cast<int>(m.curve), m.fixedVelocity, m.loops, m.channel}) b.push_back(static_cast<std::uint8_t>(v));
+    }
+    put(kTagExport, b);
+  }
   if (e.detectMode != d.detectMode) put(kTagDetect, {static_cast<std::uint8_t>(e.detectMode)});
   if (e.gridDivision != d.gridDivision || e.gridTriplet != d.gridTriplet)
     put(kTagGrid, {static_cast<std::uint8_t>(divisionCode(e.gridDivision)), static_cast<std::uint8_t>(e.gridTriplet ? 1 : 0)});
@@ -201,6 +224,14 @@ Result<ProjectExtras> decodeExtras(const Blocks& blocks) {
         e.exportUi.formatIndex = r.u8();
         e.exportUi.rateIndex = r.u8();
         e.exportUi.loopsIndex = r.u8();
+        if (r.ok() && r.remaining() == 5) {
+          MidiExportSettings& m = e.exportUi.midi;
+          m.baseNote = r.u8();
+          m.curve = static_cast<VelocityCurve>(r.u8());
+          m.fixedVelocity = r.u8();
+          m.loops = r.u8();
+          m.channel = r.u8();
+        }
         if (!r.ok() || r.remaining() != 0) return malformed("export");
         break;
       case kTagDetect:

@@ -928,3 +928,40 @@ CHOP_TEST(eight_aux_buses_cost_at_most_a_modest_factor_over_one_bus) {
 #endif
   CHECK(eight <= one * bound + 1e-3);
 }
+
+CHOP_TEST(process_performs_no_heap_allocation_across_armed_switches) {
+  Renderer r;
+  Config cfg;
+  r.prepare(cfg);
+  auto src = makeSource(2, 44100, 24000, ramp);
+  FlatEventList ea, eb;
+  for (std::uint64_t i = 1; i <= 32; ++i) {
+    ea.push_back(ev(i, 20000, static_cast<Ticks>(i * 100), 300));
+    eb.push_back(ev(i, 18000, static_cast<Ticks>(i * 110 + 7), 400));
+  }
+  const auto pa = playback(src, ea);
+  const auto pb = playback(src, eb);
+  r.mailbox().publish(pa);
+  std::vector<float> x(512, 0.1f), oL(512), oR(512);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  RenderParams p;
+  r.process(tb, p, in, out, 2, 512);  // warm-up: first acquire
+  std::uint64_t token = 0;
+  int block = 1;
+  for (int loop = 0; loop < 4; ++loop) {
+    r.armMailbox().publish(std::make_shared<const ArmedSwitch>(ArmedSwitch{(loop % 2) ? pa : pb, ++token}));  // allocates: not counted
+    gAllocs = 0;
+    gCountAllocs = true;
+    for (int i = 0; i < 200; ++i, ++block) {  // 200 x 512 frames covers one 96000-frame bar
+      tb.ppq = block * 512 * 120.0 / (60.0 * 48000.0);
+      r.process(tb, p, in, out, 2, 512);
+    }
+    gCountAllocs = false;
+    CHECK_EQ(gAllocs.load(), 0);
+  }
+  CHECK_EQ(r.appliedSwitchToken(), 4u);
+}
