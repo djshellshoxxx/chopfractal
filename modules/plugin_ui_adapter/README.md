@@ -13,6 +13,8 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `layoutHistoryTree()`
 - `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
 - `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
+- `buildCaptureView()`, `captureEndNotice()`, `formatCaptureTime()` (input capture control state, labels and notices)
+- `buildPadView()`, `padTakeNotice()`, `padNoteName()`, `padVelocityFromY()`, `padQuantizeFromIndex()` (performance pad grid, labels, settings boxes and take messages)
 - `buildMidiOptionsView()`, `buildDragOutView()`, `dragFileName()`, `midiNoteText()` and the exact drag-out status strings (F13); session-feature view models for F10, F09 and F18 in `session_views.hpp`
 
 Public headers:
@@ -21,6 +23,9 @@ Public headers:
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
 - `include/chopfractal/plugin_ui_adapter/session_views.hpp`
+- `include/chopfractal/plugin_ui_adapter/capture_view.hpp`
+- `include/chopfractal/plugin_ui_adapter/pads_view.hpp`
+- `include/chopfractal/plugin_ui_adapter/outputs_view.hpp`
 
 ## Contract
 
@@ -37,6 +42,7 @@ Public headers:
 - `source_chop` ^0.1 — marker views read the chop map
 - `pattern_engine` ^0.1 — pattern views read the pattern tree
 - `variation_history` ^0.1 — the tree layout reads node summaries
+- `input_capture` ^0.1 — the capture view reads the engine's status and end reasons
 
 ## Build and test
 

@@ -13,6 +13,7 @@ Exact folders, in dependency order (minimum versions in parentheses):
 - `modules/break_engine/` (required by a dependency)
 - `modules/pattern_engine/` (^0.1)
 - `modules/variation_history/` (^0.1)
+- `modules/input_capture/` (^0.1)
 - `modules/plugin_ui_adapter/` (this module)
 
 ## 2. Copy
@@ -33,6 +34,7 @@ add_subdirectory(modules/source_chop)
 add_subdirectory(modules/break_engine)
 add_subdirectory(modules/pattern_engine)
 add_subdirectory(modules/variation_history)
+add_subdirectory(modules/input_capture)
 add_subdirectory(modules/plugin_ui_adapter)
 target_link_libraries(your_target PRIVATE chopfractal::plugin_ui_adapter)
 ```

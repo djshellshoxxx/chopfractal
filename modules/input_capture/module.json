@@ -1,0 +1,43 @@
+{
+  "id": "input_capture",
+  "name": "Input capture",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": null,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::input_capture",
+  "public_headers": [
+    "include/chopfractal/input_capture/capture.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Status/Result error types"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "One audio thread calls process() (no allocation, locks or I/O); every other call is a message or worker thread. State changes hand the buffer between the threads with release/acquire stores, so no locks exist.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/input_capture -B build/input_capture && cmake --build build/input_capture && ctest --test-dir build/input_capture",
+  "summary": "Records the track's audio input into a preallocated buffer, either free-running (a ring that keeps the last N seconds) or synced to the host's bar grid (starts on the next bar line, ends by ppq so tempo changes stay bar-exact). Four states (Idle, Armed, Capturing, Captured), sample-accurate start, meters with clip counting, and an O(frames) hand-off of the planar audio.",
+  "public_api": [
+    "`CaptureEngine::arm(ArmSettings)`, `startNow()`, `requestStop()`, `discard()`, `take() -> CapturedAudio`, `status()`, `reap()`",
+    "`CaptureEngine::process(in, numChannels, frames, CaptureTransport)` (audio thread) and `onPrepare(sampleRate, channels)`",
+    "`maxCaptureFrames(sampleRate, channels)` and the limits `kMaxCaptureSeconds`, `kMaxCaptureBytes`, `kMaxCaptureFrames`"
+  ],
+  "limits": [
+    "Mono or stereo, 8 kHz to 384 kHz, at most 60 s, 100 MiB and 11,520,000 frames; memory is allocated per arm and released when the capture ends, so an idle engine holds nothing"
+  ],
+  "adapters": [
+    "Call process() from the host's audio callback before anything that overwrites the input buffer, forward the transport (playing, ppq, bpm), and run take() on a worker thread."
+  ],
+  "adapter_notes": "The engine never touches a file or the project; the caller turns CapturedAudio into its own source type.",
+  "removal": "Delete the folder; callers lose input capture only.",
+  "example": "examples/minimal.cpp"
+}

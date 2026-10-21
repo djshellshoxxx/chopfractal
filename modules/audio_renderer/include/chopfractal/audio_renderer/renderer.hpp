@@ -15,6 +15,7 @@
 // non-RT producer thread.
 #include <chopfractal/audio_renderer/limiter.hpp>
 #include <chopfractal/audio_renderer/mailbox.hpp>
+#include <chopfractal/audio_renderer/pads.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/result.hpp>
 #include <chopfractal/chop_contracts/time.hpp>
@@ -22,6 +23,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace chopfractal::render {
@@ -78,18 +80,33 @@ struct PlaybackOptions {
   std::uint8_t tremDepth = 60;   // percent
 };
 
+// ---- multiple outputs (F11) ----
+// Bus 0 is the main output; buses 1..kMaxAuxBuses are optional stereo aux outputs ("Out 2" .. "Out 9").
+constexpr int kMaxAuxBuses = 8;
+// Which output each chop plays on. Immutable and resolved on a non-RT thread; makePlayback bakes it into Playback::eventBus.
+struct BusRouting {
+  std::vector<std::pair<ChopId, std::uint8_t>> chopBus;  // sorted by ChopId, bus 0..kMaxAuxBuses
+  std::uint8_t defaultBus = 0;
+  std::uint8_t busFor(ChopId c) const;  // binary search; defaultBus when absent
+  bool allMain() const;                 // every chop (and the default) is on bus 0
+};
+
 // Prepared, validated, immutable playback description (retriggers and gesture effects already expanded).
 struct Playback {
   SourcePtr source;
   FlatEventList events;  // sorted by start
   std::vector<PreparedSlice> slices;  // parallel to events
   Ticks lengthTicks = 0; // loop length of the pattern
+  std::vector<std::uint8_t> eventBus;  // parallel to events; empty means every event plays on the main bus
   // A source is loaded (so chops can be auditioned) but no pattern exists yet: the input passes through
   // unchanged and previews are mixed on top.
   bool passThrough = false;
 };
 Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks,
                                                       const PlaybackOptions& options = PlaybackOptions{});
+// The same with output routing. A null or all-main routing gives a Playback identical to the one above.
+Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks,
+                                                      const PlaybackOptions& options, const BusRouting* routing);
 Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source);
 // The retrigger sub-hits makePlayback prepares (n evenly spaced hits, level x0.8 per hit, a sub-hit past `lengthTicks` wraps;
 // 0 = no wrap), sorted by start, without needing a decoded source. Gesture-effect repeats are not included. Non-real-time.
@@ -107,6 +124,14 @@ struct Config {
   double sampleRate = 48000.0;
   int maxBlock = 2048;
   int maxVoices = 8;
+  int auxBuses = 0;  // aux output buses the host enabled, 0..kMaxAuxBuses; routes to a bus above this fold into main
+};
+
+// Views onto the host's aux output buffers. bus[i] points to a float*[2] (left, right) for "Out i+2". Every enabled bus is
+// written for every frame of every call (zeros when silent). count is the number of valid entries.
+struct AuxOutputs {
+  int count = 0;
+  float* const* bus[kMaxAuxBuses] = {};
 };
 
 struct TransportBlock {
@@ -154,6 +179,21 @@ class Renderer {
   // `in` may alias `out`. numChannels is 1 or 2. frames may be 0.
   void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
               int numChannels, int frames);
+  // The same, with live performance input (F07): pad events sorted by frame in [0, frames). They start voices on their
+  // exact sample on top of the pattern, with the transport playing or stopped. The six-argument form forwards LiveInput{}
+  // and is bit-identical to it.
+  void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+              int numChannels, int frames, const LiveInput& live);
+  // The same with live input and aux outputs (F11). The overloads above forward AuxOutputs{} and are bit-identical.
+  void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+              int numChannels, int frames, const LiveInput& live, const AuxOutputs& aux);
+  void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+              int numChannels, int frames, const AuxOutputs& aux);
+  // Which MIDI note plays which chop. Publish from a non-RT thread; the audio thread acquires it once per block.
+  Mailbox<PadBank>& padMailbox();
+  std::uint64_t padDropped() const;  // pad events beyond kMaxPadEventsPerBlock in one block (dropped)
+  std::uint64_t padUnmapped() const; // note-ons that matched no chop
+  int activePadVoices() const;       // sounding pad voices, published once per block (any thread)
 
   bool requestPreview(const PreviewRequest& request);  // false when the queue is full
   void reset();                                         // RT-safe: silences everything immediately
@@ -184,5 +224,14 @@ using ProgressFn = std::function<bool(double)>;
 // callback never changes the rendered samples.
 Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& settings,
                                                       const ProgressFn& progress = {});
+
+// Every bus rendered separately. main is the main bus (equal to renderOffline when auxBuses is 0, because every event then
+// plays on it); aux[k][c] is channel c of "Out k+2". Events routed above auxBuses fold into main.
+struct OfflineStems {
+  std::vector<std::vector<float>> main;                  // 2 channels
+  std::vector<std::vector<std::vector<float>>> aux;      // auxBuses x 2 channels
+};
+Result<OfflineStems> renderOfflineStems(std::shared_ptr<const Playback> playback, const OfflineSettings& settings, int auxBuses,
+                                        const ProgressFn& progress = {});
 
 }  // namespace chopfractal::render

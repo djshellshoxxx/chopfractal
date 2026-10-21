@@ -141,6 +141,8 @@ ProjectSession::ProjectSession() : history_(history::Config{}) {
   // future bump: raise the module's schema constant, register one step per version, add a fixture test.
   migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
   registerSectionDecoder(kTagGroove, "Groove", [this](const StateSection& sec) { return decodeGroove(sec); });
+  registerSectionDecoder(kTagPads, "pad", [this](const StateSection& sec) { return decodePads(sec); });
+  registerSectionDecoder(kTagRouting, "output routing", [this](const StateSection& sec) { return decodeRouting(sec); });
   registerSectionDecoder(kTagScenes, "scene", [this](const StateSection& sec) { return decodeScenes(sec); });
   registerSectionDecoder(kTagArrangement, "arrangement", [this](const StateSection& sec) { return decodeArrangement(sec); });
 }
@@ -183,6 +185,7 @@ void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
   if (armedToken_ != 0 && pb != armedBuilt_.playback) cancelArm();  // an edit or a loaded project must never be overwritten by a stale scene
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
+  publishPadBank();
 }
 
 std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
@@ -302,6 +305,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   chopMap_ = std::move(map.value());
   chops_ = chopMap_->snapshot();
   roles_ = roles::RoleMap{};
+  resetPerChopRouting();
   rules_ = roles::RuleSet{};  // rules can name chop ids, which restart at 1 for a new source
   foreignModules_.clear();
   patterns_.reset();
@@ -319,6 +323,7 @@ void ProjectSession::clearSource() {
   chopMap_.reset();
   chops_.reset();
   roles_ = roles::RoleMap{};
+  resetPerChopRouting();
   rules_ = roles::RuleSet{};
   foreignModules_.clear();
   patterns_.reset();
@@ -345,12 +350,18 @@ Status ProjectSession::editMarkers(const std::function<Status(source::ChopMap&)>
   const source::ChopMap mapBackup = *chopMap_;
   const ChopSnapshotPtr chopsBackup = chops_;
   const roles::RoleMap rolesBackup = roles_;
+  const OutputRouting routingBackup = routing_;
+  const PadSettings padBackup = padSettings_;
+  const auto sectionsBackup = sections_;
   Status s = edit(*chopMap_);
   if (s.ok()) s = reconcileAfterMarkerChange();
   if (!s.ok()) {
     *chopMap_ = mapBackup;
     chops_ = chopsBackup;
     roles_ = rolesBackup;
+    routing_ = routingBackup;
+    padSettings_ = padBackup;
+    sections_ = sectionsBackup;
     republish();  // best effort: the previous, valid state
   }
   return s;
@@ -376,6 +387,7 @@ Status ProjectSession::reconcileAfterMarkerChange() {
   std::vector<ChopId> ids;  // roles follow the marker, so disabling a chop and enabling it again keeps its role
   for (const source::Marker& m : chopMap_->markers()) ids.push_back(m.id);
   roles_.retainOnly(ids);
+  pruneRouting();
   if (!patterns_.hasPattern()) return republish();
   pattern::Pattern cleaned = pattern::sanitize(patterns_.current(), *chops_);
   if (pattern::serialize(cleaned) == pattern::serialize(patterns_.current())) return republish();
@@ -410,7 +422,11 @@ Status ProjectSession::relinkSource(std::shared_ptr<const render::SourceData> da
 
 Status ProjectSession::assignRole(ChopId chop, const std::string& role) {
   if (!chopMap_ || !chopMap_->find(chop)) return makeError(ErrorCode::NotFound, "unknown chop");
-  return roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  Status st = roles_.assignRole(chop, role);  // takes effect at the next Generate or Mutate, never retroactively
+  if (!st.ok()) return st;
+  publishPadBank();  // the hat default of a pad's choke group follows the role at once
+  if (!routing_.roleBus.empty()) return republish();  // a role route moves the chop to its output at once
+  return {};
 }
 
 Status ProjectSession::setRules(roles::RuleSet rules) {
@@ -975,6 +991,8 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   patterns_.reset();
   groove_ = groove::Groove{};  // a project without the Groove section plays straight; the decoder below restores a saved one
   grooveHistory_.reset(groove_);
+  padSettings_ = PadSettings{};  // before the publish below; the decoder restores a saved one
+  routing_ = OutputRouting{};
   if (newPattern) patterns_.restore(std::move(*newPattern));
   patterns_.restoreSlots(std::move(newSlots));  // after restore(), which clears the slots
   extras_ = std::move(newExtras);
@@ -1005,6 +1023,9 @@ void ProjectSession::reset() {
   rules_ = roles::RuleSet{};
   extras_ = ProjectExtras{};
   sections_.clear();
+  padSettings_ = PadSettings{};
+  routing_ = OutputRouting{};
+  publishPadBank();
   groove_ = groove::Groove{};
   grooveHistory_.reset(groove_);
   notices_.clear();

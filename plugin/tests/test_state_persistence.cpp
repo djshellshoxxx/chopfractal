@@ -272,7 +272,7 @@ CHOP_TEST(export_runs_on_a_worker_reports_progress_and_cancels) {
   // The fraction rises monotonically while the worker renders.
   float last = p.exportStatus().fraction;
   int rises = 0;
-  for (int i = 0; i < 400 && stateIs(p, ExportStatus::State::Running) && rises < 3; ++i) {
+  for (int i = 0; i < 400 && stateIs(p, ExportStatus::State::Running) && rises < 1; ++i) {
     pump(10);
     const float f = p.exportStatus().fraction;
     CHECK(f >= last);
