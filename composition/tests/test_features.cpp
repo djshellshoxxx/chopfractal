@@ -684,6 +684,7 @@ CHOP_TEST(chaos_changes_generated_patterns_deterministically_and_comes_from_the_
   ProjectSession a, b, plain;
   for (ProjectSession* p : {&a, &b, &plain}) CHECK(ready(*p));
   host::ParamValues pv = host::ParamValues::defaults();
+  pv.set(host::kBreakGlitch, 0.0);  // the Glitch macro raises the gesture allowances on its own; this test isolates Chaos
   const pattern::Settings calm = settingsFromParams(pv, settings(21, 4));
   pv.set(host::kChaos, 1.0);
   const pattern::Settings wild = settingsFromParams(pv, settings(21, 4));
@@ -691,7 +692,9 @@ CHOP_TEST(chaos_changes_generated_patterns_deterministically_and_comes_from_the_
   CHECK(a.generate(wild).ok() && b.generate(wild).ok() && plain.generate(calm).ok());
   CHECK(pattern::serialize(*a.pattern()) == pattern::serialize(*b.pattern()));        // deterministic
   CHECK(pattern::serialize(*a.pattern()) != pattern::serialize(*plain.pattern()));    // and different from calm
-  CHECK(settingsEqual(calm, settingsFromParams(host::ParamValues::defaults(), settings(21, 4))));  // default param = no chaos
+  host::ParamValues calmPv = host::ParamValues::defaults();
+  calmPv.set(host::kBreakGlitch, 0.0);
+  CHECK(settingsEqual(calm, settingsFromParams(calmPv, settings(21, 4))));  // default chaos = none
   int fx = 0, tx = 0;
   for (const auto& bar : a.pattern()->bars)
     for (const auto& bt : bar.beats)

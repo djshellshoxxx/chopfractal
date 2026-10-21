@@ -23,6 +23,13 @@ void applyBreakParams(const host::ParamValues& v, pattern::Settings& s, bool set
   s.brk.humanize = unit(host::kBreakHumanize);
   s.brk.fill = unit(host::kBreakFill);
   s.brk.glitch = unit(host::kBreakGlitch);
+  if (s.engineVersion >= pattern::kEngineVersionBreak) {
+    // The Glitch macro must be audible on its own: the planner only places stutters, reversed swells and tape stops
+    // while the matching allowance is on. Glitch raises those allowances like Chaos does and never lowers them.
+    if (s.brk.glitch >= 0.2) s.allowRetrigger = true;
+    if (s.brk.glitch >= 0.3) s.allowReverse = true;
+    if (s.brk.glitch >= 0.4) s.allowGlide = true;
+  }
 }
 
 groove::Groove grooveFromParams(const host::ParamValues& v, const groove::Groove& base) {
