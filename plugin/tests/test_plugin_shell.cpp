@@ -5,90 +5,30 @@
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <utility>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <string>
 
+#include "BuildInfo.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
+#include "shell_test_support.hpp"
 
 namespace cf = chopfractal;
 
-namespace {
-// GUI tests need a display. Linux has one only when DISPLAY is set; Windows and macOS always have a desktop session.
-// With CHOPFRACTAL_REQUIRE_DISPLAY=1 (set by the CI job that runs under xvfb) a missing display fails instead of
-// silently skipping every GUI and fuzz test.
-bool haveDisplay() {
-#if JUCE_LINUX || JUCE_BSD
-  const bool has = std::getenv("DISPLAY") != nullptr;
-  if (!has && std::getenv("CHOPFRACTAL_REQUIRE_DISPLAY")) {
-    std::fprintf(stderr, "CHOPFRACTAL_REQUIRE_DISPLAY is set but there is no display; GUI tests cannot run\n");
-    CHECK(false);
-  }
-  return has;
-#else
-  return true;
-#endif
-}
-}  // namespace
+using namespace shelltest;
 
 namespace {
-
-// A host playhead we control.
-struct FakePlayHead : juce::AudioPlayHead {
-  bool playing = true;
-  bool hasBpm = true;
-  bool hasPpq = true;
-  double bpm = 120.0;
-  double ppq = 0.0;
-  juce::Optional<PositionInfo> getPosition() const override {
-    PositionInfo info;
-    info.setIsPlaying(playing);
-    if (hasBpm) info.setBpm(bpm);
-    if (hasPpq) info.setPpqPosition(ppq);
-    info.setTimeSignature(TimeSignature{4, 4});
-    return info;
-  }
-};
-
-std::shared_ptr<const cf::render::SourceData> drumLoop() {
-  auto d = std::make_shared<cf::render::SourceData>();
-  d->channels = 1;
-  d->sampleRate = 48000;
-  d->frames = 96000;
-  d->samples.assign(96000, 0.f);
-  cf::Rng rng(3);
-  for (int k = 0; k < 8; ++k)
-    for (int i = 0; i < 5000; ++i)
-      d->samples[static_cast<std::size_t>(k * 12000 + i)] = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * std::exp(-static_cast<float>(i) / 900.f) * 0.8f;
-  return d;
-}
 
 // Sets a parameter the way a host does (through the parameter object, so the project state sees it).
 void setParam(ChopFractalProcessor& p, const char* id, float plain) {
   auto* param = dynamic_cast<juce::RangedAudioParameter*>(p.apvts.getParameter(id));
   CHECK(param != nullptr);
   if (param) param->setValueNotifyingHost(param->convertTo0to1(plain));
-}
-
-void prepare(ChopFractalProcessor& p, int block = 512) {
-  p.setPlayConfigDetails(2, 2, 48000.0, block);
-  p.prepareToPlay(48000.0, block);
-}
-
-void makeSession(ChopFractalProcessor& p, std::uint64_t seed = 42) {
-  p.withSession([&](cf::composition::ProjectSession& s) {
-    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
-    cf::composition::DetectOptions d;
-    d.analysis.sensitivity = 0.8;
-    CHECK(s.applyChops(d).ok());
-    cf::pattern::Settings settings;
-    settings.bars = 2;
-    settings.density = 0.7;
-    settings.seed = seed;
-    CHECK(s.generate(settings).ok());
-  });
 }
 
 // Runs `blocks` host blocks from ppq 0 and returns the left channel.
@@ -392,22 +332,6 @@ CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists
   }
 }
 
-namespace {
-juce::Button* findButton(juce::Component& root, const juce::String& text) {
-  for (auto* c : root.getChildren())
-    if (auto* b = dynamic_cast<juce::Button*>(c))
-      if (b->getButtonText() == text) return b;
-  return nullptr;
-}
-std::vector<std::uint8_t> patternBytes(ChopFractalProcessor& p) {
-  std::vector<std::uint8_t> out;
-  p.withSession([&](cf::composition::ProjectSession& s) {
-    if (s.pattern()) out = cf::pattern::serialize(*s.pattern());
-  });
-  return out;
-}
-}  // namespace
-
 // Drives the real editor's buttons the way a user would and checks the session reacts.
 CHOP_TEST(editor_buttons_drive_the_session) {
   if (!haveDisplay()) return;
@@ -474,15 +398,12 @@ CHOP_TEST(editor_buttons_drive_the_session) {
   click("Set Role");
   CHECK(hasPattern());
   // Every visible button must have a title for accessibility.
-  for (auto* c : ed->getChildren())
-    if (auto* b = dynamic_cast<juce::Button*>(c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
+  forEachControl(*ed, [](juce::Component& c) {
+    if (auto* b = dynamic_cast<juce::Button*>(&c)) CHECK(b->getTitle().isNotEmpty() || b->getButtonText().isNotEmpty());
+  });
 }
 
 namespace {
-juce::MouseEvent mouseAt(juce::Component& c, juce::Point<int> p, juce::ModifierKeys mods = {}) {
-  auto src = juce::Desktop::getInstance().getMainMouseSource();
-  return juce::MouseEvent(src, p.toFloat(), mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, juce::Time::getCurrentTime(), p.toFloat(), juce::Time::getCurrentTime(), 1, false);
-}
 std::size_t hitCount(ChopFractalProcessor& p) {
   std::size_t n = 0;
   p.withSession([&](cf::composition::ProjectSession& s) {
@@ -565,9 +486,9 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   CHECK(mb.getSize() > 44 && std::memcmp(mb.getData(), "RIFF", 4) == 0);
 
   // Direct hit editing uses the explicit move/resize mode; plain drags select sections.
-  for (int i = 0; i < ed->getNumChildComponents(); ++i)
-    if (auto* button = dynamic_cast<juce::ToggleButton*>(ed->getChildComponent(i)))
-      if (button->getButtonText() == "Move / resize hits") button->setToggleState(true, juce::dontSendNotification);
+  if (auto* button = findButton(*ed, "Move / resize hits")) button->setToggleState(true, juce::sendNotificationSync);
+  else CHECK(false);
+  MouseSim sim(*ed);
   // Direct hit editing with real mouse events.
   ed->doReroll();
   pump();
@@ -583,10 +504,10 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   if (!target) return;
   const cf::EventId tid = target->id;
   const auto start = hitPoint(*ed, *target, 0.3);
-  ed->mouseDown(mouseAt(*ed, start));
+  sim.down(start);
   CHECK(ed->selectedHit() == tid);
-  ed->mouseDrag(mouseAt(*ed, start + juce::Point<int>(80, 0)));
-  ed->mouseUp(mouseAt(*ed, start + juce::Point<int>(80, 0)));
+  sim.drag(start + juce::Point<int>(80, 0));
+  sim.up(start + juce::Point<int>(80, 0));
   pump();
   CHECK(patternBytes(p) != before);
   CHECK(hitCount(p) == hits);
@@ -595,18 +516,17 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   CHECK(patternBytes(p) == before);
 
   // A tiny movement is a click, not an edit.
-  ed->mouseDown(mouseAt(*ed, start));
-  ed->mouseUp(mouseAt(*ed, start + juce::Point<int>(1, 0)));
+  sim.down(start);
+  sim.up(start + juce::Point<int>(1, 0));
   CHECK(patternBytes(p) == before);
 
   // Delete removes the selected hit (one undo step), M mutes it.
-  ed->mouseDown(mouseAt(*ed, start));
-  ed->mouseUp(mouseAt(*ed, start));
+  sim.click(start);
   CHECK(ed->keyPressed(juce::KeyPress('m', juce::ModifierKeys(), 'm')));
   CHECK(patternBytes(p) != before);
   p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.undo()); });
   juce::MessageManager::getInstance()->runDispatchLoopUntil(250);  // the editor timer runs at 10 Hz
-  ed->mouseDown(mouseAt(*ed, start));
+  sim.down(start);
   CHECK(ed->keyPressed(juce::KeyPress(juce::KeyPress::deleteKey)));
   CHECK(patternBytes(p) != before);
   p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.undo()); });
@@ -623,11 +543,11 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
       for (const auto& r : ed->hitRects()) covered = covered || (r.chopIndex == lane && fx >= r.x0 - 0.02 && fx <= r.x1 + 0.02);
       if (covered) continue;
       const juce::Point<int> pt(b.getX() + px, b.getY() + static_cast<int>((static_cast<float>(lane) + 0.5f) * b.getHeight() / static_cast<float>(ed->laneCount())));
-      ed->mouseDown(mouseAt(*ed, pt));
+      sim.down(pt);
       CHECK(patternBytes(p) == before);
-      ed->mouseUp(mouseAt(*ed, pt));
-      ed->mouseDown(mouseAt(*ed, pt, juce::ModifierKeys(juce::ModifierKeys::shiftModifier)));
-      ed->mouseUp(mouseAt(*ed, pt));
+      sim.up(pt);
+      sim.down(pt, juce::ModifierKeys(juce::ModifierKeys::shiftModifier));
+      sim.up(pt);
       pump();
       added = hitCount(p) == hits + 1;
     }
@@ -685,9 +605,10 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
         if (rng.uniform01() < 0.25) m |= juce::ModifierKeys::shiftModifier;
         if (rng.uniform01() < 0.15) m |= juce::ModifierKeys::altModifier;
         const bool drag = rng.uniform01() < 0.5;
-        ed->mouseDown(mouseAt(*ed, a, juce::ModifierKeys(m)));
-        if (drag) ed->mouseDrag(mouseAt(*ed, b, juce::ModifierKeys(m)));
-        ed->mouseUp(mouseAt(*ed, drag ? b : a, juce::ModifierKeys(m)));
+        MouseSim sim(*ed);
+        sim.down(a, juce::ModifierKeys(m));
+        if (drag) sim.drag(b, juce::ModifierKeys(m));
+        sim.up(drag ? b : a, juce::ModifierKeys(m));
         break;
       }
       case 3: {
@@ -836,6 +757,17 @@ CHOP_TEST(audio_stays_finite_under_hostile_host_timing_and_block_sizes) {
   CHECK(finite);
 }
 
+CHOP_TEST(version_stamp_matches_VERSION_file) {
+  std::ifstream in(CHOPFRACTAL_VERSION_FILE);
+  CHECK(in.good());
+  std::string line;
+  std::getline(in, line);
+  while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+  CHECK(!line.empty());
+  CHECK(line == cfbuild::kVersionFull);
+  CHECK(line.rfind(cfbuild::kVersionNum, 0) == 0);  // numeric part is the prefix of the full version
+}
+
 int main() {
   const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
@@ -899,19 +831,13 @@ CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
   prepare(p);
   makeSession(p);
   ChopFractalEditor editor(p);
-  juce::TextButton* play = nullptr;
-  juce::TextButton* stop = nullptr;
-  for (int i = 0; i < editor.getNumChildComponents(); ++i) {
-    if (auto* b = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i))) {
-      if (b->getButtonText() == "Play") play = b;
-      if (b->getButtonText() == "Stop") stop = b;
-    }
-  }
+  auto* play = dynamic_cast<juce::TextButton*>(findButton(editor, "Play"));
+  auto* stop = dynamic_cast<juce::TextButton*>(findButton(editor, "Stop"));
   CHECK(play != nullptr && stop != nullptr);
   if (!play || !stop) return;
   CHECK(play->isVisible() && stop->isVisible());
   CHECK(play->getWidth() >= 90 && stop->getWidth() >= 90);
-  CHECK(!play->getBounds().intersects(stop->getBounds()));
+  CHECK(!editor.getLocalArea(play->getParentComponent(), play->getBounds()).intersects(editor.getLocalArea(stop->getParentComponent(), stop->getBounds())));
   CHECK(play->findColour(juce::TextButton::buttonColourId).getGreen() >
         play->findColour(juce::TextButton::buttonColourId).getRed());
   CHECK(stop->findColour(juce::TextButton::buttonColourId).getRed() >
@@ -934,17 +860,14 @@ CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
   const juce::String message = juce::String::repeatedString("A long status message. ", 200);
   p.setStatusMessage(message);
   ChopFractalEditor editor(p);
-  juce::TextEditor* status = nullptr;
-  for (int i = 0; i < editor.getNumChildComponents(); ++i)
-    if (auto* text = dynamic_cast<juce::TextEditor*>(editor.getChildComponent(i)))
-      if (text->getTitle() == "Status messages") status = text;
+  juce::TextEditor* status = findTextEditor(editor, "Status messages");
   CHECK(status != nullptr);
   if (!status) return;
   CHECK(status->isReadOnly());
   CHECK(status->isMultiLine());
   CHECK(status->getText().startsWith(message));
   CHECK(status->getHeight() >= 60);
-  CHECK(editor.getLocalBounds().contains(status->getBounds()));
+  CHECK(editor.getLocalBounds().contains(editor.getLocalArea(status, status->getLocalBounds())));
 }
 
 CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_zoom_works) {
@@ -957,21 +880,17 @@ CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_
   const auto bounds = editor.patternBounds();
   const auto start = bounds.getTopLeft() + juce::Point<int>(1, 1);
   const auto end = bounds.getBottomRight() - juce::Point<int>(1, 1);
-  editor.mouseDown(mouseAt(editor, start));
-  editor.mouseDrag(mouseAt(editor, end));
-  editor.mouseUp(mouseAt(editor, end));
+  MouseSim sim(editor);
+  sim.dragFromTo(start, end);
   CHECK(editor.selectedHits().size() > 1);
   CHECK(patternBytes(p) == before);
   // A single hit can be selected by a simple click, and Zoom creates nested events.
   const auto hits = editor.hitRects();
   if (hits.empty()) return;
   const auto point = hitPoint(editor, hits.front(), 0.5);
-  editor.mouseDown(mouseAt(editor, point));
-  editor.mouseUp(mouseAt(editor, point));
+  sim.click(point);
   CHECK(editor.selectedHit().valid());
-  for (int i = 0; i < editor.getNumChildComponents(); ++i)
-    if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
-      if (button->getButtonText() == "Zoom In") button->onClick();
+  if (auto* button = findButton(editor, "Zoom In")) button->onClick();
   CHECK(patternBytes(p) != before);
   CHECK(std::any_of(editor.hitRects().begin(), editor.hitRects().end(), [](const auto& hit) { return hit.depth > 0; }));
 }
@@ -986,9 +905,7 @@ CHOP_TEST(waveform_drag_selects_multiple_source_sections) {
   const auto bounds = editor.waveformBounds();
   const auto start = bounds.getTopLeft() + juce::Point<int>(1, bounds.getHeight() / 2);
   const auto end = bounds.getTopRight() + juce::Point<int>(-1, bounds.getHeight() / 2);
-  editor.mouseDown(mouseAt(editor, start));
-  editor.mouseDrag(mouseAt(editor, end));
-  editor.mouseUp(mouseAt(editor, end));
+  MouseSim(editor).dragFromTo(start, end);
   CHECK(editor.selectedChops().size() > 1);
   CHECK(editor.selectedHits().size() > 1);
   CHECK(patternBytes(p) == before);
@@ -1070,9 +987,7 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     }
     CHECK(loaded);
     if (!loaded) return;
-    for (int i = 0; i < editor.getNumChildComponents(); ++i)
-      if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
-        if (button->getButtonText() == "Detect Chops") button->onClick();
+    if (auto* button = findButton(editor, "Detect Chops")) button->onClick();
     editor.doReroll();
 
     // 2. Standalone Play produces audio and Stop produces silence without a DAW.
@@ -1097,20 +1012,16 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     auto a = area.getTopLeft() + juce::Point<int>(1, 1);
     auto b = area.getBottomRight() - juce::Point<int>(1, 1);
     const auto unchanged = patternBytes(p);
-    editor.mouseDown(mouseAt(editor, a));
-    editor.mouseDrag(mouseAt(editor, b));
-    editor.mouseUp(mouseAt(editor, b));
+    MouseSim sim(editor);
+    sim.dragFromTo(a, b);
     CHECK(editor.selectedHits().size() > 1);
     CHECK(patternBytes(p) == unchanged);
     const auto rects = editor.hitRects();
     CHECK(!rects.empty());
     if (rects.empty()) return;
     a = hitPoint(editor, rects.front(), 0.5);
-    editor.mouseDown(mouseAt(editor, a));
-    editor.mouseUp(mouseAt(editor, a));
-    for (int i = 0; i < editor.getNumChildComponents(); ++i)
-      if (auto* button = dynamic_cast<juce::TextButton*>(editor.getChildComponent(i)))
-        if (button->getButtonText() == "Zoom In") button->onClick();
+    sim.click(a);
+    if (auto* button = findButton(editor, "Zoom In")) button->onClick();
     CHECK(patternBytes(p) != unchanged);
 
     // 4. Saving and restoring preserves the pattern and embedded audio.
@@ -1153,15 +1064,14 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
   ChopFractalProcessor p;
   ChopFractalEditor editor(p);
   int controls = 0;
-  for (int i = 0; i < editor.getNumChildComponents(); ++i) {
-    auto* component = editor.getChildComponent(i);
-    if (!(dynamic_cast<juce::Button*>(component) || dynamic_cast<juce::Slider*>(component) ||
-          dynamic_cast<juce::ComboBox*>(component) || dynamic_cast<juce::TextEditor*>(component))) continue;
-    auto* tooltip = dynamic_cast<juce::TooltipClient*>(component);
+  forEachControl(editor, [&](juce::Component& component) {
+    if (!(dynamic_cast<juce::Button*>(&component) || dynamic_cast<juce::Slider*>(&component) ||
+          dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
+    auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
     if (tooltip) CHECK(tooltip->getTooltip().length() > 20);
     ++controls;
-  }
+  });
   CHECK(controls > 35);
   CHECK(editor.getTooltip().length() > 20);
 }
@@ -1278,12 +1188,15 @@ CHOP_TEST(capture_buttons_follow_the_capture_state) {
       p.processBlock(buf, midi);
     }
   };
-  auto* length = dynamic_cast<juce::ComboBox*>([&]() -> juce::Component* {
-    for (auto* ch : ed->getChildren())
+  std::function<juce::ComboBox*(juce::Component&)> findCombo = [&](juce::Component& c) -> juce::ComboBox* {
+    for (auto* ch : c.getChildren()) {
       if (auto* cb = dynamic_cast<juce::ComboBox*>(ch))
         if (cb->getTitle() == "Capture length") return cb;
+      if (auto* found = findCombo(*ch)) return found;
+    }
     return nullptr;
-  }());
+  };
+  auto* length = findCombo(*ed);
   CHECK(length != nullptr);
   if (length) length->setSelectedId(1);  // Free
   click("Rec Arm");

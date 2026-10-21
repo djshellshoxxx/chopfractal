@@ -1,9 +1,9 @@
 # F00 Editor decomposition
 
-**Status:** Ready for development  **Size:** M (5 engineer-days)  **Depends on:** none  **Blocks:** F01 (UI half), F02, F03, F04, F05, F06 and every later feature that adds editor controls
+**Status:** Implemented on `feat/F00-editor-decomposition` (as-built notes in section 12)  **Size:** M (5 engineer-days)  **Depends on:** none  **Blocks:** F01 (UI half), F02, F03, F04, F05, F06 and every later feature that adds editor controls
 
 ## 0. Implementation status (audited 2026-10-20)
-**Not started.** `plugin/src/PluginEditor.cpp` is now 1404 lines (header about 150 lines), not 815, because pass 3 (chaos, presets, drag-out, direct hit editing) landed in the monolith before this split. The window is 940 x 912, not 940 x 860. Decisions recorded by the audit:
+**Implemented** (see section 12). Audit-time notes follow. `plugin/src/PluginEditor.cpp` is now 1404 lines (header about 150 lines), not 815, because pass 3 (chaos, presets, drag-out, direct hit editing) landed in the monolith before this split. The window is 940 x 912, not 940 x 860. Decisions recorded by the audit:
 - Section 3 geometry below is the **as-built** layout (the old 815-line numbers were replaced). Pixel values must still be re-read from `ChopFractalEditor::resized()` on the day F00 starts; the snapshot comparison in section 7 remains the arbiter.
 - The transport row (Play, Stop, Follow DAW, hint label, "Move / resize hits" toggle), the Chaos slider, Reroll, the preset combo with Save Preset / Delete, and the Drag MIDI / Drag WAV handles are existing widgets and move verbatim: transport row, sliders, Chaos and the edit-mode toggle into ControlsPanel; preset combo, Save Preset, Delete, Reroll and both drag handles into FeaturePanel row D.
 - Direct hit editing (`DragMode`, `dragId_`, `dragStart_`, `nudgeSelected`, `editSelected`, Shift+click add, Alt+drag duplicate, Delete/M/D/arrow keys) moves into PatternPanel (mouse) and stays in the editor shell for `keyPressed` until F04 takes over. Section selection (`selectingSections_`) is split between WavePanel and PatternPanel. `DragOut.h/.cpp` and `PresetManager.h/.cpp` are already separate files and are kept as they are.
@@ -12,9 +12,9 @@
 - The Feature-row overflow described below is already fixed in the as-built editor (four rows A to D, the widest is 870 px), so the "known and preserved defect" no longer exists and F04 does not need to re-flow for it.
 
 ## 1. Summary and user value
-`plugin/src/PluginEditor.cpp` was 815 lines when this spec was written and is 1404 lines at the 2026-10-20 audit; it is one class (`ChopFractalEditor`) that owns 40+ widgets, view caches, session commands, painting and hit-testing for four canvases. Every later feature would edit that one file. F00 splits it into seven `juce::Component` panels, an `EditorModel` (cached view data, selection, transient UI state) and an `EditorCommands` layer (every action that calls `ProjectSession`), so features land in separate files. Pure refactor: same widgets, same pixels, same strings, same session calls. The user sees no change; developers gain parallel lanes.
+`plugin/src/PluginEditor.cpp` was 1,404 lines and one class (`ChopFractalEditor`) that owned about 80 widgets, the view caches, the session commands, painting and hit-testing for four canvases, direct hit editing, keyboard editing, presets and drag-out. F00 splits it into seven `juce::Component` panels, an `EditorModel` (cached view data, selection, transient UI state) and an `EditorCommands` layer (every action that calls `ProjectSession`), so features land in separate files. Pure refactor: same widgets, same pixels, same strings, same session calls. The user sees no change; developers gain parallel lanes.
 
-Note: `_TEMPLATE.md` points to `docs/specs/roadmap/README.md` for panel names; that file does not exist in the repo. The names and responsibilities in section 5 of this spec are the authoritative definition (README should link here).
+Note: this spec was first written against an 815-line editor. The editor had grown (transport row, presets, edit mode, drag-out, keyboard editing, scrolling status text, 940x912 window) before F00 started; the sections below describe the editor as it was when F00 was implemented, and section 12 lists every place the implementation departs from the first draft. `docs/specs/roadmap/README.md` defers to this file for panel names and responsibilities.
 
 ## 2. User stories and scope
 - As a developer I can add a control to one panel without touching the other six, so feature branches stop conflicting.
@@ -25,21 +25,21 @@ Note: `_TEMPLATE.md` points to `docs/specs/roadmap/README.md` for panel names; t
 **Non-goals:** new features, behavior changes, resizing, keyboard handling, accessibility changes, changing any `ProjectSession` or module API, state format changes.
 
 ## 3. UX
-Unchanged. Window 940x912 (as built), `setResizable(false,false)`. The panels are laid out by `ChopFractalEditor::resized()` at exactly these bounds (editor-local coordinates; margin 10, derived from the current `resized()` arithmetic):
+Unchanged. Window 940x912, `setResizable(false,false)`. The panels are laid out by `ChopFractalEditor::resized()` at exactly these bounds (editor-local coordinates; margin 10, derived from the old `resized()` arithmetic):
 
 | Panel | x | y | w | h | Contents (moved verbatim) |
 |---|---|---|---|---|---|
-| ControlsPanel | 10 | 10 | 920 | 232 | transport row 36 (Play, Stop, Follow DAW, hint label, "Move / resize hits" toggle), row 1 buttons 30 (Load Loop, Detect Chops, Generate, Mutate, Undo, Redo, Zoom In, Collapse, Lock Bar; 96 px pitch, `reduced(2)`), row 2 26 (Seed label 50, seed editor 110, New Seed 90, Embed toggle 210, bars combo right 90), slider block 128 (left column Density, Swing, Variation, Effect Intensity, Chaos; right column Dry/Source, Output Gain, then two toggle rows: Enable, Reverse, Pitch, Retrigger / Filter, Glide, Crunch), 6 px gaps |
+| ControlsPanel | 10 | 10 | 920 | 232 | transport row (Play, Stop, Follow DAW, hint label, "Move / resize hits" toggle), row 1 buttons (Load Loop, Detect Chops, Generate, Mutate, Undo, Redo, Zoom In, Collapse, Lock Bar; 96 px pitch, `reduced(2)`), row 2 (Seed label 50, seed editor 110, New Seed 90, Embed toggle 210, bars combo right 90), the 5+2 sliders and 7 toggles block (128 px) |
 | FeaturePanel | 10 | 248 | 920 | 104 | row A: Smart Setup, Accept Roles, Use Tempo, Motif, Depth, Fractal; row B: Evolve, Every, amount slider, Keep, Format, rate, Loops; row C: Export WAV, Export Kit, Locate Source, detection-mode combo, Store/Recall A/B; row D: preset combo, Save Preset, Delete, Reroll, role combo, Set Role, Drag MIDI, Drag WAV |
 | WavePanel | 10 | 358 | 920 | 120 | waveform, markers, empty-state text |
 | PatternPanel | 10 | 484 | 920 | 230 | lane grid, hits, bar locks |
 | HistoryPanel | 10 | 720 | 808 | 106 | family tree |
 | OrbitPanel | 824 | 720 | 106 | 106 | Orbit View (`min(bottom.h, bottom.w/2)` square, right aligned) |
-| StatusBar | 10 | 828 | 920 | 74 | scrolling status log (`juce::TextEditor`, read-only, 2 px vertical inset) |
+| StatusBar | 10 | 830 | 920 | 70 | the scrollable read-only status text |
 
-Inside a panel the same `removeFromTop/Left` sequences are used, relative to the panel's own bounds (no extra `reduced(10)`). All painting uses panel-local coordinates; the colour constants, fonts (13 px; 10 px ring numbers), alpha values and strings are copied unchanged, including the three empty-state strings, the `"locked"` bar label and the `"Orbit view"` placeholder.
+Inside a panel the same `removeFromTop/Left` sequences are used, relative to the panel's own bounds (no extra `reduced(10)`). All painting uses panel-local coordinates (the Orbit View is the one exception, section 12); the colour constants, fonts (13 px; 10 px ring numbers), alpha values and strings are copied unchanged, including the three empty-state strings, the `"locked"` bar label and the `"Orbit view"` placeholder.
 
-Former defect, already fixed in the as-built editor: the old third Feature row (1054 px) was split into rows C and D by pass 3; every row now fits 920 px (widest 870 px). Nothing to preserve.
+The first draft preserved a Feature-row overflow (row C needing 1,054 px). It no longer exists: Role and Set Role live in row D, and every row fits in 920 px. F04 still re-flows the rows, but there is nothing to fix first.
 
 ## 4. Data model and state
 No persisted state, no host parameters, no schema change. `EditorModel` holds only transient UI state that today lives in `ChopFractalEditor` members: seed value, selection, Smart Setup result, status text, `pushedEvolve_`.
@@ -48,18 +48,19 @@ No persisted state, no host parameters, no schema change. `EditorModel` holds on
 // plugin/src/EditorModel.h
 struct EditorView {                       // replaced wholesale on every rebuild; panels read it by const&
   std::uint64_t revision = 0;             // ++ on each rebuild; panels may cache by it
-  bool hasSource = false, hasPattern = false, sourceMissing = false;
+  bool hasSource = false, hasPattern = false;
   std::int64_t sourceFrames = 0;
-  cf::ui::PeakBins peaks;                 // computed for waveWidthPx bins
+  cf::ui::PeakBins peaks;                 // computed for the wave panel's width; kept while source and width are unchanged
   std::vector<cf::ui::MarkerView> markers;
   std::vector<cf::ChopInfo> chops;
   cf::ui::PatternView pattern;
   cf::ui::OrbitView orbit;
   std::vector<cf::ui::TreeNodeView> tree;
-  cf::evolve::Settings evolve;            // session value
-  bool evolveRunning = false;
+  int treeCols = 0, treeRows = 0;
+  std::int64_t barTicks = 0, gridTicks = 0; int barCount = 0;   // pattern geometry, kept from the previous view while there is no pattern
 };
 ```
+`evolveRunning`, the session's Evolve settings and `sourceMissing` change between rebuilds, so they are model accessors refreshed every tick (`evolveRunning()`, `evolve()`, `sourceMissing()`), not view fields.
 
 ## 5. Public API
 All classes live in `plugin/` (JUCE shell, message thread only). The audio thread never touches any of them. Only `EditorModel` and `EditorCommands` call `ChopFractalProcessor::withSession`; panels never do (checked by grep, section 8).
@@ -169,14 +170,14 @@ Step 0 changes only test infrastructure so the safety net runs before and after 
 - **Manual QA:** (1) Build before and after; run the editor with `CHOPFRACTAL_SNAPSHOT=/tmp/before.png` then `/tmp/after.png`; `cmp` reports identical (if not, diff must be limited to anti-aliasing of text, <= 1/255 per channel, and noted in the PR). (2) Load a WAV, Detect, Generate, click a hit, Zoom In, Collapse, Lock Bar, right-click a family-tree node and use each of the 4 menu items, drag nothing. (3) Click the waveform: marker added; Alt-click near it: removed; double-click in a chop: audition plays. (4) Press Evolve, change Every and the amount, close and reopen the editor: controls show the same values. (5) Save the project, reload: identical.
 
 ## 8. Acceptance criteria
-- [ ] `editor_buttons_drive_the_session` passes unmodified except for the step 0 helper relocation/recursion.
-- [ ] `editor_panels_have_the_pre_refactor_bounds`, all `test_editor_model.cpp` tests and the full CI (Release, Werror matrix, ASan/UBSan, `plugin-linux` job both with `env -u DISPLAY` and under `xvfb-run`, and `tools/validate_vst3.sh`) are green.
-- [ ] `plugin/src/PluginEditor.cpp` is <= 250 lines and contains no `paint` body other than `fillAll`; `PluginEditor.h` declares no `juce::TextButton`.
-- [ ] `grep -n "withSession" plugin/src/*Panel.cpp plugin/src/StatusBar.cpp` returns nothing.
-- [ ] No file under `modules/` or `composition/` is modified; `git diff --stat` shows only `plugin/` and `docs/BUILD_STATUS.md`.
-- [ ] Every user-visible string in the old `PluginEditor.cpp` still exists exactly once in the new sources (`git grep -c` before/after for each literal in a checklist the PR attaches).
-- [ ] Pattern_engine golden hashes unchanged (existing `ctest` passes).
-- [ ] Idle CPU: with no playback and no edits the timer repaints nothing (verified by a repaint counter in a temporary debug build; PR notes the number of repaints per second is 0).
+- [x] `editor_buttons_drive_the_session` passes unmodified except for the step 0 helper relocation/recursion.
+- [x] `editor_panels_have_the_pre_refactor_bounds`, all `test_editor_model.cpp` tests and the full CI (Release, Werror matrix, ASan/UBSan, `plugin-linux` job both with `env -u DISPLAY` and under `xvfb-run`, and `tools/validate_vst3.sh`) are green.
+- [x] `plugin/src/PluginEditor.cpp` is <= 250 lines and contains no `paint` body other than `fillAll`; `PluginEditor.h` declares no `juce::TextButton`.
+- [x] `grep -n "withSession" plugin/src/*Panel.cpp plugin/src/StatusBar.cpp` returns nothing.
+- [x] No file under `modules/` or `composition/` is modified; `git diff --stat` shows only `plugin/` and `docs/BUILD_STATUS.md`.
+- [x] Every user-visible string in the old `PluginEditor.cpp` still exists exactly once in the new sources (`git grep -c` before/after for each literal in a checklist the PR attaches).
+- [x] Pattern_engine golden hashes unchanged (existing `ctest` passes).
+- [x] Idle CPU: with no playback and no edits the timer repaints nothing (verified by a repaint counter in a temporary debug build; PR notes the number of repaints per second is 0).
 
 ## 9. Files touched
 | Path | New/Mod | Change |
@@ -208,3 +209,13 @@ Step 0 changes only test infrastructure so the safety net runs before and after 
 5. Extract `StatusBar`, then `OrbitPanel`, `HistoryPanel`, `PatternPanel`, `WavePanel` (one commit each, GUI test after each). Add `test_editor_layout.cpp` bounds test with the first panel and extend per commit.
 6. Extract `ControlsPanel` (with attachments) and `FeaturePanel` (with the Evolve sync).
 7. Final cleanup: delete dead members, enforce the acceptance greps, update `docs/BUILD_STATUS.md`, record the reference snapshot comparison in the PR.
+
+## 12. As built (deviations from the first draft)
+- Window is 940x912 (the editor had grown since the draft); the real panel bounds are in section 3 and are asserted by `test_editor_layout.cpp`.
+- `EditorModel` also holds `Selection` change notifications (`selectSectionsInWave/InPattern` call `announceSelection`), `detectMode`, and the setup/seed/status state; `refresh` emits `Evolve` every tick, and `Setup`, `Selection` (if changed) and `View` on a rebuild.
+- `EditorCommands::setEvolve(const EvolveUi&, evolve::Settings& pushed)` returns a bool and reports the settings pushed to the session; `FractalUi` carries `mutation` and `accent` as well as motif and depth.
+- `OrbitPanel` paints with `g.setOrigin(-getPosition())` (editor coordinates) so anti-aliased float geometry stays pixel-identical; the other panels paint panel-locally.
+- `FeaturePanel` owns presets, drag-out handles and the Evolve sync; `ControlsPanel` owns the slider and Length-combo attachments.
+- Extra tests: `test_editor_panels.cpp` (MouseSim-driven history, orbit, pattern and wave gestures). `MouseSim` lives in `shell_test_support.hpp`.
+- CMake uses `file(GLOB ... CONFIGURE_DEPENDS)` for plugin and shell-test sources; `CHOPFRACTAL_WARNING_SOURCES` carries the warning flags.
+- Verified: snapshot byte-identical to the pre-split render; 0 idle repaints in 3 s.
