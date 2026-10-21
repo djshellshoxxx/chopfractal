@@ -109,6 +109,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   chopfractal::composition::ProjectSession session_;
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
+  std::array<double, 5> lastGrooveParams_{};  // Groove Lab knobs as of the last poll (message thread): the session is touched only when one moved
   std::atomic<double> sampleRate_{48000.0};
   std::atomic<double> patternQuarters_{0.0};
   std::atomic<std::uint32_t> boundaryCount_{0};

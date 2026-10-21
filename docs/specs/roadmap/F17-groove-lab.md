@@ -152,3 +152,15 @@ Sanitizers: ASan/UBSan; TSan on rebuild versus audio thread swap. Manual QA: MPC
 - J Dilla, MPC3000 and the "swung plus straight plus shifted" description of Dilla Time: MusicRadar, "How J Dilla and his MPC changed beatmaking forever" (https://www.musicradar.com/artists/djs-producers/every-producer-bows-down-to-dilla-whether-they-like-it-or-not-how-j-dilla-and-his-mpc-changed-beatmaking-forever), RouteNote, "The Dilla swing" (https://create.routenote.com/blog/the-dilla-swing-how-one-producer-humanised-the-sound-of-hip-hop/) and Ethan Hein's notes on the book Dilla Time (https://ethanhein.substack.com/p/dilla-time).
 - Consistent with the as-built engine: swing parameter 0..1 maps to 50 to 66.7 % of the pair (docs/specs/pattern-generation-engine.md).
 - These pages were found by web search during the audit; the specific percentages 54, 58, 62, 71 and the Dilla numbers are this spec's offered defaults (marked as such in 4.2), not quotations. Re-verify the links when the spec is implemented.
+
+
+## As built (engine v2 branch)
+
+- The groove is applied once in `ProjectSession::buildPlayback` (composition), not in `Playback::build`; it never
+  changes the pattern bytes or the pattern hash.
+- The state section is tag 14 (schema 1, 46 bytes), absent while the groove equals the default. A test fixture that used
+  tag 14 as an unknown tag now uses 25.
+- The MIDI bake is done in composition (`midiEvents()` / `renderMidi`), not through `midi_export::Options::groove`.
+- Swing uses the `SwingGrid` rounding (nearest tick, half away from zero) at 0.1 percent resolution.
+- The host parameters are the five rows `groove_enable`, `groove_template`, `groove_swing`, `groove_hum_time`,
+  `groove_hum_vel`; the processor applies them to the session when one moved since the last timer poll.
