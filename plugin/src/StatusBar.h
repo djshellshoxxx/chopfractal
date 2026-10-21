@@ -2,6 +2,8 @@
 // Bottom status bar (F05): the latest message on one elided line (severity prefix, click or Enter opens the notice log),
 // then, right to left, the version and tag, the seed, the Cancel Export button while exporting, the meter with its CLIP
 // chip, the voice count and the sync box (tempo, meter, transport and whether they are the host's or fallbacks).
+#include <functional>
+
 #include "EditorPanels.h"
 #include "MeterStrip.h"
 #include "NoticeLogPanel.h"
@@ -24,6 +26,11 @@ class StatusBar : public EditorPanelBase {
   StatusReadout& voiceBox() { return voices_; }
   StatusReadout& syncBox() { return sync_; }
   bool compact() const { return compact_; }
+  // F19: the "?" button opens the command palette; the Quick start button shows while the checklist has not been hidden for good.
+  std::function<void()> onPalette, onQuickStart;
+  juce::TextButton& paletteButton() { return palette_; }
+  juce::TextButton& quickStartButton() { return quickStart_; }
+  void setQuickStartVisible(bool);
 
  private:
   class MessageButton : public juce::Button {
@@ -41,6 +48,7 @@ class StatusBar : public EditorPanelBase {
   MessageButton message_;
   MeterStrip meter_;
   StatusReadout voices_{"Active voices"}, sync_{"Tempo and meter"};
+  juce::TextButton palette_{"?"}, quickStart_{"Quick start"};
   juce::TextButton cancelExport_{"Cancel Export"};  // visible only while an export runs
   juce::String shown_, lastSeed_;
   juce::Component::SafePointer<NoticeLogPanel> log_;

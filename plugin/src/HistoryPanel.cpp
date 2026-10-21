@@ -8,7 +8,10 @@
 
 namespace cf = chopfractal;
 
-HistoryPanel::HistoryPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "HistoryPanel") { setOpaque(true); }
+HistoryPanel::HistoryPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "HistoryPanel") {
+  setOpaque(true);
+  setWantsKeyboardFocus(true);
+}
 
 void HistoryPanel::modelChanged(Change c) {
   if (c == Change::View || c == Change::Flags) repaint();
@@ -56,6 +59,7 @@ void HistoryPanel::paint(juce::Graphics& g) {
 }
 
 void HistoryPanel::mouseDown(const juce::MouseEvent& e) {
+  grabEditorFocus();
   const auto pt = e.getPosition();
   for (const auto& n : model_.view().tree) {
     const auto np = treePos(n);

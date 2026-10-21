@@ -9,7 +9,10 @@
 namespace cf = chopfractal;
 using editor_theme::laneColour;
 
-OrbitPanel::OrbitPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "OrbitPanel") { setOpaque(true); }
+OrbitPanel::OrbitPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "OrbitPanel") {
+  setOpaque(true);
+  setWantsKeyboardFocus(true);
+}
 
 void OrbitPanel::modelChanged(Change c) {
   if (c == Change::View || c == Change::Selection) repaint();

@@ -16,6 +16,7 @@
 #include "DragOut.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
+#include "QuickStartTracker.h"
 
 struct FractalUi {
   std::string motif = "x.xx";
@@ -61,6 +62,8 @@ class EditorCommands {
   // Loads a loop; asks first (Replace / Cancel) when the project already has a pattern or history. Tests replace the hook.
   void requestLoad(const juce::File&);
   std::function<void(std::function<void(bool)>)> confirmReplace;
+  // Quick start (F19): called when a real event happens that the checklist tracks (audible playback, a finished export).
+  std::function<void(QuickStep)> onMilestone;
   bool projectHasWork();
   void locateSource();
   void handleDroppedFiles(const juce::StringArray& files);
@@ -145,6 +148,12 @@ class EditorCommands {
   void deleteSelected();
   void toggleMuteSelected();
   void duplicateSelected();
+
+  // ---- host parameters (command palette; same gesture as a drag, so automation recording and host undo behave) ----
+  // Sets the plain value (snapped to the manifest's range and step) and returns what the parameter now holds, or NaN when the
+  // id is not a parameter.
+  double setParameter(const std::string& id, double plain);
+  double parameter(const std::string& id) const;
 
   void say(const juce::String& text) { model_.setStatus(text); }
 

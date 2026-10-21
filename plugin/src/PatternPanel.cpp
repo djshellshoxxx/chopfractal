@@ -14,6 +14,7 @@ using editor_theme::laneColour;
 
 PatternPanel::PatternPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "PatternPanel"), playhead_(model) {
   setOpaque(true);
+  setWantsKeyboardFocus(true);
   addAndMakeVisible(playhead_);
 }
 

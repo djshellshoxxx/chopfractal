@@ -9,9 +9,12 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "CdlLookAndFeel.h"
+#include "CommandPalette.h"
+#include "CommandRegistry.h"
 #include "ControlsPanel.h"
 #include "DrawerHost.h"
 #include "EditorCommands.h"
+#include "EditorKeys.h"
 #include "EditorModel.h"
 #include "EditorTheme.h"
 #include "FeaturePanel.h"
@@ -22,6 +25,8 @@
 #include "ExportDrawer.h"
 #include "PresetBrowser.h"
 #include "PluginProcessor.h"
+#include "QuickStartCard.h"
+#include "QuickStartTracker.h"
 #include "SettingsDrawer.h"
 #include "ShellChrome.h"
 #include "ShellLayout.h"
@@ -78,12 +83,28 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   PresetBrowser& presetBrowser() { return presets_; }
   ExportDrawer& exportDrawer() { return export_; }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
+  // ---- F19 / F04 ----
+  void openPalette() { palette_.open(); }
+  CommandPalette& palette() { return palette_; }
+  CommandRegistry& registry() { return registry_; }
+  QuickStartTracker& quickStart() { return quickStartTracker_; }
+  QuickStartCard& quickStartCard() { return quickCard_; }
+  void showQuickStart() { quickCard_.showNow(); }
+  void resetQuickStart();
+  void showShortcuts();
+  void auditionSelected();   // Enter: the chop of the selected hit
+  void toggleEvolve();
+  void observeQuickStart();  // the 10 Hz tick: marks steps that really happened
+  void refreshAccessibility();
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
   const MacroStrip& macroStrip() const { return macro_; }
   StatusBar& statusBar() { return status_; }
   WavePanel& wavePanel() { return wave_; }
+  PatternPanel& patternPanel() { return pattern_; }
+  OrbitPanel& orbitPanel() { return orbit_; }
+  TopBar& topBar() { return topBar_; }
   HistoryPanel& historyPanel() { return history_; }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
   int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
@@ -119,6 +140,16 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Viewport legacyView_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
+  QuickStartTracker quickStartTracker_;
+  CommandRegistry registry_;
+  QuickStartCard quickCard_;
+  CommandPalette palette_;
+  juce::Component::SafePointer<juce::CallOutBox> shortcutsBox_;
+  bool spaceHintShown_ = false;
+  bool exportSeenDone_ = false;
+  std::uint64_t announcedRevision_ = 0;
+  chopfractal::EventId announcedHit_;
+  bool announceSelection_ = false;
 
   shell::ShellRects rects_;
   bool advanced_ = false;

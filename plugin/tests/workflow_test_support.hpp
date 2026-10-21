@@ -31,6 +31,7 @@ struct IsolatedUser {
     PresetManager::setFolderOverride(root.getChildFile("presets"));
     dragout::setFolderOverride(root.getChildFile("drag"));
     cdl::setSettingsFileOverride(root.getChildFile("ui.json"));
+    QuickStartTracker::setFileOverride(root.getChildFile("quickstart.json"));
     cdl::setCurrentTheme(cdl::ThemeId::Night);
     cdl::setReducedMotion(false);
   }
@@ -38,6 +39,7 @@ struct IsolatedUser {
     PresetManager::setFolderOverride(juce::File());
     dragout::setFolderOverride(juce::File());
     cdl::setSettingsFileOverride(juce::File());
+    QuickStartTracker::setFileOverride(juce::File());
     cdl::setCurrentTheme(cdl::ThemeId::Night);
     cdl::setReducedMotion(false);
     root.deleteRecursively();

@@ -53,6 +53,7 @@ class EditorModel {
   // ---- selection ----
   chopfractal::EventId selected() const { return selected_; }  // the primary selected hit
   void select(chopfractal::EventId);                            // sets only the primary hit (Orbit View clicks)
+  void selectOnly(chopfractal::EventId);                        // one hit as the whole selection (keyboard navigation)
   void clearSelection();                                        // primary hit, hit list and chop list
   const std::vector<chopfractal::EventId>& selectedHits() const { return selectedHits_; }
   const std::vector<chopfractal::ChopId>& selectedChops() const { return selectedChops_; }

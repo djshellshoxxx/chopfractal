@@ -142,6 +142,18 @@ void EditorModel::select(cf::EventId id) {
   emit(Change::Selection);
 }
 
+void EditorModel::selectOnly(cf::EventId id) {
+  if (!id.valid()) {
+    clearSelection();
+    return;
+  }
+  if (selected_ == id && selectedHits_.size() == 1 && selectedChops_.empty()) return;
+  selected_ = id;
+  selectedHits_.assign(1, id);
+  selectedChops_.clear();
+  emit(Change::Selection);
+}
+
 void EditorModel::clearSelection() {
   if (!selected_.valid() && selectedHits_.empty() && selectedChops_.empty()) return;
   selected_ = cf::EventId{};

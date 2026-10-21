@@ -44,7 +44,8 @@ cf::Status EditorCommands::run(const std::function<cf::Status(cf::composition::P
 // ---------------------------------------------------------------------------------------------
 
 void EditorCommands::play() {
-  proc_.startPlayback();
+  const bool started = proc_.startPlayback();
+  if (started && onMilestone) onMilestone(QuickStep::Play);
   model_.rebuild();
 }
 
@@ -626,6 +627,7 @@ bool EditorCommands::pollArrangement() {
   if (running) {
     model_.setProgress(juce::String(cf::ui::arrangementProgressMessage(std::max(1, progress.section), std::max(1, progress.sections), progress.fraction)));
   } else if (finished) {
+    if (result.status.ok() && onMilestone) onMilestone(QuickStep::Export);
     if (result.status.ok())
       model_.setStatus(juce::String(cf::ui::arrangementExportedMessage(juce::File(juce::String(result.wavPath)).getFileName().toStdString(), result.bars, result.seconds)));
     else if (result.status.error().code == cf::ErrorCode::Cancelled)
@@ -658,6 +660,18 @@ void EditorCommands::setParamPlain(const std::string& id, double plain) {
     prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
     prm->endChangeGesture();
   }
+}
+
+double EditorCommands::setParameter(const std::string& id, double plain) {
+  const auto* def = cf::host::findParam(id);
+  if (def == nullptr || proc_.apvts.getParameter(id) == nullptr) return std::nan("");
+  setParamPlain(id, cf::host::snapValue(*def, plain));
+  return parameter(id);
+}
+
+double EditorCommands::parameter(const std::string& id) const {
+  if (auto* prm = proc_.apvts.getParameter(id)) return static_cast<double>(prm->convertFrom0to1(prm->getValue()));
+  return std::nan("");
 }
 
 bool EditorCommands::applyPreset(const cf::presets::Preset& p, bool generateAfter) {
@@ -718,12 +732,16 @@ void EditorCommands::deletePreset(const juce::File& file) {
 // canvas gestures
 // ---------------------------------------------------------------------------------------------
 
-void EditorCommands::audition(cf::ChopId id) { proc_.audition(id); }
+void EditorCommands::audition(cf::ChopId id) {
+  proc_.audition(id);
+  if (onMilestone) onMilestone(QuickStep::Play);
+}
 
 void EditorCommands::auditionFrame(std::int64_t frame) {
   for (const auto& c : model_.view().chops)
     if (frame >= c.range.start && frame < c.range.end) {
       proc_.audition(c.id);  // plays through the output without touching the pattern playhead
+      if (onMilestone) onMilestone(QuickStep::Play);
       return;
     }
 }

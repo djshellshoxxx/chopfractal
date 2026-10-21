@@ -29,6 +29,18 @@ StatusBar::StatusBar(EditorModel& model, EditorCommands& commands) : EditorPanel
   sync_.setTooltip("Following the host tempo and time signature");
   addAndMakeVisible(voices_);
   addAndMakeVisible(sync_);
+  palette_.setTitle("Command palette");
+  palette_.setTooltip("Search every action and parameter (Ctrl+K)");
+  palette_.onClick = [this] {
+    if (onPalette) onPalette();
+  };
+  addAndMakeVisible(palette_);
+  quickStart_.setTitle("Show quick start");
+  quickStart_.setTooltip("Show the first-run checklist");
+  quickStart_.onClick = [this] {
+    if (onQuickStart) onQuickStart();
+  };
+  addChildComponent(quickStart_);
   cancelExport_.setTitle("Cancel Export");
   cancelExport_.onClick = [this] { cmd_.cancelExport(); };
   addChildComponent(cancelExport_);
@@ -148,7 +160,19 @@ void StatusBar::resized() {
     cancelExport_.setBounds(b.withSizeKeepingCentre(b.getWidth(), std::min(b.getHeight(), w(20))));
     area.removeFromRight(w(6));
   }
+  palette_.setBounds(area.removeFromRight(w(24)).reduced(0, w(3)));
+  area.removeFromRight(w(6));
+  if (quickStart_.isVisible()) {
+    quickStart_.setBounds(area.removeFromRight(juce::GlyphArrangement::getStringWidthInt(cdl::font(cdl::FontRole::Button, scale_), quickStart_.getButtonText()) + w(26)).reduced(0, w(3)));
+    area.removeFromRight(w(6));
+  }
   message_.setBounds(area);
+}
+
+void StatusBar::setQuickStartVisible(bool on) {
+  if (quickStart_.isVisible() == on) return;
+  quickStart_.setVisible(on);
+  resized();
 }
 
 void StatusBar::modelChanged(Change c) {

@@ -7,7 +7,10 @@
 
 namespace cf = chopfractal;
 
-WavePanel::WavePanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "WavePanel") { setOpaque(true); }
+WavePanel::WavePanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "WavePanel") {
+  setOpaque(true);
+  setWantsKeyboardFocus(true);
+}
 
 void WavePanel::modelChanged(Change c) {
   if (c == Change::View || c == Change::Selection || c == Change::Flags) repaint();
