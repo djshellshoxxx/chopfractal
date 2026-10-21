@@ -33,7 +33,8 @@
     "edits: `setLock`, `clearLocks`, `addEvent`, `deleteEvent`, `moveEvent`, `setEventChop`, `setEventTransform`, `duplicateBar`, `restoreSourceOrder`, `setChild`, `collapse`, `setChildActive`",
     "`serialize()` / `deserialize()` (schema 1, engine version 1)",
     "`PatternSession`: undo/redo and two A/B snapshot slots",
-    "`setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)"
+    "`setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)",
+    "`mapRegions(pattern, fn)`: applies a range mapping to every sub-region, recursively through zoom trees (used when a source is time-stretched)"
   ],
   "limits": [
     "Pattern length 1, 2, 4 or 8 bars; grids 1/1 to 1/32, straight or triplet",

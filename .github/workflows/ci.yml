@@ -23,6 +23,9 @@ jobs:
       - run: python3 tools/gen_module_docs.py --check
       # Standard headers must be included directly, not inherited from one compiler's library internals.
       - run: python3 tools/check_includes.py
+      # Forbidden stretch engines (GPL/LGPL/commercial): docs/specs/roadmap/F14-tempo-match-stretch.md section 6.
+      - name: No forbidden time-stretch libraries
+        run: '! grep -rIliE "rubberband|soundtouch|elastique" --include=CMakeLists.txt --include=*.cmake --include=*.hpp --include=*.cpp --include=module.json modules composition plugin tools'
 
   # Every module and the composition root, on each supported compiler/OS. The golden determinism hashes in
   # pattern_engine make a cross-platform divergence fail loudly here.
@@ -67,6 +70,11 @@ jobs:
           cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
           cmake --build build-tsan --target test_audio_renderer
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
+      - name: ThreadSanitizer on the time-stretch module (threaded determinism test)
+        run: |
+          cmake -S modules/time_stretch -B build-tsan-ts -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan-ts --target test_time_stretch
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan-ts/test_time_stretch
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
   transfer-smoke:

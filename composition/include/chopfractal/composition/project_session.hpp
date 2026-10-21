@@ -22,6 +22,7 @@
 #include <chopfractal/variation_history/history.hpp>
 
 #include <cstdint>
+#include <chopfractal/composition/stretch.hpp>
 #include <chopfractal/chop_insight/insight.hpp>
 #include <chopfractal/evolve/evolve.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
@@ -113,6 +114,14 @@ class ProjectSession {
   Status editMarkers(const std::function<Status(source::ChopMap&)>& edit);
   Status undoMarkers();
   Status redoMarkers();
+  std::shared_ptr<const render::SourceData> sourceData() const { return sourceData_; }
+  // True when the source has no file behind it (captured or stretched), so project state must embed the audio.
+  bool sourceNeedsEmbed() const;
+  // ---- tempo-match stretch (composition/src/stretch.cpp) ----
+  // Validates the request (ratio 0.5x..2x, 20..999 BPM, size limits, marker collisions) and snapshots the source.
+  Result<StretchPlan> planStretch(const StretchRequest& request) const;
+  // All-or-nothing: swaps in the stretched source, rescaled markers and pattern, restarts the variation tree.
+  Status applyStretched(const StretchPlan& plan, std::shared_ptr<const render::SourceData> stretched);
   // Re-attach audio to a saved project. Must be the same audio (hash match); otherwise load it as a new source.
   Status relinkSource(std::shared_ptr<const render::SourceData> data);
 

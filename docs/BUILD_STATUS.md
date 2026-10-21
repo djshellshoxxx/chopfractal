@@ -20,14 +20,14 @@ Modular plan: Stages A to D are complete; Stage E (portability and release) is c
 
 ## What exists
 
-Sixteen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
+Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
 
 | Module | Role | Test cases |
 |---|---|---|
 | `chop_contracts` | typed IDs, ticks, results, byte codec, RNG, nested events (with per-event effects) + `flatten`, policy interface | 10 |
 | `state_codec` | versioned project container, CRC, migrations | 5 |
 | `variation_history` | generic branch graph with protected pruning | 7 |
-| `source_chop` | markers, undo, proposals, transient and grid analysis | 14 |
+| `source_chop` | markers, undo, proposals, transient and grid analysis, `rescaled` for stretched sources | 17 |
 | `pattern_engine` | generate, mutate, locks, edits, effects, `setBarEvents`, flatten, state, session | 23 |
 | `recursive_hit_zoom` | nested child patterns inside a hit's time and source bounds | 12 |
 | `chop_roles_grammar` | roles, serializable rules, explainable policy | 9 |
@@ -37,6 +37,7 @@ Sixteen portable C++17 modules (no JUCE, no host types), a headless composition 
 | `fractal_rhythm` | self-similar motif groove as nested events | 8 |
 | `chop_insight` | chop features, role suggestions, loop/tempo suggestions | 4 |
 | `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 23 |
+| `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
 | `plugin_host_adapter` | parameter manifest (version 2), host-time validation, bus rules | 6 |
 | `plugin_ui_adapter` | headless view models including the Orbit View | 8 |
 | `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 18 |

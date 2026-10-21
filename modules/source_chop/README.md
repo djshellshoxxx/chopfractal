@@ -12,6 +12,7 @@ Source metadata, chop markers, marker editing with undo/redo, region and snapsho
 - `regions()` and `snapshot()` (enabled chops, trims applied, immutable)
 - `preview()/applyProposal()` with `MergeMode::Replace|Merge`, one undo step
 - `detectTransients()`, `evenGrid()`, `snapToNearest()`, `snapToZeroCrossing()`, `computeSourceId()`
+- `ChopMap::rescaled(from, newInfo, inFrames, outFrames)`: copy with every marker position, trim and fade scaled by an exact integer rule, ids preserved (time-stretched source)
 - `serialize()` / `deserialize()` (schema 1)
 
 Public headers:
