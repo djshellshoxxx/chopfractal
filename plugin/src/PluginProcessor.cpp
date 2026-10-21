@@ -6,6 +6,9 @@
 #include <cmath>
 #include <cstring>
 
+#include <chopfractal/plugin_ui_adapter/capture_view.hpp>
+#include <chopfractal/plugin_ui_adapter/pads_view.hpp>
+
 #include "PluginEditor.h"
 
 namespace cf = chopfractal;
@@ -16,14 +19,21 @@ constexpr char kStateMagic[4] = {'C', 'F', 'P', 'L'};
 // project that uses nothing new keeps writing 1 and stays readable by older builds. Both are read.
 constexpr int kStateVersionV1 = 1;
 constexpr int kStateVersionV2 = 2;
-constexpr double kMaxSourceSeconds = 60.0;
-constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
 }  // namespace
+static_assert(ChopFractalProcessor::kMaxSourceSeconds == cf::capture::kMaxCaptureSeconds, "capture and file decoding share the 60 s limit");
+static_assert(ChopFractalProcessor::kMaxDecodedBytes == cf::capture::kMaxCaptureBytes, "capture and file decoding share the 100 MiB limit");
+
+// Main stereo in; main stereo out plus eight optional stereo aux outs ("Out 2" .. "Out 9"), disabled until the host enables them.
+ChopFractalProcessor::BusesProperties ChopFractalProcessor::makeBuses() {
+  auto p = BusesProperties()
+               .withInput("Input", juce::AudioChannelSet::stereo(), true)
+               .withOutput("Main", juce::AudioChannelSet::stereo(), true);
+  for (int i = 2; i <= 1 + cf::render::kMaxAuxBuses; ++i) p = p.withOutput("Out " + juce::String(i), juce::AudioChannelSet::stereo(), false);
+  return p;
+}
 
 ChopFractalProcessor::ChopFractalProcessor()
-    : AudioProcessor(BusesProperties()
-                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor(makeBuses()),
       apvts(*this, nullptr, "ChopFractal", createLayout()) {
   const auto& manifest = cf::host::parameterManifest();
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) paramPtrs_[i] = apvts.getRawParameterValue(manifest[i].id);
@@ -34,6 +44,9 @@ ChopFractalProcessor::ChopFractalProcessor()
   }
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
+  session_.attachPadMailbox(&renderer_.padMailbox());
+  takeBuffer_.reserve(cf::composition::kMaxTakeHits);
+  openHit_.fill(-1);
   startTimerHz(30);
 }
 
@@ -79,15 +92,42 @@ void ChopFractalProcessor::prepareToPlay(double sampleRate, int maximumExpectedS
   cf::render::Config cfg;
   cfg.sampleRate = sampleRate;
   cfg.maxBlock = maximumExpectedSamplesPerBlock > 0 ? maximumExpectedSamplesPerBlock : 2048;
+  // The aux outputs the host enabled for this run (JUCE calls prepareToPlay after every bus layout change).
+  int mask = 0, highest = 0;
+  for (int i = 1; i <= cf::render::kMaxAuxBuses && i < getBusCount(false); ++i)
+    if (auto* bus = getBus(false, i); bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() == 2) {
+      mask |= 1 << (i - 1);
+      highest = i;
+    }
+  cfg.auxBuses = highest;
+  auxMask_.store(mask);
+  {
+    const juce::ScopedLock lock(sessionLock_);
+    session_.setAuxBusesAvailable(highest);
+  }
   renderer_.prepare(cfg);
   sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+  if (capture_.onPrepare(sampleRate_.load(), getTotalNumInputChannels())) setStatusMessage(cf::ui::kCaptureReconfiguredText);
+}
+
+void ChopFractalProcessor::setNonRealtime(bool isNonRealtime) noexcept {
+  captureBlocked_.store(isNonRealtime);
+  AudioProcessor::setNonRealtime(isNonRealtime);
 }
 
 bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels());
+  int aux[cf::render::kMaxAuxBuses] = {};
+  for (int i = 0; i < cf::render::kMaxAuxBuses; ++i) aux[i] = layouts.getNumChannels(false, i + 1);
+  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels(), aux, cf::render::kMaxAuxBuses);
 }
 
-void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
+int ChopFractalProcessor::activeAuxBuses() const {
+  int n = 0;
+  for (int m = auxMask_.load(); m != 0; m &= m - 1) ++n;
+  return n;
+}
+
+void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
   const int frames = buffer.getNumSamples();
   const int channels = juce::jmin(2, buffer.getNumChannels());
@@ -120,6 +160,7 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   hostPlaying.store(tt.block.playing, std::memory_order_relaxed);
   usedFallbackTempo.store(tt.usedFallbackTempo, std::memory_order_relaxed);
   usedFallbackMeter.store(tt.usedFallbackMeter, std::memory_order_relaxed);
+  hostHasPosition.store(tt.block.positionValid, std::memory_order_relaxed);
   activeBpm.store(tt.block.bpm, std::memory_order_relaxed);
   hostBeatsPerBar.store(tt.timeSignature.numerator, std::memory_order_relaxed);
   hostBeatUnit.store(tt.timeSignature.denominator, std::memory_order_relaxed);
@@ -127,7 +168,72 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
 
-  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
+  // Capture reads the input before the renderer, whose output aliases it. Offline renders never record.
+  if (!isNonRealtime()) {
+    cf::capture::CaptureTransport ct;
+    ct.playing = tt.block.playing;
+    ct.positionValid = tt.block.positionValid;
+    ct.ppq = tt.block.ppq;
+    ct.bpm = tt.block.bpm;
+    capture_.process(buffer.getArrayOfReadPointers(), juce::jmin(2, getTotalNumInputChannels(), buffer.getNumChannels()), frames, ct);
+  }
+
+  // Performance pads: on-screen presses first (frame 0), then the MIDI notes at their own samples. Nothing here allocates.
+  int numPads = 0;
+  const bool padsOn = pv.get(cf::host::kEffectEnable) >= 0.5;
+  const bool recording = padsOn && recordArmed_.load(std::memory_order_relaxed) && tt.block.playing && tt.block.positionValid;
+  const double ppqPerFrame = tt.block.bpm / (60.0 * sampleRate_.load(std::memory_order_relaxed));
+  const auto addPad = [&](int frame, cf::render::PadEvent::Type type, int note, int velocity) {
+    if (numPads >= cf::render::kMaxPadEventsPerBlock) {
+      padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    cf::render::PadEvent& e = padEvents_[static_cast<std::size_t>(numPads++)];
+    e.frame = frame;
+    e.type = type;
+    e.note = static_cast<std::uint8_t>(note);
+    e.velocity = static_cast<std::uint8_t>(velocity);
+    if (type == cf::render::PadEvent::Type::NoteOn) padActivity_[static_cast<std::size_t>(note >> 5)].fetch_or(1u << (note & 31), std::memory_order_relaxed);
+    if (recording && type != cf::render::PadEvent::Type::AllNotesOff)
+      if (!takeQueue_.tryPush(TakeEvent{tt.block.ppq + frame * ppqPerFrame, e.note, e.velocity, type == cf::render::PadEvent::Type::NoteOn}))
+        takeDropped_.fetch_add(1, std::memory_order_relaxed);
+  };
+  {
+    UiPad u;
+    while (uiPadQueue_.tryPop(u))
+      addPad(0, u.kind == 2 ? cf::render::PadEvent::Type::AllNotesOff : (u.kind == 1 ? cf::render::PadEvent::Type::NoteOn : cf::render::PadEvent::Type::NoteOff), u.note, u.velocity);
+  }
+  if (!midi.isEmpty()) {
+    const int channel = padChannel_.load(std::memory_order_relaxed);
+    for (const auto meta : midi) {
+      const juce::MidiMessage msg = meta.getMessage();
+      if (channel != 0 && msg.getChannel() != channel) continue;
+      const int frame = juce::jlimit(0, frames - 1, meta.samplePosition);
+      if (msg.isNoteOn(false) && msg.getVelocity() > 0) addPad(frame, cf::render::PadEvent::Type::NoteOn, msg.getNoteNumber(), msg.getVelocity());
+      else if (msg.isNoteOff(true)) addPad(frame, cf::render::PadEvent::Type::NoteOff, msg.getNoteNumber(), 0);
+      else if (msg.isAllNotesOff() || msg.isAllSoundOff()) addPad(frame, cf::render::PadEvent::Type::AllNotesOff, 0, 0);
+    }
+  }
+  cf::render::LiveInput live;
+  live.pads = padEvents_.data();
+  live.numPads = numPads;
+  live.padParams = cf::host::toPadParams(pv);
+  // Aux outputs: the channels of bus i sit after the main channels, in bus order. Pointers only, nothing is allocated.
+  cf::render::AuxOutputs aux;
+  float* auxPtrs[cf::render::kMaxAuxBuses][2] = {};
+  float* const* writePtrs = buffer.getArrayOfWritePointers();
+  if (const int mask = auxMask_.load(std::memory_order_relaxed); mask != 0 && channels == 2) {
+    for (int i = 0; i < cf::render::kMaxAuxBuses; ++i) {
+      if (((mask >> i) & 1) == 0) continue;
+      const int first = getChannelIndexInProcessBlockBuffer(false, i + 1, 0);
+      if (first < 0 || first + 1 >= buffer.getNumChannels()) continue;
+      auxPtrs[i][0] = writePtrs[first];
+      auxPtrs[i][1] = writePtrs[first + 1];
+      aux.bus[i] = auxPtrs[i];
+      aux.count = i + 1;
+    }
+  }
+  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), writePtrs, channels, frames, live, aux);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
@@ -191,6 +297,12 @@ void ChopFractalProcessor::pollOutputStage() {
 
 void ChopFractalProcessor::pollAudioFlags() {
   pollOutputStage();
+  pollCapture();
+  {  // the project may have been loaded since the last poll: follow its MIDI channel
+    int channel = 0;
+    withSession([&channel](cf::composition::ProjectSession& s) { channel = s.padSettings().midiChannel; });
+    padChannel_.store(channel, std::memory_order_relaxed);
+  }
   {  // Groove Lab knobs: applied to the session (playback-time layer) only when one of them moved since the last poll
     const cf::host::ParamValues pv = currentParams();
     const std::array<double, 5> now = {pv.get(cf::host::kGrooveEnable), pv.get(cf::host::kGrooveTemplate), pv.get(cf::host::kGrooveSwing),
@@ -206,7 +318,9 @@ void ChopFractalProcessor::pollAudioFlags() {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
   if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
-  if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
+  const std::uint32_t crossings = midpointCount_.exchange(0);
+  pollPads(crossings > 0);  // before Evolve steps: the take is merged first, then the pattern evolves around it
+  if (crossings) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
     // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).
     const double chaos = currentParams().get(cf::host::kChaos);
@@ -326,6 +440,7 @@ std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(c
 }
 
 void ChopFractalProcessor::loadFileAsync(const juce::File& file, bool relink) {
+  if (!relink) clearUndoKeep();
   setStatusMessage("Loading " + file.getFileName() + "...");
   juce::WeakReference<ChopFractalProcessor> self(this);
   const std::uint64_t ticket = ++loadTicket_;
@@ -363,10 +478,15 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   bool v2 = false;
   {
     const juce::ScopedLock lock(sessionLock_);  // extras and A/B are captured in the same critical section as the rest: no torn state
-    auto saved = session_.saveState(embedSource.load());
-    if (!saved.ok() && embedSource.load()) {
-      setStatusMessage("The audio is too large to embed (" + juce::String(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024))) + " MB); the project references the file instead.");
-      saved = session_.saveState(false);  // reference it instead
+    // A source with no file behind it (a kept capture, a stretched loop) must always travel inside the project.
+    const bool pathless = session_.sourceNeedsEmbed();
+    const bool embed = embedSource.load() || pathless;
+    auto saved = session_.saveState(embed);
+    if (!saved.ok() && embed) {
+      const juce::String mb(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024)));
+      setStatusMessage(pathless ? "The captured audio is too large to embed (" + mb + " MB). Raise the embed limit or keep a shorter capture."
+                                : "The audio is too large to embed (" + mb + " MB); the project references the file instead.");
+      saved = session_.saveState(false);  // reference it instead (a pathless source is then saved without its audio)
     }
     if (saved.ok()) {
       blob = std::move(saved.value());
@@ -382,6 +502,8 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
 }
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
+  clearUndoKeep();
+  discardTake();  // a take waiting for a merge belongs to the project being replaced
   const std::uint64_t ticket = ++loadTicket_;  // a file load or audio restore still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};
@@ -480,6 +602,184 @@ void ChopFractalProcessor::restoreAudio(const std::string& path, cf::SourceId id
 }
 
 // ---------------------------------------------------------------------------------------------
+// input capture
+// ---------------------------------------------------------------------------------------------
+
+cf::Status ChopFractalProcessor::armCapture(cf::capture::CaptureMode mode, int bars, double maxSeconds) {
+  auto refuse = [this](cf::ErrorCode code, const char* text) {
+    setStatusMessage(text);
+    return cf::Status(cf::makeError(code, text));
+  };
+  if (captureBlocked_.load()) return refuse(cf::ErrorCode::Conflict, cf::ui::kCaptureOfflineText);
+  if (captureInputChannels() < 1) return refuse(cf::ErrorCode::InvalidArgument, cf::ui::kCaptureNoInputText);
+  if (keepInFlight_.load()) return refuse(cf::ErrorCode::Conflict, "Wait for the capture to finish being kept.");
+  if (capture_.status().state == cf::capture::CaptureState::Captured) discardCapture();
+  cf::capture::ArmSettings s;
+  s.mode = mode;
+  s.channels = juce::jmin(2, captureInputChannels());
+  s.sampleRate = sampleRate_.load();
+  s.bars = bars;
+  s.barQuarters = 4.0 * static_cast<double>(hostBeatsPerBar.load()) / static_cast<double>(juce::jmax(1, hostBeatUnit.load()));
+  s.bpmHint = activeBpm.load();
+  s.maxSeconds = maxSeconds;
+  const cf::Status st = capture_.arm(s);
+  if (!st.ok()) {
+    setStatusMessage(juce::String::fromUTF8(st.error().message.c_str()));
+    return st;
+  }
+  clearUndoKeep();  // a new capture ends the undo window of the previous Keep
+  lastCaptureState_ = cf::capture::CaptureState::Armed;
+  setStatusMessage({});
+  return {};
+}
+
+cf::ui::CaptureUiInput ChopFractalProcessor::captureUiInput(cf::capture::CaptureMode mode, int bars, double maxSeconds) {
+  cf::ui::CaptureUiInput in;
+  in.status = capture_.status();
+  in.mode = mode;
+  in.bars = bars;
+  in.maxSeconds = maxSeconds;
+  in.bpm = activeBpm.load();
+  in.barQuarters = 4.0 * static_cast<double>(hostBeatsPerBar.load()) / static_cast<double>(juce::jmax(1, hostBeatUnit.load()));
+  in.sampleRate = sampleRate_.load();
+  in.channels = juce::jmax(1, juce::jmin(2, captureInputChannels()));
+  in.hostPlaying = hostPlaying.load();
+  in.hostHasPosition = hostHasPosition.load();
+  in.canUndoKeep = canUndoKeep_.load();
+  in.keepInFlight = keepInFlight_.load();
+  in.blocked = captureBlocked_.load();
+  in.noInput = captureInputChannels() < 1;
+  withSession([&](cf::composition::ProjectSession& s) {
+    in.hasSource = s.hasSource();
+    in.hasPattern = s.pattern() != nullptr;
+  });
+  return in;
+}
+
+void ChopFractalProcessor::pollCapture() {
+  capture_.reap();
+  const cf::capture::CaptureStatus st = capture_.status();
+  if (st.state == lastCaptureState_) return;
+  const bool ended = st.state == cf::capture::CaptureState::Captured || (st.state == cf::capture::CaptureState::Idle && st.ended == cf::capture::EndReason::Reconfigured);
+  lastCaptureState_ = st.state;
+  if (!ended) return;
+  const double seconds = static_cast<double>(juce::jmin(st.framesCaptured, st.capacityFrames)) / juce::jmax(1.0, sampleRate_.load());
+  const cf::ui::CaptureNotice n = cf::ui::captureEndNotice(st.ended, seconds);
+  if (!n.text.empty()) setStatusMessage(juce::String::fromUTF8(n.text.c_str()));
+}
+
+void ChopFractalProcessor::clearUndoKeep() {
+  keepUndo_.clear();
+  undoToEmpty_ = false;
+  canUndoKeep_.store(false);
+}
+
+void ChopFractalProcessor::keepCaptureAsync(bool chopAfter) {
+  if (capture_.status().state != cf::capture::CaptureState::Captured) {
+    setStatusMessage("There is no capture to keep.");
+    return;
+  }
+  if (keepInFlight_.exchange(true)) return;
+  // Undo Keep: snapshot the project and keep the old audio by pointer, before anything changes.
+  clearUndoKeep();
+  withSession([&](cf::composition::ProjectSession& s) {
+    if (!s.hasSource()) {
+      undoToEmpty_ = true;
+    } else if (!keepUndo_.capture(s).ok()) {
+      keepUndo_.clear();  // too large to snapshot: Keep still works, only the undo is unavailable
+    }
+  });
+  preKeepEmbed_ = embedSource.load();
+  setStatusMessage(cf::ui::kCaptureKeepingText);
+  const std::uint64_t ticket = ++loadTicket_;
+  juce::WeakReference<ChopFractalProcessor> self(this);
+  loadPool_.addJob([self, this, chopAfter, ticket] {
+    auto taken = capture_.take();  // the only O(n) work; the audio thread never touches a Captured buffer
+    std::shared_ptr<const cf::render::SourceData> data;
+    std::string name;
+    bool wrapped = false;
+    double seconds = 0.0;
+    if (taken.ok()) {
+      auto d = std::make_shared<cf::render::SourceData>();
+      d->channels = taken.value().channels;
+      d->sampleRate = taken.value().sampleRate;
+      d->frames = taken.value().frames;
+      d->samples = std::move(taken.value().samples);
+      wrapped = taken.value().wrapped;
+      seconds = static_cast<double>(d->frames) / juce::jmax(1, d->sampleRate);
+      data = std::move(d);
+      name = ("Capture " + juce::Time::getCurrentTime().formatted("%Y-%m-%d %H:%M")).toStdString();
+    }
+    const bool failed = !taken.ok();
+    juce::MessageManager::callAsync([self, ticket, data, name, chopAfter, wrapped, seconds, failed] {
+      if (self != nullptr) self->finishKeep(ticket, data, name, chopAfter, wrapped, seconds, failed);
+    });
+  });
+}
+
+void ChopFractalProcessor::finishKeep(std::uint64_t ticket, std::shared_ptr<const cf::render::SourceData> data, std::string name, bool chopAfter, bool wrapped,
+                                      double seconds, bool failed) {
+  keepInFlight_.store(false);
+  if (failed || !data) {
+    clearUndoKeep();
+    setStatusMessage("The capture could not be kept.");
+    return;
+  }
+  if (ticket != loadTicket_.load()) {  // a project load replaced the session while the audio was moving: do not overwrite it
+    clearUndoKeep();
+    setStatusMessage("Keep cancelled: another project was loaded.");
+    return;
+  }
+  cf::Status st;
+  cf::SourceId id{};
+  withSession([&](cf::composition::ProjectSession& s) {
+    st = s.loadCapturedSource(data, name);
+    if (st.ok()) {
+      id = s.chopMap()->info().id;
+      if (chopAfter) {
+        auto setup = s.smartSetup(usedFallbackTempo.load() ? 0.0 : activeBpm.load());
+        if (!setup.ok()) setStatusMessage(juce::String::fromUTF8(setup.error().message.c_str()));
+      }
+    }
+  });
+  if (!st.ok()) {
+    clearUndoKeep();
+    setStatusMessage(juce::String::fromUTF8(st.error().message.c_str()));
+    return;
+  }
+  keptSourceId_ = id;
+  embedSource = true;  // the captured audio has no file: it is saved inside the project
+  canUndoKeep_.store(keepUndo_.available() || undoToEmpty_);
+  juce::String text = cf::ui::kCaptureSavedInsideText;
+  const std::string ring = cf::ui::captureKeptRingText(wrapped, seconds);
+  if (!ring.empty()) text = juce::String::fromUTF8(ring.c_str()) + " " + text;
+  setStatusMessage(text);
+}
+
+bool ChopFractalProcessor::undoKeep() {
+  if (!canUndoKeep_.load()) return false;
+  cf::Status st;
+  withSession([&](cf::composition::ProjectSession& s) {
+    if (!s.chopMap() || s.chopMap()->info().id != keptSourceId_) {
+      st = cf::makeError(cf::ErrorCode::Conflict, "The kept capture is no longer the source.");
+    } else if (undoToEmpty_) {
+      s.clearSource();
+    } else {
+      st = keepUndo_.restore(s);
+    }
+  });
+  if (!st.ok()) {
+    clearUndoKeep();
+    setStatusMessage(juce::String::fromUTF8(st.error().message.c_str()));
+    return false;
+  }
+  embedSource = preKeepEmbed_;
+  clearUndoKeep();
+  setStatusMessage("Restored the source from before Keep.");
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------
 // export on a worker thread
 // ---------------------------------------------------------------------------------------------
 
@@ -570,3 +870,137 @@ void ChopFractalProcessor::finishExport(const cf::Result<cf::composition::Export
 juce::AudioProcessorEditor* ChopFractalProcessor::createEditor() { return new ChopFractalEditor(*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ChopFractalProcessor(); }
+
+// ---------------------------------------------------------------------------------------------
+// performance pads (F07)
+// ---------------------------------------------------------------------------------------------
+
+void ChopFractalProcessor::padTrigger(int note, int velocity, bool on) {
+  if (note < 0 || note > 127) return;
+  UiPad u;
+  u.note = static_cast<std::uint8_t>(note);
+  u.velocity = static_cast<std::uint8_t>(juce::jlimit(1, 127, velocity));
+  u.kind = on ? 1 : 0;
+  if (!uiPadQueue_.tryPush(u)) padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void ChopFractalProcessor::padAllNotesOff() {
+  UiPad u;
+  u.kind = 2;
+  if (!uiPadQueue_.tryPush(u)) padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+cf::Status ChopFractalProcessor::setPadSettings(const cf::composition::PadSettings& settings) {
+  cf::Status st;
+  withSession([&](cf::composition::ProjectSession& s) { st = s.setPadSettings(settings); });
+  if (st.ok()) padChannel_.store(settings.midiChannel, std::memory_order_relaxed);
+  else setStatusMessage(juce::String(st.error().message));
+  return st;
+}
+
+cf::Status ChopFractalProcessor::setChokeGroup(cf::ChopId chop, std::uint8_t group) {
+  cf::Status st;
+  withSession([&](cf::composition::ProjectSession& s) { st = s.setChokeGroup(chop, group); });
+  if (!st.ok()) setStatusMessage(juce::String(st.error().message));
+  return st;
+}
+
+cf::composition::PadSettings ChopFractalProcessor::padSettings() {
+  cf::composition::PadSettings out;
+  withSession([&](cf::composition::ProjectSession& s) { out = s.padSettings(); });
+  return out;
+}
+
+std::array<std::uint32_t, 4> ChopFractalProcessor::takePadActivity() {
+  std::array<std::uint32_t, 4> out{};
+  for (std::size_t i = 0; i < out.size(); ++i) out[i] = padActivity_[i].exchange(0, std::memory_order_relaxed);
+  return out;
+}
+
+void ChopFractalProcessor::setRecordArmed(bool armed) {
+  if (!armed) {
+    recordArmed_.store(false);  // the next poll merges what was played
+    return;
+  }
+  bool ready = false;
+  withSession([&](cf::composition::ProjectSession& s) { ready = s.pattern() != nullptr && s.chops() && !s.chops()->chops.empty(); });
+  if (!ready) {
+    setStatusMessage(cf::ui::kPadNoPatternText);
+    return;
+  }
+  recordArmed_.store(true);
+  const bool noPosition = hostPlaying.load() && !hostHasPosition.load();
+  setStatusMessage(noPosition ? cf::ui::kPadNoPositionText : cf::ui::kPadArmedText);
+}
+
+void ChopFractalProcessor::discardTake() {
+  TakeEvent e;
+  while (takeQueue_.tryPop(e)) {
+  }
+  takeBuffer_.clear();
+  openHit_.fill(-1);
+  takeCount_.store(0);
+  takeFullReported_ = false;
+}
+
+void ChopFractalProcessor::pollPads(bool midpointCrossed) {
+  TakeEvent e;
+  while (takeQueue_.tryPop(e)) {
+    if (e.note > 127) continue;
+    if (e.on) {
+      if (takeBuffer_.size() >= cf::composition::kMaxTakeHits) {
+        if (!takeFullReported_) {
+          takeFullReported_ = true;
+          setStatusMessage(cf::ui::kPadTakeFullText);
+        }
+        continue;
+      }
+      cf::composition::TakeHit h;
+      h.ppqOn = e.ppq;
+      h.note = e.note;
+      h.velocity = e.velocity;
+      takeBuffer_.push_back(h);
+      openHit_[e.note] = static_cast<int>(takeBuffer_.size()) - 1;
+    } else {
+      const int i = openHit_[e.note];
+      if (i >= 0 && i < static_cast<int>(takeBuffer_.size())) takeBuffer_[static_cast<std::size_t>(i)].ppqOff = e.ppq;
+      openHit_[e.note] = -1;
+    }
+  }
+  takeCount_.store(static_cast<int>(takeBuffer_.size()));
+  const bool playing = hostPlaying.load();
+  const bool stopped = wasPlayingForTake_ && !playing;
+  wasPlayingForTake_ = playing;
+  if (!takeBuffer_.empty() && (midpointCrossed || stopped || !recordArmed_.load())) mergePendingTake();
+}
+
+void ChopFractalProcessor::mergePendingTake() {
+  const std::vector<cf::composition::TakeHit> hits = takeBuffer_;
+  discardTake();
+  const cf::host::ParamValues pv = currentParams();
+  withSession([&](cf::composition::ProjectSession& s) {
+    const cf::composition::PadSettings ps = s.padSettings();
+    cf::composition::TakeOptions opt;
+    opt.quantizeDivision = ps.quantizeDivision;
+    opt.triplet = ps.quantizeTriplet;
+    opt.merge = ps.merge;
+    opt.baseNote = ps.baseNote;
+    const cf::render::PadParams pp = cf::host::toPadParams(pv);
+    opt.curve = pp.curve;
+    opt.mode = pp.mode;
+    auto r = s.mergeTake(hits, opt);
+    if (!r.ok()) {
+      setStatusMessage(r.error().code == cf::ErrorCode::InvalidArgument ? juce::String(cf::ui::kPadNoPatternText) : juce::String(r.error().message));
+      return;
+    }
+    cf::ui::PadTakeCounts c;
+    c.added = r.value().added;
+    c.skippedLocked = r.value().skippedLocked;
+    c.skippedCap = r.value().skippedCap;
+    c.skippedUnmapped = r.value().skippedUnmapped;
+    c.skippedDuplicate = r.value().skippedDuplicate;
+    c.eventCap = s.pattern() ? s.pattern()->settings.maxEvents : c.eventCap;
+    const std::string text = cf::ui::padTakeNotice(c);
+    if (!text.empty()) setStatusMessage(text);
+  });
+}

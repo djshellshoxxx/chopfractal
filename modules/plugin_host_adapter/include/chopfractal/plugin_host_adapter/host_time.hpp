@@ -33,5 +33,8 @@ TimeTranslation translateHostTime(const HostTimeInfo& host, double manualBpm, Ti
 
 // Plugin bus layouts the shell accepts: mono or stereo, with matching input and output.
 bool isSupportedBusLayout(int inputChannels, int outputChannels);
+// The same with the auxiliary stereo outputs (F11): auxOutputChannels[i] is the channel count of aux bus i, 0 when the host
+// left it disabled. Each aux bus must be 0 or 2 channels, and enabling any of them requires a stereo main input and output.
+bool isSupportedBusLayout(int inputChannels, int outputChannels, const int* auxOutputChannels, int numAux);
 
 }  // namespace chopfractal::host

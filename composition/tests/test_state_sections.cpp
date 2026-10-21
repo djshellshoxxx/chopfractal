@@ -129,7 +129,7 @@ CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
   ProjectSession a;
   CHECK(statefix::fixtureSession(a));
   CHECK(a.setSection(makeSection(25, 4, 0x01)).ok());
-  CHECK(a.setSection(makeSection(10, 4, 0x02)).ok());
+  CHECK(a.setSection(makeSection(17, 4, 0x02)).ok());
   CHECK(a.setSection(makeSection(20, 4, 0x03)).ok());
   const auto saved = a.saveState(false).value();
 
@@ -139,7 +139,7 @@ CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
     ++groove;
     return makeError(ErrorCode::Corrupt, "nope" + std::to_string(s.bytes.size()));
   });
-  b.registerSectionDecoder(10, "pads", [&](const StateSection& s) -> Status {
+  b.registerSectionDecoder(17, "pads", [&](const StateSection& s) -> Status {
     ++pads;
     return s.bytes.size() == 4 ? Status{} : Status{makeError(ErrorCode::Corrupt, "size")};
   });
@@ -147,14 +147,14 @@ CHOP_TEST(decoder_failure_drops_only_that_section_with_one_warning) {
   CHECK_EQ(groove, 1);
   CHECK_EQ(pads, 1);
   CHECK(b.section(25) == nullptr);
-  CHECK(b.section(10) != nullptr && b.section(20) != nullptr);
+  CHECK(b.section(17) != nullptr && b.section(20) != nullptr);
   CHECK(b.pattern() != nullptr);
   CHECK_EQ(countWarnings(b, "Some groove settings could not be restored."), 1);
   // The dropped section is not written back.
   auto again = b.saveState(false).value();
   ProjectSession c;
   CHECK(c.loadState(again.data(), again.size(), {}).ok());
-  CHECK(c.section(25) == nullptr && c.section(10) != nullptr);
+  CHECK(c.section(25) == nullptr && c.section(17) != nullptr);
   // Decoders do not run for a project without the section, and unregistering stops them.
   ProjectSession d;
   int calls = 0;

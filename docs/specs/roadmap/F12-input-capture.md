@@ -1,9 +1,20 @@
 # F12 Input capture
 
-**Status:** Ready for development  **Size:** L (8 engineer-days)  **Depends on:** F00 (WavePanel, StatusBar), F01 only for the shared UI-pref trailing block (optional)  **Blocks:** F14 (capture + stretch workflow is a documented combination, not a code dependency)
+**Status:** Engine, composition, processor and view model implemented on `feat/AIO-audio-io`; the capture strip in the editor is wired by the GUI rewrite from section 12  **Size:** L (8 engineer-days)  **Depends on:** F00 (WavePanel, StatusBar), F01 only for the shared UI-pref trailing block (optional)  **Blocks:** F14 (capture + stretch workflow is a documented combination, not a code dependency)
 
-## 0. Implementation status (audited 2026-10-20)
-**Not started.** Source loading is still file-only (Load Loop, drag-and-drop, project restore). The plugin has no capture path; `Standalone` builds exist for Windows, so input capture also matters there (the engine must tolerate the standalone wrapper's device input). Decisions recorded by the audit:
+## 0. Implementation status
+**Implemented (AIO branch, 2026-10-21):** `modules/input_capture` (engine, 18 unit tests incl. allocation and threaded tests, TSan step in CI), `ProjectSession::loadCapturedSource` and the pathless-source embed rule (`sourceNeedsEmbed` already existed from F14, `SourceReplaceUndo` is reused), processor wiring (`armCapture`, `startCapture`, `stopCapture`, `discardCapture`, `keepCaptureAsync`, `undoKeep`, `clearUndoKeep`, `captureUiInput`, forced embed in `getStateInformation`, offline guard, `onPrepare`), the portable view model `plugin_ui_adapter/capture_view.hpp`, and the shell tests in `plugin/tests/test_capture_shell.cpp`. **Not built here:** the WavePanel strip itself (the GUI is being rewritten; section 12 is the contract it wires).
+
+Decisions made while implementing (these override the text above where they differ):
+- `CaptureEngine::arm` requires Idle; a Captured capture must be discarded or taken first. The processor's `armCapture` discards an unkept capture itself after the editor has asked the user ("Discard the unsaved capture?").
+- `status().peak` is the largest |sample| since Arm and `status().level` the largest of the last block (the meter bar uses `level`, the peak hold uses `peak`). Armed captures meter the input too. `status()` also reports `channels` and `sampleRate` of the capture.
+- Free mode clamps its ring to the limits instead of refusing; Synced refuses with `LimitExceeded` (hint = largest frame count) when the nominal length does not fit, `OutOfRange` over 60 s.
+- Synced start and end use the same rounding as `Renderer::schedule` and decide by the rounded frame offset, so the result is identical for every block size, including blocks of one frame.
+- `onPrepare` aborts only when the sample rate or the input channel count differs from the armed one (hosts call `prepareToPlay` for other reasons), and it keeps partial audio as Captured.
+- A stop request and a start request in the same block resolve to the stop (nothing is recorded).
+- Undo Keep after Keep into an empty project clears the source again. The undo is refused (and dropped) when the current source is no longer the kept capture.
+
+Audit notes of 2026-10-20 (written before implementation, kept for the reasoning): source loading was file-only (Load Loop, drag-and-drop, project restore) and the plugin had no capture path; `Standalone` builds exist for Windows, so input capture also matters there (the engine must tolerate the standalone wrapper's device input). Decisions recorded by the audit:
 - The optional shared UI-pref block mentioned in the status line is the capture metadata section, F01 extras tag 12 (cap 64 KiB); it is optional and the feature works without F01.
 - The editor in the as-built layout has no free row: the capture controls go into WavePanel's top-left overlay (Arm, Capture, Stop, Keep, Discard as 52 px buttons plus the sync combo) and the 120 x 8 input meter sits at its right edge; WavePanel stays 920 x 120.
 - Shared helper `SourceReplaceUndo` / `sourceNeedsEmbed()` is created by whichever of F12/F14 lands first (roadmap README); the confirmation for replacing a loop that has a pattern is F05's `requestLoad`.
@@ -157,6 +168,27 @@ Manual QA: 1) REAPER, plugin on a track fed by a drum loop item, 4/4 at 120 BPM.
 - 92 MB allocation latency/OOM in 32-bit-address hosts: allocate on Arm, catch `std::bad_alloc` and return `LimitExceeded` ("Not enough memory for that capture length."); not an audio-thread concern.
 - Loss of an unkept capture on editor/project close: tooltip warns; capture stays in the processor while the plugin instance lives (closing the editor does not discard).
 - Silent loss of pathless audio on save: forced embed + size message; tested.
+
+## 12. GUI command list (what each control must call)
+The editor reads `ChopFractalProcessor::captureUiInput(mode, bars, maxSeconds)` on its 30 Hz timer and passes it to `ui::buildCaptureView()` (`plugin_ui_adapter/capture_view.hpp`); every label, visibility and enable flag below comes from the returned `CaptureView`. Messages already reach the status bar through `statusMessage()`; the editor shows them, it does not compose them.
+
+| Control | Calls |
+|---|---|
+| "Capture" toggle (expand the strip) | UI only. Empty waveform text: `view.emptyWaveText` |
+| "Capture mode" combo (`ui::kCaptureModeItems`) | UI state `mode`; shows "Capture bars" when `view.showBars`, "Max length" when `view.showMaxLength` |
+| "Capture bars" combo (`ui::kCaptureBarsChoices`) / "Max length" combo (`ui::kCaptureMaxSecondsChoices`) | UI state; label `view.lengthLabel`; both boxes disabled unless `view.optionsEnabled` |
+| "Arm" | enabled by `view.armEnabled`; when `view.armNeedsConfirm` ask "Discard the unsaved capture?" (buttons "Discard" / "Cancel"); then `proc.armCapture(mode, bars, maxSeconds)`; a refusal is returned and already in `statusMessage()` |
+| "Capture" | `view.captureEnabled` -> `proc.startCapture()` |
+| "Stop" | `view.stopEnabled` -> `proc.stopCapture()` |
+| "Keep" | `view.keepEnabled`; when `view.keepNeedsConfirm` show `view.keepConfirmTitle` / `view.keepConfirmMessage` (buttons "Keep" / "Cancel"); then `proc.keepCaptureAsync(chopAfterKeepCheckbox)` |
+| "Discard" | `view.discardEnabled` -> `proc.discardCapture()` |
+| "Chop after Keep" checkbox (default on) | UI state, passed to Keep |
+| "Undo Keep" | visible when `view.undoKeepVisible` -> `proc.undoKeep()` |
+| State label, input meter | `view.stateLabel`, `view.meter`, `view.meterPeak`, `view.clipped` + `view.meterText` ("Clipped", never colour alone), `view.meterTooltip`, strip tooltip `view.stripTooltip` |
+| Generate, Mutate, Load, Load Loop, Detect | call `proc.clearUndoKeep()` first (the undo window ends); loads through `loadFileAsync` and `setStateInformation` already do it |
+| Armed/Capturing when the editor closes | nothing: the capture lives in the processor |
+
+Keyboard order for the strip: Mode, Bars, Arm, Capture, Stop, Keep, Discard. Every control needs `setTitle`.
 
 ## 11. Implementation steps
 1. Scaffold `modules/input_capture` (module.json, CMake, README via gen_module_docs, empty engine), add to root CMake and `check_modules`; CI green.

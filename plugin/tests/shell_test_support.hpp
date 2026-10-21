@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "PluginProcessor.h"
@@ -68,9 +69,11 @@ inline void prepare(ChopFractalProcessor& p, int block = 512) {
   p.prepareToPlay(48000.0, block);
 }
 
-inline void makeSession(ChopFractalProcessor& p, std::uint64_t seed = 42) {
+// `path` empty means a source with no file behind it (saved inside the project whatever the embed flag says); pass a
+// path to test reference-only projects.
+inline void makeSession(ChopFractalProcessor& p, std::uint64_t seed = 42, const std::string& path = "") {
   p.withSession([&](cf::composition::ProjectSession& s) {
-    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
+    CHECK(s.loadSource(drumLoop(), "loop", path).ok());
     cf::composition::DetectOptions d;
     d.analysis.sensitivity = 0.8;
     CHECK(s.applyChops(d).ok());

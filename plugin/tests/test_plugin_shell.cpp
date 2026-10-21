@@ -89,7 +89,7 @@ CHOP_TEST(only_matching_mono_and_stereo_bus_layouts_are_supported) {
   CHECK(p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::mono())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::mono(), juce::AudioChannelSet::stereo())));
   CHECK(!p.isBusesLayoutSupported(layout(juce::AudioChannelSet::create5point1(), juce::AudioChannelSet::create5point1())));
-  CHECK(!p.acceptsMidi() && !p.producesMidi() && p.getTailLengthSeconds() == 0.0);
+  CHECK(p.acceptsMidi() && !p.producesMidi() && !p.isMidiEffect() && p.getTailLengthSeconds() == 0.0);
   CHECK(p.getNumPrograms() >= 1 && p.getProgramName(0).isNotEmpty());  // the VST3 validator rejects unnamed programs
 }
 
@@ -143,7 +143,7 @@ CHOP_TEST(missing_host_tempo_falls_back_visibly_and_stays_valid) {
 CHOP_TEST(project_state_round_trips_parameters_pattern_history_and_audio) {
   ChopFractalProcessor a;
   prepare(a);
-  makeSession(a);
+  makeSession(a, 42, "/nonexistent/loop.wav");  // file-backed: the light save below references the file instead of embedding it
   setParam(a, "density", 0.9f);
   setParam(a, "allow_reverse", 1.f);
   a.embedSource = true;
@@ -292,7 +292,7 @@ CHOP_TEST(effect_parameters_reach_generation_and_the_state_round_trips) {
 CHOP_TEST(embed_flag_and_manual_tempo_survive_a_save_and_reload) {
   ChopFractalProcessor p;
   prepare(p);
-  makeSession(p);
+  makeSession(p, 42, "/nonexistent/loop.wav");
   p.embedSource = true;
   p.manualBpm = 97.5;
   juce::MemoryBlock blob;
