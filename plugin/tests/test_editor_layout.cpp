@@ -18,6 +18,7 @@ struct PanelBounds {
 const PanelBounds kPanels[] = {
     {"StatusBar", {10, 830, 920, 70}},
     {"OrbitPanel", {824, 720, 106, 106}},
+    {"PatternPanel", {10, 484, 920, 230}},
     {"HistoryPanel", {10, 720, 808, 106}},
 };
 }  // namespace

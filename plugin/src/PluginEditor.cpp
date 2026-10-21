@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 
 using editor_theme::laneColour;
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_), history_(model_, commands_) {
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_), history_(model_, commands_), pattern_(model_, commands_) {
   model_.addListener(this);
   setSize(940, 912);
   setResizable(false, false);
@@ -41,6 +41,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   addAndMakeVisible(status_);
   addAndMakeVisible(orbit_);
   addAndMakeVisible(history_);
+  addAndMakeVisible(pattern_);
   load_.onClick = [this] { commands_.chooseFile(); };
   detect_.onClick = [this] { commands_.detectChops(static_cast<DetectChoice>(detectMode_.getSelectedId())); };
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
@@ -212,7 +213,7 @@ juce::String ChopFractalEditor::getTooltip() {
   const auto point = getMouseXYRelative();
   if (waveArea_.contains(point))
     return "Source waveform: click a chop to select and audition it; drag across sections to select several. Shift-click adds a marker; Alt-click removes the nearest marker. Drop a sample anywhere to load it.";
-  if (patternArea_.contains(point))
+  if (pattern_.getBounds().contains(point))
     return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
   if (history_.getBounds().contains(point))
     return "Variation family tree: click a node to recall it, at the next loop boundary during playback. Right-click for favorite, rename, compare and delete actions. Each Generate, Mutate, Zoom and completed edit adds a branch.";
@@ -312,7 +313,7 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
-  patternArea_ = area.removeFromTop(230);
+  pattern_.setBounds(area.removeFromTop(230));
   area.removeFromTop(6);
   status_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   auto bottom = area.removeFromTop(area.getHeight() - 2);
@@ -341,7 +342,6 @@ void ChopFractalEditor::refresh(bool force) {
   if (force || rebuilt) repaint();
   else if (playing || lastPlaying_) {  // only the playhead views change while the transport runs
     orbit_.repaint();
-    repaint(patternArea_);
   }
   lastPlaying_ = playing;
 }
@@ -435,62 +435,6 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     g.drawText(juce::String(markerNumber), x + 2, waveArea_.getY(), 28, 14, juce::Justification::left);
   }
 
-  // Pattern grid: lanes by chop, numbered so colour is never the only indicator.
-  g.setColour(editor_theme::canvas());
-  g.fillRect(patternArea_);
-  const int lanes = std::max(1, static_cast<int>(model_.view().chops.size()));
-  const float laneH = static_cast<float>(patternArea_.getHeight()) / static_cast<float>(lanes);
-  const float w = static_cast<float>(patternArea_.getWidth());
-  g.setColour(juce::Colours::white.withAlpha(0.12f));
-  for (double x : model_.view().pattern.beatLines) g.drawVerticalLine(patternArea_.getX() + static_cast<int>(x * w), static_cast<float>(patternArea_.getY()), static_cast<float>(patternArea_.getBottom()));
-  for (std::size_t b = 0; b < model_.view().pattern.barLines.size(); ++b) {
-    g.setColour(juce::Colours::white.withAlpha(0.35f));
-    const int x = patternArea_.getX() + static_cast<int>(model_.view().pattern.barLines[b] * w);
-    g.drawVerticalLine(x, static_cast<float>(patternArea_.getY()), static_cast<float>(patternArea_.getBottom()));
-    if (b < model_.view().pattern.barLocked.size() && model_.view().pattern.barLocked[b]) {
-      g.setColour(editor_theme::accentRed());
-      g.drawText("locked", x + 3, patternArea_.getBottom() - 16, 60, 14, juce::Justification::left);
-    }
-  }
-  for (const auto& r : model_.view().pattern.rects) {
-    const float inset = static_cast<float>(r.depth) * 3.0f;
-    const float y = static_cast<float>(patternArea_.getY()) + static_cast<float>(std::max(0, r.chopIndex)) * laneH + inset;
-    juce::Rectangle<float> rect(static_cast<float>(patternArea_.getX()) + static_cast<float>(r.x0) * w, y, std::max(2.0f, static_cast<float>(r.x1 - r.x0) * w - 1.0f),
-                                std::max(4.0f, laneH - 2.0f - 2.0f * inset));
-    g.setColour(laneColour(r.chopIndex).withAlpha(r.depth > 0 ? 0.95f : 0.75f));
-    g.fillRect(rect);
-    if (r.id == model_.selected() || std::find(model_.selectedHits().begin(), model_.selectedHits().end(), r.id) != model_.selectedHits().end()) {
-      g.setColour(juce::Colours::white);
-      g.drawRect(rect, 2.0f);
-    } else if (r.locked || r.hasChild) {
-      g.setColour(r.locked ? editor_theme::accentRed() : juce::Colours::white);
-      g.drawRect(rect, 1.0f);
-    }
-    if (rect.getWidth() > 14.0f && rect.getHeight() > 12.0f) {
-      g.setColour(juce::Colours::black);
-      g.drawText(juce::String(r.chopIndex + 1), rect.toNearestInt(), juce::Justification::centred);
-    }
-  }
-  if (model_.view().pattern.rects.empty()) {
-    g.setColour(juce::Colours::grey);
-    g.drawText("Detect chops, then press Generate.", patternArea_, juce::Justification::centred);
-  }
-
-  // Ghost outline of the hit being dragged (the edit is applied on release).
-  if (dragMode_ != DragMode::None)
-    for (const auto& r : model_.view().pattern.rects)
-      if (r.id == dragId_) {
-        const float pw = static_cast<float>(patternArea_.getWidth());
-        const float lh = static_cast<float>(patternArea_.getHeight()) / static_cast<float>(std::max<std::size_t>(1, model_.view().chops.size()));
-        const float dx = static_cast<float>(dragNow_.x - dragStart_.x);
-        float x = static_cast<float>(patternArea_.getX()) + static_cast<float>(r.x0) * pw;
-        float width = static_cast<float>(r.x1 - r.x0) * pw;
-        if (dragMode_ == DragMode::Move) x += dx; else width = std::max(2.0f, width + dx);
-        g.setColour(juce::Colours::white.withAlpha(0.8f));
-        g.drawRect(x, static_cast<float>(patternArea_.getY()) + static_cast<float>(r.chopIndex) * lh + 2.0f, width, lh - 4.0f, 1.5f);
-        break;
-      }
-
   if (selectingSections_) {
     const auto rectangle = juce::Rectangle<int>(selectionStart_, selectionEnd_);
     g.setColour(editor_theme::accentBlue().withAlpha(0.2f));
@@ -503,16 +447,12 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
 void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
   const auto pt = e.getPosition();
   selectingSections_ = false;
-  if (!e.mods.isShiftDown() && !e.mods.isAltDown() && !e.mods.isPopupMenu() &&
-      ((waveArea_.contains(pt) && model_.view().sourceFrames > 0) || (patternArea_.contains(pt) && !model_.editMode()))) {
+  if (!e.mods.isShiftDown() && !e.mods.isAltDown() && !e.mods.isPopupMenu() && waveArea_.contains(pt) && model_.view().sourceFrames > 0) {
     grabKeyboardFocus();
-    dragMode_ = DragMode::None;
     selectingSections_ = true;
-    selectingWave_ = waveArea_.contains(pt);
     selectionStart_ = selectionEnd_ = pt;
     updateSectionSelection(pt);
-    if (selectingWave_)
-      for (const auto id : model_.selectedChops()) { commands_.audition(id); break; }
+    for (const auto id : model_.selectedChops()) { commands_.audition(id); break; }
     return;
   }
   if (waveArea_.contains(pt) && model_.view().sourceFrames > 0) {
@@ -524,37 +464,6 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
       commands_.addMarkerAt(frame);
     else
       commands_.auditionFrame(frame);
-  } else if (patternArea_.contains(pt)) {
-    grabKeyboardFocus();
-    model_.clearSelection();
-    dragMode_ = DragMode::None;
-    const double w = static_cast<double>(patternArea_.getWidth());
-    const double fx = static_cast<double>(pt.x - patternArea_.getX()) / w;
-    const int lane = cf::ui::laneAtY(static_cast<double>(pt.y - patternArea_.getY()), static_cast<double>(patternArea_.getHeight()), static_cast<int>(model_.view().chops.size()));
-    for (auto it = model_.view().pattern.rects.rbegin(); it != model_.view().pattern.rects.rend(); ++it)
-      if (it->chopIndex == lane && fx >= it->x0 && fx <= it->x1) {
-        model_.select(it->id);
-        if (it->depth == 0 && !it->locked && !e.mods.isPopupMenu()) {  // only top-level, unlocked hits can be dragged
-          const double edgePx = (it->x1 - fx) * w;
-          const double edgeZone = std::min(6.0, (it->x1 - it->x0) * w / 3.0);  // narrow hits keep a move zone
-          dragMode_ = edgePx <= edgeZone ? DragMode::Resize : DragMode::Move;
-          dragId_ = it->id;
-          dragStart_ = dragNow_ = pt;
-          dragLane_ = lane;
-          dragCopy_ = e.mods.isAltDown();
-        }
-        break;
-      }
-    if (!model_.selected().valid() && e.mods.isShiftDown() && lane >= 0 && model_.view().gridTicks > 0 && model_.view().barTicks > 0 && model_.view().barCount > 0) {  // Shift-click on empty space adds a hit
-      const cf::Ticks total = model_.view().barTicks * model_.view().barCount;
-      const auto pos = cf::ui::splitTick(cf::ui::snapDown(cf::ui::xToTick(static_cast<double>(pt.x - patternArea_.getX()), w, total), model_.view().gridTicks), model_.view().barTicks, model_.view().barCount);
-      const cf::Ticks dur = std::min<cf::Ticks>(model_.view().gridTicks, model_.view().barTicks - pos.startInBar);
-      commands_.editHits([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
-        if (lane >= static_cast<int>(chops.chops.size())) return cf::makeError(cf::ErrorCode::OutOfRange, "no chop in that lane");
-        return cf::pattern::addEvent(p, pos.bar, chops.chops[static_cast<std::size_t>(lane)].id, pos.startInBar, dur, chops);
-      });
-    }
-    repaint();
   }
 }
 
@@ -571,78 +480,22 @@ void ChopFractalEditor::mouseDoubleClick(const juce::MouseEvent& e) {
 // ---------------------------------------------------------------------------------------------
 
 void ChopFractalEditor::updateSectionSelection(juce::Point<int> point) {
-  const auto area = selectingWave_ ? waveArea_ : patternArea_;
-  selectionEnd_ = {juce::jlimit(area.getX(), area.getRight() - 1, point.x),
-                   juce::jlimit(area.getY(), area.getBottom() - 1, point.y)};
+  selectionEnd_ = {juce::jlimit(waveArea_.getX(), waveArea_.getRight() - 1, point.x), juce::jlimit(waveArea_.getY(), waveArea_.getBottom() - 1, point.y)};
   const auto rect = juce::Rectangle<int>(selectionStart_, selectionEnd_);
   const bool click = rect.getWidth() < 3 && rect.getHeight() < 3;
-  if (selectingWave_)
-    model_.selectSectionsInWave(selectionStart_.x - area.getX(), selectionEnd_.x - area.getX(), click, area.getWidth());
-  else
-    model_.selectSectionsInPattern(rect.translated(-area.getX(), -area.getY()), selectionEnd_ - area.getPosition(), click, area.withZeroOrigin());
+  model_.selectSectionsInWave(selectionStart_.x - waveArea_.getX(), selectionEnd_.x - waveArea_.getX(), click, waveArea_.getWidth());
   repaint();
 }
 
 void ChopFractalEditor::mouseDrag(const juce::MouseEvent& e) {
-  if (selectingSections_) { updateSectionSelection(e.getPosition()); return; }
-  if (dragMode_ == DragMode::None) return;
-  dragNow_ = e.getPosition();
-  repaint(patternArea_);
+  if (selectingSections_) updateSectionSelection(e.getPosition());
 }
 
 void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
-  if (selectingSections_) {
-    updateSectionSelection(e.getPosition());
-    selectingSections_ = false;
-    refresh(true);
-    return;
-  }
-  if (dragMode_ == DragMode::None) return;
-  const DragMode mode = dragMode_;
-  dragMode_ = DragMode::None;
-  dragNow_ = e.getPosition();
-  const int dx = dragNow_.x - dragStart_.x;
-  const int dy = dragNow_.y - dragStart_.y;
-  if (std::abs(dx) < 3 && std::abs(dy) < 3) {
-    repaint(patternArea_);
-    return;  // a click, not a drag
-  }
-  repaint(patternArea_);
-  if (model_.view().gridTicks <= 0 || model_.view().barTicks <= 0 || model_.view().barCount <= 0) return;
-  const cf::EventId id = dragId_;
-  const cf::Ticks total = model_.view().barTicks * model_.view().barCount;
-  const double w = static_cast<double>(patternArea_.getWidth());
-  const cf::Ticks grid = model_.view().gridTicks, barT = model_.view().barTicks;
-  const int bars = model_.view().barCount;
-  const cf::Ticks dTicks = static_cast<cf::Ticks>(std::llround(static_cast<double>(dx) / w * static_cast<double>(total)));
-  const int newLane = cf::ui::laneAtY(static_cast<double>(dragNow_.y - patternArea_.getY()), static_cast<double>(patternArea_.getHeight()), static_cast<int>(model_.view().chops.size()));
-  const bool copy = dragCopy_;
-  const int oldLane = dragLane_;
-  commands_.editHits([=](const cf::pattern::Pattern& p, const cf::ChopSnapshot& chops) -> cf::Result<cf::pattern::Pattern> {
-    const cf::Event* ev = cf::pattern::findEvent(p, id);
-    const auto loc = cf::pattern::locate(p, id);
-    if (!ev || !loc) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
-    const cf::Ticks absStart = static_cast<cf::Ticks>(loc->bar) * barT + ev->start;
-    if (mode == DragMode::Resize) {
-      const cf::Ticks absEnd = cf::ui::snapNearest(absStart + ev->duration + dTicks, grid);
-      const cf::Ticks minDur = std::min(grid, barT - ev->start);  // never shrink a hit to an inaudible sliver
-      const cf::Ticks dur = std::max(minDur, std::min(absEnd - absStart, barT - ev->start));
-      return cf::pattern::resizeEvent(p, id, dur);
-    }
-    const cf::Ticks lastSlot = std::max<cf::Ticks>(0, barT * bars - grid);  // snapping may round up to the very end: keep a full cell
-    const auto pos = cf::ui::splitTick(std::min(lastSlot, cf::ui::snapNearest(std::max<cf::Ticks>(0, absStart + dTicks), grid)), barT, bars);
-    cf::Result<cf::pattern::Pattern> r = cf::makeError(cf::ErrorCode::InvalidArgument, "unreachable");
-    if (copy) {
-      if (pos.bar != loc->bar) return cf::makeError(cf::ErrorCode::InvalidArgument, "Alt-drag copies within the same bar.");
-      r = cf::pattern::duplicateEvent(p, id, pos.startInBar);
-    } else {
-      r = cf::pattern::moveEvent(p, id, pos.bar, pos.startInBar);
-    }
-    if (!r.ok() || copy || newLane < 0 || newLane == oldLane || newLane >= static_cast<int>(chops.chops.size())) return r;
-    // Vertical drag re-assigns the hit to the chop of the lane it was dropped on.
-    const cf::Event* moved = cf::pattern::findEvent(r.value(), id);
-    return moved ? cf::pattern::setEventChop(r.value(), id, chops.chops[static_cast<std::size_t>(newLane)].id, chops) : r;
-  });
+  if (!selectingSections_) return;
+  updateSectionSelection(e.getPosition());
+  selectingSections_ = false;
+  refresh(true);
 }
 
 void ChopFractalEditor::reloadPresets() {

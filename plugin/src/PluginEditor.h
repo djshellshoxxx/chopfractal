@@ -14,6 +14,7 @@
 #include "PluginProcessor.h"
 #include "HistoryPanel.h"
 #include "OrbitPanel.h"
+#include "PatternPanel.h"
 #include "PresetManager.h"
 #include "StatusBar.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -43,7 +44,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void reloadPresets();
   juce::File makeDragFile(bool wav);
   // Read-only views for tests and accessibility tooling.
-  juce::Rectangle<int> patternBounds() const { return patternArea_; }
+  juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
   int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
   chopfractal::EventId selectedHit() const { return model_.selected(); }
@@ -81,8 +82,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   StatusBar status_;
   OrbitPanel orbit_;
   HistoryPanel history_;
+  PatternPanel pattern_;
   juce::ToggleButton editMode_{"Move / resize hits"};
-  bool selectingSections_ = false, selectingWave_ = false;
+  bool selectingSections_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
 
   juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
@@ -105,13 +107,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
   double fractalMutation_ = -1.0;  // < 0: derive from the Variation control; set by a preset
   double fractalAccent_ = 0.85;
-  // Direct hit editing (pattern grid): one gesture = one undo step, applied on mouse-up.
-  enum class DragMode { None, Move, Resize };
-  DragMode dragMode_ = DragMode::None;
-  chopfractal::EventId dragId_;
-  juce::Point<int> dragStart_, dragNow_;
-  int dragLane_ = 0;
-  bool dragCopy_ = false;
   juce::TooltipWindow tooltip_{this};
   juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
 
@@ -129,7 +124,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
 
-  juce::Rectangle<int> waveArea_, patternArea_;
+  juce::Rectangle<int> waveArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };
