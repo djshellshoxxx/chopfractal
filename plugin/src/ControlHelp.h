@@ -76,7 +76,7 @@ inline juce::String forName(const juce::String& name) {
     {"Recall B", "Recall comparison pattern B. It may be unavailable if its source chops have changed."},
     {"Role for the selected hit's chop", "Choose a role such as kick, snare or hat for the primary selected hit's source chop. Press Set Role to apply."},
     {"Set Role", "Apply the chosen role to the primary selected hit's source chop. The role is used during future Generate or Mutate."},
-    {"Status messages", "Full status and error messages. Use the mouse wheel or scrollbar to read long text. Select text to copy it."},
+    {"Status messages", "Latest message, click to open the notice log with every warning and error of this session"},
     {"Load Loop > Detect Chops > Generate > Play", "Start by loading or dropping a loop, detecting chops, generating a pattern, and pressing Play."},
   };
   for (const auto& entry : entries)

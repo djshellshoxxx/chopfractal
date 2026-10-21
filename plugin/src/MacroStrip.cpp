@@ -181,7 +181,10 @@ void MacroStrip::resized() {
   const int n = static_cast<int>(knobs_.size());
   if (n == 0) return;
   // The Output cell carries the Match and Limit toggles to the right of its knob.
-  const int togglesFloor = px(78);
+  // Wide enough for the widest toggle label at this scale (box, gap, text and a little air), never less than the design width.
+  const auto labelFont = cdl::font(cdl::FontRole::Body, scale_);
+  const int labelW = std::max(juce::GlyphArrangement::getStringWidthInt(labelFont, "Match"), juce::GlyphArrangement::getStringWidthInt(labelFont, "Limit"));
+  const int togglesFloor = std::max(px(78), px(2 + 14 + 10 + 6) + labelW);
   const float units = static_cast<float>(n);
   const int unit = std::clamp(static_cast<int>(static_cast<float>(knobArea_.getWidth() - togglesFloor) / units), px(72), px(130));
   const int total = n * unit + togglesFloor;

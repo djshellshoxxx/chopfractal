@@ -965,3 +965,75 @@ CHOP_TEST(process_performs_no_heap_allocation_across_armed_switches) {
   }
   CHECK_EQ(r.appliedSwitchToken(), 4u);
 }
+
+// ---- F05: the output meter ----
+CHOP_TEST(meter_reports_peak_clip_and_voices) {
+  Renderer r;
+  r.prepare(Config{});
+  TransportBlock tb;
+  RenderParams params;
+  std::vector<float> a(256, 0.5f), b(256, -0.25f), oa(256), ob(256);
+  const float* in[2] = {a.data(), b.data()};
+  float* out[2] = {oa.data(), ob.data()};
+  r.process(tb, params, in, out, 2, 256);  // no source: pass-through
+  auto m = r.meter().take();
+  CHECK_NEAR(m.peak[0], 0.5, 1e-4);
+  CHECK_NEAR(m.peak[1], 0.25, 1e-4);
+  CHECK_EQ(m.clipSamples, 0u);
+  m = r.meter().take();  // taking resets the peak
+  CHECK_NEAR(m.peak[0], 0.0, 0.0);
+  CHECK_NEAR(m.peak[1], 0.0, 0.0);
+
+  std::vector<float> loud(256, 0.2f);
+  for (int i = 0; i < 256; i += 4) loud[static_cast<std::size_t>(i)] = (i % 8 == 0) ? 1.5f : -1.25f;  // 64 samples above 1
+  loud[1] = std::numeric_limits<float>::quiet_NaN();                                              // never a peak, never a clip
+  const float* inl[2] = {loud.data(), loud.data()};
+  r.process(tb, params, inl, out, 2, 256);
+  m = r.meter().take();
+  CHECK_NEAR(m.peak[0], 1.5, 1e-4);
+  CHECK_EQ(m.clipSamples, 128u);  // 64 per channel
+
+  std::vector<float> mono(128, 0.8f), outMono(128);
+  const float* in1[1] = {mono.data()};
+  float* out1[1] = {outMono.data()};
+  r.process(tb, params, in1, out1, 1, 128);
+  m = r.meter().take();
+  CHECK_NEAR(m.peak[0], 0.8, 1e-4);
+  CHECK_NEAR(m.peak[1], m.peak[0], 0.0);
+
+  auto pb = playback(makeSource(1, 48000, 24000, dc), {ev(1, 24000, 0, 960)});
+  r.mailbox().publish(pb);
+  tb.playing = true;
+  tb.positionValid = true;
+  std::vector<float> silence(256, 0.f);
+  const float* ins[2] = {silence.data(), silence.data()};
+  r.process(tb, params, ins, out, 2, 256);
+  m = r.meter().take();
+  CHECK(m.activeVoices >= 1);
+  CHECK_EQ(m.activeVoices, r.activeVoices());
+  CHECK(m.peak[0] > 0.0f);
+}
+
+CHOP_TEST(meter_is_race_free_between_the_audio_and_the_ui_thread) {
+  Renderer r;
+  r.prepare(Config{});
+  std::atomic<bool> stop{false};
+  std::atomic<long> seen{0};
+  std::thread ui([&] {
+    while (!stop.load()) {
+      const auto m = r.meter().take();
+      if (m.peak[0] > 0.f) seen.fetch_add(1);
+      std::this_thread::yield();
+    }
+  });
+  std::vector<float> a(64, 0.9f), oa(64), ob(64);
+  const float* in[2] = {a.data(), a.data()};
+  float* out[2] = {oa.data(), ob.data()};
+  TransportBlock tb;
+  RenderParams params;
+  const auto t0 = std::chrono::steady_clock::now();
+  while (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(200)) r.process(tb, params, in, out, 2, 64);
+  stop = true;
+  ui.join();
+  CHECK(seen.load() > 0);
+}

@@ -214,7 +214,13 @@ bool ChopFractalEditor::isInterestedInFileDrag(const juce::StringArray& files) {
   return false;
 }
 
-void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) { commands_.handleDroppedFiles(files); }
+void ChopFractalEditor::fileDragEnter(const juce::StringArray& files, int, int) { model_.setDropHover(isInterestedInFileDrag(files)); }
+void ChopFractalEditor::fileDragExit(const juce::StringArray&) { model_.setDropHover(false); }
+
+void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) {
+  model_.setDropHover(false);
+  commands_.handleDroppedFiles(files);
+}
 
 void ChopFractalEditor::paint(juce::Graphics& g) { cdl::paintWindowFrame(g, getLocalBounds()); }
 

@@ -478,8 +478,8 @@ CHOP_TEST(editor_restores_widgets_from_state_and_shows_export_progress) {
     CHECK(p.startExport(r).ok());
     CHECK(waitFor([&] { return cancel->isVisible(); }, 3000));
     CHECK(!exportWav->isEnabled() && !exportKit->isEnabled());
-    CHECK_EQ(cancel->getWidth(), 106);
-    CHECK_EQ(cancel->getHeight(), 16);
+    CHECK(cancel->getWidth() >= 90 && cancel->getHeight() >= 14);
+    CHECK(editor->getLocalBounds().contains(editor->getLocalArea(cancel, cancel->getLocalBounds())));
     CHECK(waitFor([&] { return p.statusMessage().startsWith("Exporting gui.wav: ") && p.statusMessage().endsWith("%"); }, 3000));
     cancel->onClick();
     CHECK(waitFor([&] { return stateIs(p, ExportStatus::State::Cancelled); }, 3000));

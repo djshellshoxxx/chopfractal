@@ -10,7 +10,7 @@ namespace cf = chopfractal;
 WavePanel::WavePanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "WavePanel") { setOpaque(true); }
 
 void WavePanel::modelChanged(Change c) {
-  if (c == Change::View || c == Change::Selection) repaint();
+  if (c == Change::View || c == Change::Selection || c == Change::Flags) repaint();
 }
 
 void WavePanel::paint(juce::Graphics& g) {
@@ -68,6 +68,15 @@ void WavePanel::paint(juce::Graphics& g) {
     g.fillRect(rectangle);
     g.setColour(editor_theme::accentBlue());
     g.drawRect(rectangle, 1);
+  }
+  if (model_.dropHover()) {  // a droppable file is over the editor
+    const auto& p = cdl::pal();
+    g.setColour(p.ok.withAlpha(0.14f));
+    g.fillRect(area);
+    g.setColour(p.ok);
+    g.drawRect(area, 2);
+    g.setFont(cdl::font(cdl::FontRole::Body, cdl::uiScale()));
+    g.drawText("Drop a WAV or AIFF to load it", area, juce::Justification::centred);
   }
 }
 

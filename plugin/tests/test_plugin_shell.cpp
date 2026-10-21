@@ -885,20 +885,20 @@ CHOP_TEST(editor_has_visible_play_and_stop_controls_in_the_header) {
   CHECK(!p.hostPlaying.load());
 }
 
-CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
+CHOP_TEST(status_bar_keeps_long_messages_on_one_elided_line_and_the_log_keeps_them_whole) {
   if (!haveDisplay()) return;
   ChopFractalProcessor p;
   const juce::String message = juce::String::repeatedString("A long status message. ", 200);
   p.setStatusMessage(message);
   ChopFractalEditor editor(p);
-  juce::TextEditor* status = findTextEditor(editor, "Status messages");
+  auto* status = findButton(editor, "Status messages");
   CHECK(status != nullptr);
   if (!status) return;
-  CHECK(status->isReadOnly());
-  CHECK(status->isMultiLine());
-  CHECK(status->getText().startsWith(message));
-  CHECK(status->getHeight() >= 20);
+  CHECK(status->getHeight() >= 16);
   CHECK(editor.getLocalBounds().contains(editor.getLocalArea(status, status->getLocalBounds())));
+  CHECK(editor.statusBar().displayedText().startsWith("A long status message."));
+  LogEntry last;
+  CHECK(p.noticeLog().latest(last) && last.text == message);
 }
 
 CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_zoom_works) {

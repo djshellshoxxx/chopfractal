@@ -84,4 +84,16 @@ inline void snapshot(juce::Component& root, const juce::String& name) {
   juce::FileOutputStream fs(f);
   juce::PNGImageFormat().writeImageToStream(img, fs);
 }
+// The same without the settle time: for popups that close themselves when the window loses focus.
+inline void snapshotNow(juce::Component& c, const juce::String& name) {
+  const char* dir = std::getenv("CHOPFRACTAL_G3_SNAPS");
+  if (!dir) return;
+  juce::File folder(dir);
+  folder.createDirectory();
+  juce::Image img = c.createComponentSnapshot(c.getLocalBounds());
+  juce::File f = folder.getChildFile(name + "_" + juce::String(c.getWidth()) + "x" + juce::String(c.getHeight()) + ".png");
+  f.deleteFile();
+  juce::FileOutputStream fs(f);
+  juce::PNGImageFormat().writeImageToStream(img, fs);
+}
 }  // namespace shelltest

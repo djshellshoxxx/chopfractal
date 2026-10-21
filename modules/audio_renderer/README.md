@@ -19,6 +19,7 @@ Public headers:
 - `include/chopfractal/audio_renderer/renderer.hpp`
 - `include/chopfractal/audio_renderer/mailbox.hpp`
 - `include/chopfractal/audio_renderer/limiter.hpp`
+- `include/chopfractal/audio_renderer/meter.hpp`
 - `include/chopfractal/audio_renderer/slice_quality.hpp`
 
 ## Contract

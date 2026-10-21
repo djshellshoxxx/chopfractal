@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 HistoryPanel::HistoryPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "HistoryPanel") { setOpaque(true); }
 
 void HistoryPanel::modelChanged(Change c) {
-  if (c == Change::View) repaint();
+  if (c == Change::View || c == Change::Flags) repaint();
 }
 
 juce::Point<int> HistoryPanel::treePos(const cf::ui::TreeNodeView& n) const {
@@ -37,6 +37,15 @@ void HistoryPanel::paint(juce::Graphics& g) {
       }
     g.setColour(n.active ? editor_theme::accentGreen() : (n.favorite ? editor_theme::accentAmber() : editor_theme::neutralGrey()));
     g.fillEllipse(static_cast<float>(x - 8), static_cast<float>(y - 8), 16.0f, 16.0f);
+    if (n.id == model_.pendingNode()) {  // queued for the next loop: a static dashed ring, no animation
+      juce::Path ring;
+      ring.addEllipse(static_cast<float>(x - 11), static_cast<float>(y - 11), 22.0f, 22.0f);
+      juce::Path dashed;
+      const float dashes[] = {4.0f, 3.0f};
+      juce::PathStrokeType(2.0f).createDashedStroke(dashed, ring, dashes, 2);
+      g.setColour(cdl::pal().warn);
+      g.fillPath(dashed);
+    }
     g.setColour(cdl::pal().ink.withAlpha(0.85f));
     g.drawText(n.label.empty() ? juce::String(static_cast<juce::int64>(n.id)) : juce::String(n.label), x + 10, y - 7, 90, 14, juce::Justification::left);
   }

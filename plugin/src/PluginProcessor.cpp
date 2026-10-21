@@ -358,10 +358,15 @@ void ChopFractalProcessor::pollAudioFlags() {
           setStatusMessage("Evolve: " + juce::String(r.error().message));
           break;
         }
-        if (r.value()) setStatusMessage("Evolve stepped");
+        if (r.value()) setProgressMessage("Evolve stepped");
       }
     });
   }
+  // Notices raised by Evolve steps and loop-boundary switches would otherwise wait for the next button press.
+  std::vector<cf::composition::Notice> notices;
+  withSession([&notices](cf::composition::ProjectSession& s) { notices = s.takeNotices(); });
+  for (const auto& n : notices)
+    setStatusMessage(juce::String(n.text), n.level == cf::composition::Notice::Level::Error ? Severity::Error : n.level == cf::composition::Notice::Level::Warning ? Severity::Warning : Severity::Info);
 }
 
 void ChopFractalProcessor::syncAudioInfo() {
@@ -409,9 +414,24 @@ juce::String ChopFractalProcessor::statusMessage() const {
   return status_;
 }
 
-void ChopFractalProcessor::setStatusMessage(const juce::String& message) {
+void ChopFractalProcessor::setStatusMessage(const juce::String& message, Severity severity) {
+  {
+    const juce::ScopedLock lock(statusLock_);
+    status_ = message;
+    statusSeverity_ = message.isEmpty() ? Severity::Info : severity;
+  }
+  noticeLog_.add(severity, message);
+}
+
+void ChopFractalProcessor::setProgressMessage(const juce::String& message) {
   const juce::ScopedLock lock(statusLock_);
   status_ = message;
+  statusSeverity_ = Severity::Info;
+}
+
+Severity ChopFractalProcessor::statusSeverity() const {
+  const juce::ScopedLock lock(statusLock_);
+  return statusSeverity_;
 }
 
 // ---------------------------------------------------------------------------------------------

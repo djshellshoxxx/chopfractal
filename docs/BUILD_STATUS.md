@@ -96,7 +96,7 @@ Defects found and fixed during integration (each now has a test): derived child 
 
 Three independent read-only audits (core logic, audio/export/feature modules, plugin shell and GUI) plus a button-driving GUI test found and fixed: a failed marker edit that wedged the session (now transactional, and zoomed content stranded by a deleted chop is dropped); undo, redo and A/B recall restoring patterns that reference deleted chops; roles lost when a chop is disabled; per-event locks bypassed by bar replacement and bar duplication; signed overflow in event timing; grammar labels that saved but could not be loaded; duplicate marker IDs and a zero id counter in saved state; a history config that could write unreadable state; voice-pool exhaustion hard-cutting a sounding voice, and newest-voice stealing; MIDI decoder accepting invalid tempo, meter, running status and zero-length notes (and a shift-exponent bug); non-atomic WAV overwrite and false clip reports at 0 dB; stale waveform after loading a new source; embed flag, manual tempo not persisted; no Locate Source for a missing audio file; use-after-free risk in menu callbacks; Lock Bar acting on bar 0 with nothing selected; Evolve toggle out of sync with the session; repaint 10 times a second while idle. Each has a regression test.
 
-Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, no meters. (Seed field, motif, A/B snapshots and the export choices are saved since F01 state v2; export runs on a worker thread.)
+Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains. (Seed field, motif, A/B snapshots and the export choices are saved since F01 state v2; export runs on a worker thread.)
 
 ## Pass 3 (pre-beta)
 
@@ -144,7 +144,7 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F02 | Direct editing | Partly built in pass 3: hit move, resize, duplicate, delete, mute, add; Shift+click markers; marker dragging, zoom, menus not built |
 | F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
 | F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |
-| F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
+| F05 | Meters and feedback | Built in G3: output meter with latched CLIP chip, voice box, sync box, severity notice log, pending-activation ring, drag-and-drop with the replace confirmation (see gui-redesign.md section 24) |
 | F06 | Rule editor | Not started |
 | F11 | Multi-output stems | Renderer, host buses, session routing (state tag 9), processor and view model built and tested; the Outputs section is pending (command list in the F11 spec, section 12) |
 | F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |

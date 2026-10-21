@@ -41,12 +41,13 @@ struct FakePlayHead : juce::AudioPlayHead {
   bool hasPpq = true;
   double bpm = 120.0;
   double ppq = 0.0;
+  int numerator = 4, denominator = 4;
   juce::Optional<PositionInfo> getPosition() const override {
     PositionInfo info;
     info.setIsPlaying(playing);
     if (hasBpm) info.setBpm(bpm);
     if (hasPpq) info.setPpqPosition(ppq);
-    info.setTimeSignature(TimeSignature{4, 4});
+    info.setTimeSignature(TimeSignature{numerator, denominator});
     return info;
   }
 };

@@ -19,12 +19,22 @@ EditorCommands::EditorCommands(ChopFractalProcessor& processor, EditorModel& mod
 
 cf::Status EditorCommands::run(const std::function<cf::Status(cf::composition::ProjectSession&)>& action) {
   cf::Status status;
-  juce::String notice;
+  std::vector<cf::composition::Notice> notices;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     status = action(s);
-    for (const auto& n : s.takeNotices()) notice = juce::String(n.text);
+    notices = s.takeNotices();
   });
-  model_.setStatus(status.ok() ? notice : juce::String(status.error().message));
+  auto severityOf = [](cf::composition::Notice::Level l) {
+    return l == cf::composition::Notice::Level::Error ? Severity::Error : l == cf::composition::Notice::Level::Warning ? Severity::Warning : Severity::Info;
+  };
+  // Every notice of the action reaches the log; the last one (or the error) stays on the status line.
+  for (std::size_t i = 0; i + 1 < notices.size(); ++i) proc_.noticeLog().add(severityOf(notices[i].level), juce::String(notices[i].text));
+  if (!status.ok())
+    model_.setStatus(juce::String(status.error().message), Severity::Error);
+  else if (!notices.empty())
+    model_.setStatus(juce::String(notices.back().text), severityOf(notices.back().level));
+  else
+    model_.setStatus({});
   model_.rebuild();
   return status;
 }
@@ -52,8 +62,38 @@ void EditorCommands::chooseFile() {
   chooser_ = std::make_unique<juce::FileChooser>("Choose a loop (WAV or AIFF, up to 60 s)", juce::File(), "*.wav;*.aif;*.aiff");
   chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this](const juce::FileChooser& fc) {
     const juce::File f = fc.getResult();
-    if (f.existsAsFile()) proc_.loadFileAsync(f);
+    if (f.existsAsFile()) requestLoad(f);
   });
+}
+
+bool EditorCommands::projectHasWork() {
+  bool work = false;
+  proc_.withSession([&work](cf::composition::ProjectSession& s) { work = s.pattern() != nullptr || s.history().size() > 0; });
+  return work;
+}
+
+void EditorCommands::requestLoad(const juce::File& file) {
+  auto load = [this, file](bool confirmed) {
+    if (!confirmed) {
+      model_.setStatus("Load cancelled. The current loop is unchanged.");
+      return;
+    }
+    proc_.stopPlayback();
+    model_.clearSelection();
+    proc_.loadFileAsync(file);
+    model_.rebuild();
+  };
+  if (!projectHasWork()) {
+    load(true);
+    return;
+  }
+  if (confirmReplace) {
+    confirmReplace(load);
+    return;
+  }
+  juce::AlertWindow::showAsync(juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::QuestionIcon, "Replace the current loop?",
+                                                                            "Loading a new loop resets the markers, pattern and family tree of this project.", "Replace", "Cancel"),
+                               [load](int result) { load(result == 1); });  // OK is 1, Cancel is 0
 }
 
 void EditorCommands::locateSource() {
@@ -67,18 +107,19 @@ void EditorCommands::locateSource() {
 bool EditorCommands::isAudioFile(const juce::File& file) { return file.hasFileExtension("wav;aif;aiff;flac;ogg;mp3"); }
 
 void EditorCommands::handleDroppedFiles(const juce::StringArray& files) {
+  int accepted = 0;
+  for (const auto& path : files)
+    if (isAudioFile(juce::File(path))) ++accepted;
+  if (accepted > 1) proc_.noticeLog().add(Severity::Info, "Only the first file was loaded.");
   for (const auto& path : files) {
     const juce::File file(path);
     if (!isAudioFile(file)) continue;
     if (!file.existsAsFile()) {
-      proc_.setStatusMessage("The dropped sample could not be found.");
+      proc_.setStatusMessage("The dropped sample could not be found.", Severity::Warning);
       model_.rebuild();
       return;
     }
-    proc_.stopPlayback();
-    model_.clearSelection();
-    proc_.loadFileAsync(file);
-    model_.rebuild();
+    requestLoad(file);
     return;  // a ChopFractal project has one source loop
   }
   proc_.setStatusMessage("Drop an audio sample (WAV, AIFF, FLAC, OGG or MP3). One source loop is loaded at a time.");
@@ -238,7 +279,17 @@ void EditorCommands::setRoleOfSelected(const juce::String& role) {
 
 void EditorCommands::activateNode(cf::history::NodeId id) {
   const auto when = proc_.hostPlaying.load() ? cf::composition::Quantize::LoopBoundary : cf::composition::Quantize::Immediate;
-  run([=](cf::composition::ProjectSession& s) { return s.activate(id, when); });
+  const auto st = run([=](cf::composition::ProjectSession& s) { return s.activate(id, when); });
+  if (!st.ok()) return;
+  // Queued during playback: say so now; the model says "Switched to" when the loop boundary applies it.
+  juce::String label = "#" + juce::String(static_cast<juce::int64>(id));
+  bool queued = false;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    queued = s.pendingActivationNode() == id;
+    for (const auto& n : s.history().listAll())
+      if (n.id == id && !n.label.empty()) label = juce::String(n.label);
+  });
+  model_.setStatus(queued ? "Variation \"" + label + "\" will start at the next loop." : "Switched to \"" + label + "\".");
 }
 
 void EditorCommands::historyMenu(cf::history::NodeId id, juce::Component* anchor) {
@@ -573,7 +624,7 @@ bool EditorCommands::pollArrangement() {
     s.releaseArrangementJob();
   });
   if (running) {
-    model_.setStatus(juce::String(cf::ui::arrangementProgressMessage(std::max(1, progress.section), std::max(1, progress.sections), progress.fraction)));
+    model_.setProgress(juce::String(cf::ui::arrangementProgressMessage(std::max(1, progress.section), std::max(1, progress.sections), progress.fraction)));
   } else if (finished) {
     if (result.status.ok())
       model_.setStatus(juce::String(cf::ui::arrangementExportedMessage(juce::File(juce::String(result.wavPath)).getFileName().toStdString(), result.bars, result.seconds)));

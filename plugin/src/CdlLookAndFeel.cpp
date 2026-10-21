@@ -40,10 +40,15 @@ void paintStencilTitle(juce::Graphics& g, const juce::String& text, juce::Rectan
   const auto f = font(FontRole::Title, s);
   const auto o = std::max(2, juce::roundToInt(3.0f * s));
   g.setFont(f);
+  const auto up = text.toUpperCase();
   g.setColour(pal().spray);
-  g.drawText(text.toUpperCase(), a.translated(o, o), juce::Justification::centredLeft, false);
+  g.drawText(up, a.translated(o, o), juce::Justification::centredLeft, false);
+  // A one pixel keyline in the background colour on the shadow side separates the two passes, so the thin stencil strokes
+  // stay crisp instead of blending into the spray layer.
+  g.setColour(pal().bg);
+  for (const auto d : {juce::Point<int>(1, 0), juce::Point<int>(0, 1), juce::Point<int>(1, 1)}) g.drawText(up, a.translated(d.x, d.y), juce::Justification::centredLeft, false);
   g.setColour(pal().ink);
-  g.drawText(text.toUpperCase(), a, juce::Justification::centredLeft, false);
+  g.drawText(up, a, juce::Justification::centredLeft, false);
 }
 
 void paintSectionLabel(juce::Graphics& g, const juce::String& text, juce::Rectangle<int> a) {

@@ -439,6 +439,7 @@ class ProjectSession {
   Status activate(history::NodeId node, Quantize when);
   void onLoopBoundary();
   bool hasPendingActivation() const { return pendingActivation_ != history::kNoNode; }
+  history::NodeId pendingActivationNode() const { return pendingActivation_; }  // the variation queued for the next loop boundary, or kNoNode
   Status renameNode(history::NodeId node, std::string label);
   Status setFavorite(history::NodeId node, bool favorite);
   Status deleteBranch(history::NodeId node, bool includeFavorites = false);

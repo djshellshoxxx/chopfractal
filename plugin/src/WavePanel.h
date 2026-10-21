@@ -11,6 +11,7 @@ class WavePanel : public EditorPanelBase {
   void mouseDrag(const juce::MouseEvent&) override;
   void mouseUp(const juce::MouseEvent&) override;
   void mouseDoubleClick(const juce::MouseEvent&) override;
+  bool isDropHighlighted() const { return model_.dropHover(); }
 
  private:
   void modelChanged(Change) override;

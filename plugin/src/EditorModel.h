@@ -84,8 +84,17 @@ class EditorModel {
   bool evolveRunning() const { return evolveRunning_; }
   const chopfractal::evolve::Settings& evolve() const { return evolve_; }
 
-  juce::String statusLine() const;  // the status message plus the host-fallback hints
-  void setStatus(const juce::String&);
+  juce::String statusLine() const;  // the status message
+  void setStatus(const juce::String&, Severity = Severity::Info);
+  void setProgress(const juce::String&);  // status line without a log entry (export and arrangement progress)
+  Severity statusSeverity() const { return proc_.statusSeverity(); }
+  // F05 feedback readouts
+  chopfractal::history::NodeId pendingNode() const { return pendingNode_; }  // the variation queued for the next loop, or kNoNode
+  bool dropHover() const { return dropHover_; }
+  void setDropHover(bool on);                                                 // a file drag is over the editor (Change::Flags)
+  chopfractal::render::MeterReading takeMeter() { return proc_.takeMeter(); }
+  static constexpr int kMaxVoices = 8;
+  juce::String syncText(bool compact) const;
 
   // ---- pass-throughs, so panels never touch the processor ----
   double playheadQuarters() const { return proc_.playheadQuarters(); }
@@ -123,6 +132,9 @@ class EditorModel {
   chopfractal::composition::SetupSuggestion setup_;
   bool haveSetup_ = false;
   bool sourceMissing_ = false;
+  chopfractal::history::NodeId pendingNode_ = chopfractal::history::kNoNode;
+  juce::String pendingLabel_;
+  bool dropHover_ = false;
   bool evolveRunning_ = false;
   chopfractal::evolve::Settings evolve_;
 

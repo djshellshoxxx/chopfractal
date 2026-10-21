@@ -58,6 +58,10 @@ class EditorCommands {
   void stop();
   void followHost();
   void chooseFile();
+  // Loads a loop; asks first (Replace / Cancel) when the project already has a pattern or history. Tests replace the hook.
+  void requestLoad(const juce::File&);
+  std::function<void(std::function<void(bool)>)> confirmReplace;
+  bool projectHasWork();
   void locateSource();
   void handleDroppedFiles(const juce::StringArray& files);
   static bool isAudioFile(const juce::File&);
@@ -111,6 +115,8 @@ class EditorCommands {
   chopfractal::Status startExport(const ExportRequest&);  // the FileChooser flows end here (public so tests can skip the dialog)
   void cancelExport();
   juce::File makeDragFile(bool wav, const ExportUi&);
+
+  NoticeLog& noticeLog() { return proc_.noticeLog(); }
 
   // ---- diagnostics (settings drawer, status bar) ----
   juce::String diagnosticsText() const;       // version, host, audio, interface, source, tempo, output and recent notices

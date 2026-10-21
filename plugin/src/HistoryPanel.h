@@ -7,6 +7,7 @@ class HistoryPanel : public EditorPanelBase {
   HistoryPanel(EditorModel&, EditorCommands&);
   void paint(juce::Graphics&) override;
   void mouseDown(const juce::MouseEvent&) override;
+  chopfractal::history::NodeId pendingNode() const { return model_.pendingNode(); }
 
  private:
   void modelChanged(Change) override;

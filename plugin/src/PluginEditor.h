@@ -37,6 +37,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::String getTooltip() override;
   bool isInterestedInFileDrag(const juce::StringArray& files) override;
   void filesDropped(const juce::StringArray& files, int x, int y) override;
+  void fileDragEnter(const juce::StringArray& files, int x, int y) override;
+  void fileDragExit(const juce::StringArray& files) override;
   void paint(juce::Graphics& g) override;
   void resized() override;
   bool keyPressed(const juce::KeyPress&) override;
@@ -80,6 +82,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
   const MacroStrip& macroStrip() const { return macro_; }
+  StatusBar& statusBar() { return status_; }
+  WavePanel& wavePanel() { return wave_; }
+  HistoryPanel& historyPanel() { return history_; }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
   int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
   chopfractal::EventId selectedHit() const { return model_.selected(); }
