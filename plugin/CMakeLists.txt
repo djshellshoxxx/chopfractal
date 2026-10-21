@@ -51,6 +51,7 @@ endif()
 juce_add_plugin(ChopFractal
   COMPANY_NAME "ChopFractal"
   PRODUCT_NAME "ChopFractal"
+  VERSION ${PROJECT_VERSION}
   PLUGIN_MANUFACTURER_CODE Cfrc
   PLUGIN_CODE Cfx1
   FORMATS ${CHOPFRACTAL_FORMATS}
@@ -77,6 +78,9 @@ if(CHOPFRACTAL_BUILD_CLAP)
   endif()
 endif()
 
+# Version stamp generated from the root VERSION file (single source of truth).
+configure_file(src/BuildInfo.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h" @ONLY)
+target_include_directories(ChopFractal PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
 target_include_directories(ChopFractal PRIVATE src)
 # Warnings for our own plugin sources only (JUCE's module sources are compiled into the same target and stay untouched).
@@ -111,8 +115,9 @@ endif()
 if(CHOPFRACTAL_BUILD_TESTS)
   juce_add_console_app(ChopFractalShellTests PRODUCT_NAME "ChopFractalShellTests")
   target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
-  target_include_directories(ChopFractalShellTests PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
-  target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+  target_include_directories(ChopFractalShellTests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated" ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
+  target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1
+    CHOPFRACTAL_VERSION_FILE="${CMAKE_CURRENT_LIST_DIR}/../VERSION")
   target_link_libraries(ChopFractalShellTests PRIVATE
     chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter
     juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)

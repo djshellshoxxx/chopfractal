@@ -130,3 +130,9 @@ Each cell is scored on this script (record pass/fail, build number, notes, scree
 8. Signing scripts and `release.yml` with `environment: release`, dry-run mode; maintainer provisions secrets/variables (section 6 lists the names); run a signed rehearsal on a `v0.0.0-rc.1` tag in a private repo or `workflow_dispatch`.
 9. `docs/RELEASING.md` (certificate setup, rotation, rollback of a bad release, how to cut a tag) and `docs/COMPATIBILITY.md` template.
 10. Execute the manual DAW matrix on the first release candidate, fix findings, update BUILD_STATUS stages 7/8, cut the first tag.
+
+## 12. Implemented so far: beta zip pipeline (no secrets needed)
+- `VERSION` is `0.2.0-beta.1`; root CMake reads it (numeric part to `project()`/plugin bundle version, full string to `plugin/src/BuildInfo.h.in`); editor shows it top right; shell test `version_stamp_matches_VERSION_file`; `tools/check_version.py` (+ `tools/tests/test_packaging.py` in `portability`).
+- `.github/workflows/build-packages.yml` (reusable): Standalone, VST3, CLAP for windows-x64, linux-x86_64, macos-arm64 (macos-14), macos-x86_64 (native `macos-15-intel`), plus a lipo-merged macos-universal; shell tests on each, validator on Linux; one workflow artifact per platform and format. `ci.yml` job `packages` calls it (replaces `plugin-linux|windows|macos`).
+- `.github/workflows/release-beta.yml`: `workflow_dispatch(tag)` or tag `v*-beta.*`; draft prerelease, upload, re-download and verify checksums, then publish as prerelease. `publish-windows-alpha.yml` (pinned to one commit) was deleted.
+- Packaging is zip/tar.gz with LICENSE, THIRD_PARTY_NOTICES.md, README-INSTALL.txt and `.sha256` (`tools/package_artifacts.py`). Installers, notarization and Windows/Apple signing with real certificates stay open (steps 7-8); signing steps exist and skip without secrets, macOS is ad-hoc signed (`tools/sign_macos.sh`). See `docs/RELEASING.md`.

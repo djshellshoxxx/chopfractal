@@ -156,7 +156,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   chopfractal::EventId selected_;
   juce::String status_;
 
-  juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_;
+  juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_, versionArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };

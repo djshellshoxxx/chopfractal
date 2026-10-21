@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "BuildInfo.h"
 #include "ControlHelp.h"
 
 #include <algorithm>
@@ -393,6 +394,7 @@ void ChopFractalEditor::resized() {
   featD.removeFromLeft(16);
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
+  versionArea_ = featD;  // About text: the stamped version, right-aligned in the free space of this row
   area.removeFromTop(6);
   waveArea_ = area.removeFromTop(120);
   area.removeFromTop(6);
@@ -788,6 +790,9 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   g.fillAll(juce::Colour(0xff15181d));
   g.setColour(juce::Colours::white.withAlpha(0.85f));
   g.setFont(13.0f);
+  g.setColour(juce::Colours::white.withAlpha(0.5f));
+  g.drawText(juce::String("ChopFractal ") + cfbuild::kVersionFull, versionArea_, juce::Justification::centredRight);
+  g.setColour(juce::Colours::white.withAlpha(0.85f));
 
   // Source waveform with chop markers.
   g.setColour(juce::Colour(0xff20252d));
