@@ -19,7 +19,8 @@ inline double metricWeight(Ticks startInBar, Ticks beatT) {
 
 // The query a policy sees for a candidate (or existing) event at `startInBar` of `bar`: moved verbatim from the generator so
 // generation and explanations agree. `settings` supplies the bar count and the beat geometry.
-inline CandidateQuery buildQuery(const Pattern& p, const Settings& settings, int bar, Ticks startInBar, ChopId chop) {
+inline CandidateQuery buildQuery(const Pattern& p, const Settings& settings, int bar, Ticks startInBar, ChopId chop,
+                                 const std::unordered_set<std::uint64_t>* skipLater = nullptr) {
   const Ticks beatT = beatTicksOf(settings);
   const int beats = settings.timeSignature.numerator;
   struct E {
@@ -28,15 +29,19 @@ inline CandidateQuery buildQuery(const Pattern& p, const Settings& settings, int
     std::uint64_t id;
     ChopId chop;
   };
-  std::vector<E> before;
-  for (int b = 0; b <= bar && b < static_cast<int>(p.bars.size()); ++b)
+  std::vector<E> before, after;
+  for (int b = 0; b < static_cast<int>(p.bars.size()); ++b)
     for (const Beat& bt : p.bars[static_cast<std::size_t>(b)].beats)
-      for (const Event& e : bt.events)
-        if (b < bar || e.start < startInBar) before.push_back({b, e.start, e.id.value, e.chop});
-  std::sort(before.begin(), before.end(), [](const E& a, const E& b) {
+      for (const Event& e : bt.events) {
+        if (b < bar || (b == bar && e.start < startInBar)) before.push_back({b, e.start, e.id.value, e.chop});
+        else if ((b > bar || e.start > startInBar) && !(skipLater && skipLater->count(e.id.value))) after.push_back({b, e.start, e.id.value, e.chop});
+      }
+  auto byTime = [](const E& a, const E& b) {
     if (a.bar != b.bar) return a.bar < b.bar;
     return a.start != b.start ? a.start < b.start : a.id < b.id;
-  });
+  };
+  std::sort(before.begin(), before.end(), byTime);
+  std::sort(after.begin(), after.end(), byTime);
   CandidateQuery q;
   q.chop = chop;
   q.startInBar = startInBar;
@@ -50,6 +55,10 @@ inline CandidateQuery buildQuery(const Pattern& p, const Settings& settings, int
   }
   const std::size_t from = before.size() > 16 ? before.size() - 16 : 0;
   for (std::size_t i = from; i < before.size(); ++i) q.recent.push_back(before[i].chop);
+  for (const E& e : after) {
+    if (e.bar == bar) q.barAfter.push_back(e.chop);
+    if (q.following.size() < 16) q.following.push_back(e.chop);
+  }
   q.firstInBar = q.barSoFar.empty();
   return q;
 }

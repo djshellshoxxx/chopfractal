@@ -7,6 +7,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
+#include <limits>
 #include <vector>
 #include <atomic>
 #include <chopfractal/audio_renderer/meter.hpp>
@@ -51,7 +52,9 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   bool producesMidi() const override { return false; }
   bool isMidiEffect() const override { return false; }
   void setNonRealtime(bool isNonRealtime) noexcept override;
-  double getTailLengthSeconds() const override { return 0.0; }
+  // The plugin generates audio on its own: while a pattern is loaded it must keep running even when a host would
+  // otherwise suspend an effect on silent input (the pattern does not depend on the input).
+  double getTailLengthSeconds() const override { return patternQuarters_.load(std::memory_order_relaxed) > 0.0 ? std::numeric_limits<double>::infinity() : 0.0; }
   int getNumPrograms() override { return 1; }
   int getCurrentProgram() override { return 0; }
   void setCurrentProgram(int) override {}

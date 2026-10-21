@@ -98,7 +98,10 @@ class Gen {
     if (report_) report_->notes.push_back({k, rule, bar, beat});
   }
 
-  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop) const { return detail::buildQuery(p, s_, bar, startInBar, chop); }
+  // `skipLater` lists events that may still change (fresh ones): they are not treated as fixed context after the candidate.
+  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop, const std::unordered_set<std::uint64_t>* skipLater = nullptr) const {
+    return detail::buildQuery(p, s_, bar, startInBar, chop, skipLater);
+  }
 
   // Chooses the chop for a slot, honouring the optional policy. Returns an invalid id when blocked.
   ChopId selectChop(const Pattern& p, int bar, int beat, int slotIdx, Ticks t, double dAlt, double dPick) const {
@@ -299,7 +302,7 @@ class Gen {
         note(Note::Kind::BlockedByRule, rq.rule, bar, beat);
         continue;
       }
-      const Decision d = policy_->evaluate(query(p, bar, target->start, rq.chop));
+      const Decision d = policy_->evaluate(query(p, bar, target->start, rq.chop, &fresh));
       if (!d.allowed) {
         note(Note::Kind::BlockedByRule, d.blockedBy ? d.blockedBy : rq.rule, bar, beat);
         continue;
@@ -331,12 +334,12 @@ class Gen {
           }
       if (!holder) continue;
       Event& e = holder->events[index];
-      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop));
+      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop, &fresh));
       if (d.allowed) continue;
       std::vector<ChopId> allowed;
       std::vector<double> weights;
       for (const ChopInfo& c : chops_.chops) {
-        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id));
+        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id, &fresh));
         if (dc.allowed) {
           allowed.push_back(c.id);
           weights.push_back(dc.weight);
