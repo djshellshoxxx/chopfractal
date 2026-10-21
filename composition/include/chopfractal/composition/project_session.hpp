@@ -218,6 +218,8 @@ class ProjectSession {
   std::shared_ptr<const render::SourceData> sourceData() const { return sourceData_; }
   // True when the source has no file behind it (captured or stretched), so project state must embed the audio.
   bool sourceNeedsEmbed() const;
+  // Input capture "Keep" (composition/src/capture.cpp): loadSource with no path, so the audio is embedded in the project.
+  Status loadCapturedSource(std::shared_ptr<const render::SourceData> data, std::string name);
   // ---- tempo-match stretch (composition/src/stretch.cpp) ----
   // Validates the request (ratio 0.5x..2x, 20..999 BPM, size limits, marker collisions) and snapshots the source.
   Result<StretchPlan> planStretch(const StretchRequest& request) const;

@@ -9,7 +9,8 @@
   "public_headers": [
     "include/chopfractal/plugin_ui_adapter/views.hpp",
     "include/chopfractal/plugin_ui_adapter/orbit.hpp",
-    "include/chopfractal/plugin_ui_adapter/hit_edit.hpp"
+    "include/chopfractal/plugin_ui_adapter/hit_edit.hpp",
+    "include/chopfractal/plugin_ui_adapter/capture_view.hpp"
   ],
   "dependencies": [
     {
@@ -31,6 +32,11 @@
       "id": "variation_history",
       "version": "^0.1",
       "reason": "the tree layout reads node summaries"
+    },
+    {
+      "id": "input_capture",
+      "version": "^0.1",
+      "reason": "the capture view reads the engine's status and end reasons"
     }
   ],
   "license": "LicenseRef-ChopFractal-Proprietary",
@@ -48,7 +54,8 @@
     "`buildMarkerViews()`, `buildPatternView()` (nested hits included), `breadcrumbFor()`",
     "`layoutHistoryTree()`",
     "`buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)",
-    "`xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)"
+    "`xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)",
+    "`buildCaptureView()`, `captureEndNotice()`, `formatCaptureTime()` (input capture control state, labels and notices)"
   ],
   "limits": [
     "Colour is never the only indicator: every rectangle carries a text description"

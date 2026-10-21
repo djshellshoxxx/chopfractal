@@ -105,6 +105,7 @@ target_link_libraries(ChopFractal
     chopfractal::plugin_ui_adapter
     chopfractal::preset_store
     chopfractal::plugin_host_adapter
+    chopfractal::input_capture
     juce::juce_audio_utils
     juce::juce_audio_formats
   PUBLIC
@@ -125,7 +126,7 @@ if(CHOPFRACTAL_BUILD_TESTS)
   target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1
     CHOPFRACTAL_VERSION_FILE="${CMAKE_CURRENT_LIST_DIR}/../VERSION")
   target_link_libraries(ChopFractalShellTests PRIVATE
-    chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter
+    chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter chopfractal::input_capture
     juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
   add_test(NAME plugin.shell COMMAND ChopFractalShellTests)
 endif()

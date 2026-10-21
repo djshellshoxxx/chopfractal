@@ -9,7 +9,7 @@ Last audited 2026-10-20 against the code on `main` (after pass 3 and audit round
 | 0 Toolchain audit | **Done** | C++17; GCC 13, Clang 18, Apple Clang (macOS arm64) and MSVC 2022 all build and pass the full suite in CI |
 | 1 Source and pattern model | **Done** | Deterministic generation, locks, undo, state round-trip, no audio needed to test it |
 | 2 Minimal audio effect | **Done on Linux** | VST3 shell builds, passes the official Steinberg validator (47/47), pass-through before a source exists |
-| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. **Not done: input capture** (Arm / Capture / Stop / Keep) |
+| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. Input capture (Arm / Capture / Stop / Keep) is built and tested in the portable layers and the processor; the GUI controls are pending (command list in the F12 spec) |
 | 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
 | 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
 | 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
@@ -118,7 +118,7 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 ## Known gaps
 
-- **Input capture** is not implemented (the spec's explicit Arm/Capture/Stop/Keep flow); only file import exists.
+- **Input capture** has no GUI controls yet; the engine, session API, processor and view-model exist (see F12 spec section 12).
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
 - Direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
@@ -146,7 +146,7 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
 | F06, F07 | Rule editor, performance pads | Not started |
 | F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
-| F09, F10, F11, F12, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
+| F09, F10, F11, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
 | F13 | MIDI drag-out | Partly built in pass 3: Drag MIDI and Drag WAV of the current pattern; variations and kit not built |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
 | F16 to F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Arrangement Export, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |

@@ -10,6 +10,9 @@
 #include <atomic>
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
+#include <chopfractal/composition/source_replace.hpp>
+#include <chopfractal/input_capture/capture.hpp>
+#include <chopfractal/plugin_ui_adapter/capture_view.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 
@@ -42,6 +45,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   bool acceptsMidi() const override { return false; }
   bool producesMidi() const override { return false; }
   bool isMidiEffect() const override { return false; }
+  void setNonRealtime(bool isNonRealtime) noexcept override;
   double getTailLengthSeconds() const override { return 0.0; }
   int getNumPrograms() override { return 1; }
   int getCurrentProgram() override { return 0; }
@@ -76,6 +80,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> hostPlaying{false};
   std::atomic<bool> usedFallbackTempo{true};
   std::atomic<bool> usedFallbackMeter{true};
+  std::atomic<bool> hostHasPosition{false};  // the host gave a song position (ppq) in the last block
   std::atomic<int> hostBeatsPerBar{4};   // the meter the host last reported (4/4 when it gives none)
   std::atomic<int> hostBeatUnit{4};
   std::atomic<double> activeBpm{120.0};        // tempo the last block used (host tempo, else the manual fallback)
@@ -95,6 +100,33 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Number of decodeFile calls made by the calling thread so far (lets tests prove setStateInformation does no decoding).
   static int decodeCallsOnThisThread();
 
+  // ---- input capture (F12; docs/specs/roadmap/F12-input-capture.md) ----
+  // Source limits shared by file decoding and capture (the capture module's constants are asserted equal).
+  static constexpr double kMaxSourceSeconds = 60.0;
+  static constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
+  chopfractal::capture::CaptureEngine& captureEngine() { return capture_; }
+  // Arm: fills the engine settings from the host (input channels, sample rate, tempo, meter). An unkept capture in the
+  // Captured state is discarded first (the editor asks the user before calling). Refusals are returned and shown as the
+  // status message.
+  chopfractal::Status armCapture(chopfractal::capture::CaptureMode mode, int bars, double maxSeconds);
+  // Capture button / Stop button / Discard button.
+  chopfractal::Status startCapture() { return capture_.startNow(); }
+  void stopCapture() { capture_.requestStop(); }
+  void discardCapture() { capture_.discard(); capture_.reap(); }
+  // Keep: moves the captured audio into the project on a worker, replaces the source (embedded in the project), and, with
+  // `chopAfter`, runs Smart Setup. One level of undo (Undo Keep) is stored first.
+  void keepCaptureAsync(bool chopAfter);
+  bool captureKeepInFlight() const { return keepInFlight_.load(); }
+  bool undoKeep();
+  bool canUndoKeep() const { return canUndoKeep_.load(); }
+  void clearUndoKeep();  // the undo window ends with the next Generate, Mutate, Load or Capture
+  bool captureBlocked() const { return captureBlocked_.load(); }  // an offline render is running
+  // Tests only: pretend the host gave this many input channels (-1 = use the real count). The bus layout rules never allow
+  // fewer than one, so this is the only way to reach the "no input" refusal.
+  void overrideInputChannelsForTesting(int channels) { inputOverride_.store(channels); }
+  // Everything buildCaptureView() needs, read from the engine, the host state and the session (message thread).
+  chopfractal::ui::CaptureUiInput captureUiInput(chopfractal::capture::CaptureMode mode, int bars, double maxSeconds);
+
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
@@ -102,6 +134,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);
+  void pollCapture();     // message thread: frees idle capture memory and reports how a capture ended
+  void finishKeep(std::uint64_t ticket, std::shared_ptr<const chopfractal::render::SourceData> data, std::string name, bool chopAfter, bool wrapped, double seconds, bool failed);
   void pollOutputStage();  // message thread: gesture-effect settings, level-match measurement, export parameters, latency
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -112,6 +146,17 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};
   std::array<double, 5> lastGrooveParams_{};  // Groove Lab knobs as of the last poll (message thread): the session is touched only when one moved
   std::atomic<double> sampleRate_{48000.0};
+  chopfractal::capture::CaptureEngine capture_;
+  std::atomic<bool> captureBlocked_{false};
+  std::atomic<int> inputOverride_{-1};
+  int captureInputChannels() const { const int o = inputOverride_.load(); return o >= 0 ? o : getTotalNumInputChannels(); }
+  std::atomic<bool> keepInFlight_{false};
+  std::atomic<bool> canUndoKeep_{false};
+  chopfractal::capture::CaptureState lastCaptureState_ = chopfractal::capture::CaptureState::Idle;  // message thread
+  chopfractal::composition::SourceReplaceUndo keepUndo_;
+  bool undoToEmpty_ = false;      // the capture was kept into an empty project: undo clears the source
+  bool preKeepEmbed_ = false;
+  chopfractal::SourceId keptSourceId_{};
   // pollOutputStage state (message thread only).
   chopfractal::pattern::FxPassSettings appliedFx_;
   chopfractal::render::PlaybackOptions appliedOptions_;
