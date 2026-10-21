@@ -34,6 +34,7 @@ Public headers:
 ## Dependencies
 
 - `chop_contracts` ^0.1 — event model, flatten(), chop snapshot, policy interface, RNG, byte codec, time, undo stack
+- `break_engine` ^0.1 — engine v2: role-driven bar plans, break profiles and rule tables
 
 ## Build and test
 

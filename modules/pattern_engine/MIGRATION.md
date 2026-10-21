@@ -9,6 +9,7 @@ Module `pattern_engine` 0.1.0 (API 0.1, state schema 1).
 Exact folders, in dependency order (minimum versions in parentheses):
 
 - `modules/chop_contracts/` (^0.1)
+- `modules/break_engine/` (^0.1)
 - `modules/pattern_engine/` (this module)
 
 ## 2. Copy
@@ -25,6 +26,7 @@ or copy the folders by hand, keeping any `LICENSE`/`NOTICE` files. Do not use a 
 
 ```cmake
 add_subdirectory(modules/chop_contracts)
+add_subdirectory(modules/break_engine)
 add_subdirectory(modules/pattern_engine)
 target_link_libraries(your_target PRIVATE chopfractal::pattern_engine)
 ```

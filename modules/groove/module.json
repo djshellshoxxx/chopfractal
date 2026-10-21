@@ -1,0 +1,45 @@
+{
+  "id": "groove",
+  "name": "Groove Lab",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::break_engine",
+  "public_headers": [
+    "include/chopfractal/groove/groove.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "DrumRole, FlatEvent, Ticks"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "Pure functions; thread-safe; grooveShift is noexcept and allocation-free. apply() sorts and belongs on the message thread.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/groove -B build/groove && cmake --build build/groove && ctest --test-dir build/groove",
+  "summary": "Playback-time groove: MPC-style swing (50 to 75 percent of a step pair on a 16th or 8th grid), per-role push/pull, seeded humanize of time and velocity, a 16-cell accent curve and eight named templates. A groove never edits stored events; the caller applies grooveShift (or apply) once when it builds a playback snapshot or a MIDI file.",
+  "public_api": [
+    "`Groove` (enabled, template, swing, grid, push/pull per role class, humanize time and velocity, seed, accent, bake flag) and `makeTemplate`",
+    "`grooveShift(groove, role, tick, eventIndex, ticksPerBar, stepsPerBar, loopIndex)` -> `Shift{ticks, velScale}`",
+    "`apply(groove, FlatEventList&, loopTicks, ticksPerBar, stepsPerBar, roleOf)` shifts a flattened pattern",
+    "`serialize` / `parse`: the 46-byte project-state form; `sanitized` clamps every field"
+  ],
+  "limits": [
+    "Shifts are limited to less than half a groove step so events never swap order",
+    "Swing is defined per step pair of the pattern's own step grid (16th or 8th variant)"
+  ],
+  "adapters": [
+    "Pass a function from chop to RoleClass (use classOf(DrumRole))"
+  ],
+  "adapter_notes": "The groove is playback-time only: call apply() on the flattened list before you build your playback, and pass the same Groove to your MIDI writer.",
+  "removal": "Delete the folder and the composition hook (composition/src/groove.cpp); patterns are unaffected because a groove never writes into them.",
+  "example": "examples/minimal.cpp"
+}
