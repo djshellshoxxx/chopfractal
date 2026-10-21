@@ -48,6 +48,7 @@ class ExportJob {
   ExportWavOptions wavOptions_;
   KitOptions kitOptions_;
   std::shared_ptr<const render::Playback> playback_;      // WAV
+  render::RenderParams renderParams_;                     // WAV: output stage as of planning (limiter, match gain, polish, effect mask)
   std::shared_ptr<const render::SourceData> source_;      // kit
   ChopSnapshotPtr chops_;                                 // kit
   std::vector<std::string> targets_;                      // kit: slice files, <name>.mid, kit.txt (full paths)

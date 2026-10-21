@@ -36,6 +36,32 @@ const Golden kGolden[] = {
     {"allow_crunch", ParamKind::Bool, 0.0, 1.0, 0.0, 2},
     {"fx_intensity", ParamKind::Float, 0.0, 1.0, 0.5, 2},
     {"chaos", ParamKind::Float, 0.0, 1.0, 0.0, 3},
+    {"level_match", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"match_trim_db", ParamKind::Float, -6.0, 6.0, 0.0, 3},
+    {"limiter_enable", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"limiter_ceiling_db", ParamKind::Float, -6.0, 0.0, -1.0, 3},
+    {"allow_echo", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"echo_amount", ParamKind::Float, 0.0, 100.0, 40.0, 3},
+    {"echo_rate", ParamKind::Choice, 0.0, 3.0, 1.0, 3},
+    {"echo_decay", ParamKind::Float, 10.0, 90.0, 55.0, 3},
+    {"echo_tone", ParamKind::Float, 0.0, 100.0, 50.0, 3},
+    {"allow_tremolo", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"trem_amount", ParamKind::Float, 0.0, 100.0, 30.0, 3},
+    {"trem_mode", ParamKind::Choice, 0.0, 2.0, 2.0, 3},
+    {"trem_rate", ParamKind::Choice, 0.0, 3.0, 1.0, 3},
+    {"trem_depth", ParamKind::Float, 0.0, 100.0, 60.0, 3},
+    {"allow_stutter", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"stutter_amount", ParamKind::Float, 0.0, 100.0, 25.0, 3},
+    {"stutter_rate", ParamKind::Choice, 0.0, 9.0, 4.0, 3},
+    {"stutter_gate", ParamKind::Float, 10.0, 100.0, 80.0, 3},
+    {"stutter_decay_db", ParamKind::Float, -12.0, 6.0, -1.5, 3},
+    {"stutter_pitch", ParamKind::Float, -12.0, 12.0, 0.0, 3},
+    {"allow_roll", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"roll_amount", ParamKind::Float, 0.0, 100.0, 20.0, 3},
+    {"roll_rate", ParamKind::Choice, 0.0, 9.0, 4.0, 3},
+    {"roll_rate_end", ParamKind::Choice, 0.0, 9.0, 8.0, 3},
+    {"roll_freeze", ParamKind::Float, 0.0, 100.0, 0.0, 3},
+    {"slice_polish", ParamKind::Bool, 0.0, 1.0, 1.0, 3},
 };
 }  // namespace
 
@@ -85,6 +111,22 @@ CHOP_TEST(values_default_set_and_map_to_render_params) {
   CHECK_NEAR(p.get(kDensity), 0.5, 0.0);
   const render::RenderParams defaults = toRenderParams(p);
   CHECK(defaults.enabled && defaults.dryMix == 0.f && defaults.outputGainDb == 0.f);
+  CHECK(defaults.slicePolish && !defaults.limiterEnabled && defaults.limiterCeilingDb == -1.f && defaults.matchGainDb == 0.f);
+  CHECK_EQ(defaults.fxMask, 0);
+  p.set(kAllowEcho, 1.0);
+  p.set(kAllowRoll, 1.0);
+  p.set(kLimiterEnable, 1.0);
+  const render::RenderParams fx = toRenderParams(p, 3.5f);
+  CHECK_EQ(fx.fxMask, render::fxbit::kEcho | render::fxbit::kRoll);
+  CHECK(fx.limiterEnabled && fx.matchGainDb == 3.5f);
+  p.set(kAllowEcho, 0.0);
+  p.set(kAllowRoll, 0.0);
+  p.set(kLimiterEnable, 0.0);
+  const render::PlaybackOptions po = toPlaybackOptions(p);
+  CHECK_EQ(po.echoRate, 1);
+  CHECK_EQ(po.echoDecay, 55);
+  CHECK_EQ(po.tremMode, 2);
+  CHECK_EQ(po.tremDepth, 60);
   p.set(kDryMix, 2.0);
   p.set(kOutputGainDb, -6.0);
   p.set(kEffectEnable, 0.0);

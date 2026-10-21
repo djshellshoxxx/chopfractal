@@ -12,6 +12,8 @@
 // crosses to the audio thread is the immutable render::Playback published through the Mailbox.
 #include <chopfractal/audio_renderer/renderer.hpp>
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
+#include <chopfractal/level_match/level_match.hpp>
+#include <chopfractal/pattern_engine/fx_pass.hpp>
 #include <chopfractal/pattern_engine/pattern.hpp>
 #include <chopfractal/pattern_engine/session.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
@@ -27,6 +29,7 @@
 #include <chopfractal/evolve/evolve.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
 #include <chopfractal/wav_export/wav.hpp>
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -172,6 +175,23 @@ class ProjectSession {
   void attachMailbox(render::Mailbox<render::Playback>* mailbox);
   std::shared_ptr<const render::Playback> playback() const { return playback_; }
   Result<std::vector<std::vector<float>>> renderOffline(const render::OfflineSettings& settings) const;
+
+  // ---- gesture effects, output stage (docs/specs/roadmap/E01, E02, F16) ----
+  // Which events carry Echo / Tremolo-Pan / Stutter / Roll, and the global fallbacks the blocks refer to. A change
+  // re-runs the effect pass over the current pattern (one undo entry, never touches timing or chops) and republishes.
+  // Generate, Mutate and every other pattern change keep applying the stored settings.
+  Status setFx(const pattern::FxPassSettings& pass, const render::PlaybackOptions& options);
+  const pattern::FxPassSettings& fxSettings() const { return fx_; }
+  const render::PlaybackOptions& playbackOptions() const { return playbackOptions_; }
+  // The parameters the exporter renders with (limiter, ceiling, polish, gesture mask, output gain); dry mix is ignored.
+  void setRenderParams(const render::RenderParams& params) { renderParams_ = params; }
+  // Same parameters plus the measured match gain, as the processor uses them.
+  render::RenderParams renderParams() const;
+  float matchGainDb() const { return matchGainDb_.load(std::memory_order_relaxed); }
+  // Level match (F16): measures the source and one cycle of the pattern and stores the gain renderParams() reports.
+  // Runs on the calling (message or worker) thread; returns a result with valid == false and gain 0 when level match is
+  // off, there is no source or pattern, or the pattern is silent.
+  Result<levelmatch::MatchResult> updateLevelMatch(const host::ParamValues& values, double bpm);
   Result<render::PreviewRequest> auditionRequest(ChopId chop) const;  // same read/fade path as playback
 
   // ---- source and chops ----
@@ -319,6 +339,10 @@ class ProjectSession {
   history::NodeId pendingActivation_ = history::kNoNode;
   render::Mailbox<render::Playback>* mailbox_ = nullptr;
   std::shared_ptr<const render::Playback> playback_;
+  pattern::FxPassSettings fx_;
+  render::PlaybackOptions playbackOptions_;
+  render::RenderParams renderParams_;
+  std::atomic<float> matchGainDb_{0.f};
   codec::MigrationRegistry migrations_;
   ProjectExtras extras_;
   std::map<std::uint8_t, StateSection> sections_;  // tags 9..31 (and unknown tags >= 32), saved in tag order
@@ -342,5 +366,7 @@ pattern::Settings settingsFromParams(const host::ParamValues& values, pattern::S
 // output always satisfies pattern::validateSettings when `base` does. settingsFromParams applies it.
 pattern::Settings applyChaos(const pattern::Settings& base, double chaos);
 double mutateAmountFromParams(const host::ParamValues& values);
+// Effect-pass settings and global fallbacks from the automation values (allow_* off means amount 0).
+pattern::FxPassSettings fxSettingsFromParams(const host::ParamValues& values, std::uint64_t seed = 1);
 
 }  // namespace chopfractal::composition

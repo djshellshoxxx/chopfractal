@@ -218,6 +218,9 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderWavBytes(const ExportWav
   rs.bpm = o.bpm;
   rs.cycles = o.loops;
   rs.tailSeconds = o.tailSeconds;
+  rs.params = renderParams();
+  rs.params.enabled = true;
+  rs.params.dryMix = 0.f;
   auto audio = render::renderOffline(playback_, rs);
   if (!audio.ok()) return audio.error();
   return wav::encode(audio.value(), o.wav);

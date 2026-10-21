@@ -36,6 +36,32 @@ enum ParamIndex : std::size_t {
   kAllowCrunch,
   kFxIntensity,
   kChaos,         // manifest version 3
+  kLevelMatch,    // F16
+  kMatchTrimDb,
+  kLimiterEnable,
+  kLimiterCeilingDb,
+  kAllowEcho,     // E01
+  kEchoAmount,
+  kEchoRate,
+  kEchoDecay,
+  kEchoTone,
+  kAllowTremolo,  // E02
+  kTremAmount,
+  kTremMode,
+  kTremRate,
+  kTremDepth,
+  kAllowStutter,  // Stutter (E03)
+  kStutterAmount,
+  kStutterRate,
+  kStutterGate,
+  kStutterDecayDb,
+  kStutterPitch,
+  kAllowRoll,     // Roll (E04)
+  kRollAmount,
+  kRollRate,
+  kRollRateEnd,
+  kRollFreeze,
+  kSlicePolish,   // renderer slice-boundary quality stage
   kParamCount
 };
 
@@ -71,6 +97,9 @@ struct ParamValues {
 int barsFromChoice(double choiceIndex);
 
 // Block-level render parameters from the current automation values.
-render::RenderParams toRenderParams(const ParamValues& values);
+// matchGainDb is not a parameter: the composition layer measures it and passes it in (0 = no match gain).
+render::RenderParams toRenderParams(const ParamValues& values, float matchGainDb = 0.f);
+// Global fallbacks of the Echo and Tremolo-Pan blocks that carry "use the global value" markers.
+render::PlaybackOptions toPlaybackOptions(const ParamValues& values);
 
 }  // namespace chopfractal::host

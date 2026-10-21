@@ -146,6 +146,7 @@ class Renderer {
   int activeVoices() const;                             // sounding + fading voices (preview excluded)
   // Latency of the safety limiter while it is enabled (0 otherwise); updated once per block.
   int latencyFrames() const;
+  void primeLimiter();  // non-RT: start the limiter as if it had been running on silence (offline renders)
   LimiterTelemetry& limiterTelemetry();
   std::uint64_t droppedTriggers() const;
 

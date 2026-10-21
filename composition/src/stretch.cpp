@@ -234,7 +234,7 @@ Status ProjectSession::applyStretched(const StretchPlan& sp, std::shared_ptr<con
     if (!valid.ok()) return valid.error();
     auto flat = pattern::flatten(clean, *newChops);
     if (!flat.ok()) return flat.error();
-    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(clean));
+    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(clean), playbackOptions_);
     if (!pb.ok()) return pb.error();
     newPlayback = pb.value();
     newPattern = std::move(clean);

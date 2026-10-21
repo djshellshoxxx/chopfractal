@@ -34,6 +34,7 @@ class Limiter {
   void prepare(double sampleRate, int maxBlock);  // non-RT: sizes every buffer
   int latencyFrames() const { return latency_; }  // lookahead + detector delay, constant for a sample rate
   static int latencyFor(double sampleRate);       // what latencyFrames() returns after prepare(sampleRate)
+  void prime() noexcept;                           // reset, then behave as if silence had been limited for a long time (no warm-up, fully faded in)
   void reset() noexcept;                           // clears the delay line; the limiter restarts from its warm-up
   // In place, planar. Disabled (and fully faded out) it does nothing at all.
   void process(const LimiterParams& params, float* l, float* r, int frames) noexcept;

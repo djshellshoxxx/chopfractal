@@ -122,7 +122,7 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
 
-  renderer_.process(tt.block, cf::host::toRenderParams(pv), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
+  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
@@ -148,7 +148,44 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
 }
 
+void ChopFractalProcessor::pollOutputStage() {
+  const cf::host::ParamValues pv = currentParams();
+  const cf::pattern::FxPassSettings fx = cf::composition::fxSettingsFromParams(pv, appliedFx_.seed);
+  const cf::render::PlaybackOptions opt = cf::host::toPlaybackOptions(pv);
+  const double bpm = std::round(activeBpm.load(std::memory_order_relaxed));
+  withSession([&](cf::composition::ProjectSession& s) {
+    if (!fxApplied_ || !(fx == appliedFx_) || opt.echoRate != appliedOptions_.echoRate || opt.echoDecay != appliedOptions_.echoDecay ||
+        opt.echoTone != appliedOptions_.echoTone || opt.tremMode != appliedOptions_.tremMode || opt.tremRate != appliedOptions_.tremRate ||
+        opt.tremDepth != appliedOptions_.tremDepth) {
+      const cf::Status st = s.setFx(fx, opt);
+      if (!st.ok()) setStatusMessage("Effects: " + juce::String(st.error().message));
+      appliedFx_ = fx;
+      appliedOptions_ = opt;
+      fxApplied_ = true;
+    }
+    s.setRenderParams(cf::host::toRenderParams(pv));
+    MatchKey key;
+    key.playback = s.playback().get();
+    key.on = pv.get(cf::host::kLevelMatch) >= 0.5;
+    key.limiter = pv.get(cf::host::kLimiterEnable) >= 0.5;
+    key.trim = pv.get(cf::host::kMatchTrimDb);
+    key.ceiling = pv.get(cf::host::kLimiterCeilingDb);
+    key.bpm = bpm;
+    if (!(key == matchKey_)) {
+      matchKey_ = key;
+      auto m = s.updateLevelMatch(pv, bpm);
+      if (!m.ok()) setStatusMessage("Level match: " + juce::String(m.error().message));
+    }
+  });
+  const int latency = renderer_.latencyFrames();
+  if (latency != reportedLatency_) {
+    reportedLatency_ = latency;
+    setLatencySamples(latency);
+  }
+}
+
 void ChopFractalProcessor::pollAudioFlags() {
+  pollOutputStage();
   // A quantized switch can only complete when a pattern is playing; without one, apply it now.
   if (patternQuarters_.load(std::memory_order_relaxed) <= 0.0)
     withSession([](cf::composition::ProjectSession& s) {

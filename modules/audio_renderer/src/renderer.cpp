@@ -773,6 +773,8 @@ int Renderer::activeVoices() const {
 }
 
 int Renderer::latencyFrames() const { return impl_->latency.load(std::memory_order_relaxed); }
+void Renderer::primeLimiter() { impl_->limiter.prime(); }
+
 LimiterTelemetry& Renderer::limiterTelemetry() { return impl_->limiter.telemetry(); }
 
 std::uint64_t Renderer::droppedTriggers() const { return impl_->dropped; }
@@ -823,6 +825,7 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
         aborted = true;
     }
   };
+  if (lat > 0) r.primeLimiter();  // the export starts as if the limiter had been running on the silence before it
   renderRange(0, mainFrames, true);
   renderRange(mainFrames, total + lat, false);
   if (!aborted && progress && !progress(1.0)) aborted = true;

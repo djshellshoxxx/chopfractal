@@ -87,6 +87,12 @@ void Limiter::reset() noexcept {
   active_ = false;
 }
 
+void Limiter::prime() noexcept {
+  reset();
+  active_ = true;
+  mix_ = 1.f;
+}
+
 void Limiter::process(const LimiterParams& params, float* l, float* r, int frames) noexcept {
   if (frames <= 0 || !l || !r) return;
   const bool wantOn = params.enabled;

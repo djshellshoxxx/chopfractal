@@ -4,6 +4,7 @@
 #include "state_wire.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace chopfractal::composition {
@@ -192,7 +193,7 @@ Status ProjectSession::installPlayback(const pattern::Pattern& p) {
   auto flat = pattern::flatten(p, *chops_);
   if (!flat.ok()) return flat.error();
   if (!sourceData_) return {};  // source missing: pattern authoring continues without audio
-  auto pb = render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p));
+  auto pb = render::makePlayback(sourceData_, flat.value(), pattern::lengthTicks(p), playbackOptions_);
   if (!pb.ok()) return pb.error();
   publish(pb.value());
   return {};
@@ -214,6 +215,7 @@ Status ProjectSession::republish() {
 
 Status ProjectSession::finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report) {
   if (!result.ok()) return result.error();
+  if (fx_.any()) result = pattern::applyFxPass(result.value(), fx_);  // gesture effects follow every new pattern
   Status v = installPlayback(result.value());  // validated before the audio side ever sees it
   if (!v.ok()) return v;
   patterns_.adopt(std::move(result.value()));
@@ -803,7 +805,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
     auto flat = pattern::flatten(p.value(), *newChops);  // the pattern must fit the saved chops
     if (!flat.ok()) return makeError(ErrorCode::Corrupt, "the saved pattern does not fit the saved chops: " + flat.error().message);
     if (newData) {
-      auto pb = render::makePlayback(newData, flat.value(), pattern::lengthTicks(p.value()));
+      auto pb = render::makePlayback(newData, flat.value(), pattern::lengthTicks(p.value()), playbackOptions_);
       if (!pb.ok()) return makeError(ErrorCode::Corrupt, "the saved pattern cannot be played: " + pb.error().message);
       newPlayback = pb.value();
     }
@@ -941,6 +943,24 @@ void ProjectSession::reset() {
 // ---------------------------------------------------------------------------------------------
 // host parameter binding
 // ---------------------------------------------------------------------------------------------
+
+pattern::FxPassSettings fxSettingsFromParams(const host::ParamValues& v, std::uint64_t seed) {
+  pattern::FxPassSettings s;
+  s.seed = seed;
+  auto amount = [&](host::ParamIndex allow, host::ParamIndex amt) { return v.get(allow) >= 0.5 ? v.get(amt) / 100.0 : 0.0; };
+  s.echoAmount = amount(host::kAllowEcho, host::kEchoAmount);
+  s.tremPanAmount = amount(host::kAllowTremolo, host::kTremAmount);
+  s.stutterAmount = amount(host::kAllowStutter, host::kStutterAmount);
+  s.rollAmount = amount(host::kAllowRoll, host::kRollAmount);
+  s.stutterRate = static_cast<int>(std::lround(v.get(host::kStutterRate)));
+  s.stutterGate = static_cast<int>(std::lround(v.get(host::kStutterGate)));
+  s.stutterDecay = static_cast<int>(std::lround(v.get(host::kStutterDecayDb) * 10.0));
+  s.stutterPitch = static_cast<int>(std::lround(v.get(host::kStutterPitch) * 10.0));
+  s.rollRate = static_cast<int>(std::lround(v.get(host::kRollRate)));
+  s.rollRateEnd = static_cast<int>(std::lround(v.get(host::kRollRateEnd)));
+  s.rollFreeze = static_cast<int>(std::lround(v.get(host::kRollFreeze)));
+  return s;
+}
 
 pattern::Settings settingsFromParams(const host::ParamValues& v, pattern::Settings base) {
   base.density = v.get(host::kDensity);
