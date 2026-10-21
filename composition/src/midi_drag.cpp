@@ -185,9 +185,9 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderVariationMidi(history::N
   return midiFromPattern(p.value(), o);
 }
 
-// One pattern (already repaired against today's chops) as MIDI: the playback's expansion (gesture effects, groove per its bake flag)
-// when audio exists, the chop map alone otherwise. Shared by variation export and scene export.
-Result<std::vector<std::uint8_t>> ProjectSession::midiFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& o) const {
+// One pattern (already repaired against today's chops) as a MIDI file description: the playback's expansion (gesture effects,
+// groove per its bake flag) when audio exists, the chop map alone otherwise. Shared by variation, scene and arrangement export.
+Result<midi::FileSpec> ProjectSession::midiSpecFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& o) const {
   if (!chops_ || chops_->chops.empty()) return makeError(ErrorCode::InvalidArgument, "load a source with chops first");
   FlatEventList events;
   const Ticks length = pattern::lengthTicks(fixed);
@@ -200,7 +200,11 @@ Result<std::vector<std::uint8_t>> ProjectSession::midiFromPattern(const pattern:
     if (!flat.ok()) return flat.error();
     events = render::expandRetriggers(flat.value(), length);
   }
-  auto spec = midibuild::buildSpec(events, length, fixed.settings.timeSignature, *chops_, o);
+  return midibuild::buildSpec(events, length, fixed.settings.timeSignature, *chops_, o);
+}
+
+Result<std::vector<std::uint8_t>> ProjectSession::midiFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& o) const {
+  auto spec = midiSpecFromPattern(fixed, o);
   if (!spec.ok()) return spec.error();
   return midi::encode(spec.value());
 }

@@ -30,6 +30,7 @@ struct Ev {
   int note;
   int vel;
   int channel;
+  int marker = -1;  // index into spec.markers for a marker meta event
 };
 
 int log2Den(int d) {
@@ -72,7 +73,12 @@ Result<std::vector<std::uint8_t>> encode(const FileSpec& spec) {
     if (it != last.end()) end[it->second] = std::min(end[it->second], notes[i].start);
     last[key] = i;
   }
+  if (spec.markers.size() > kMaxMarkers) return makeError(ErrorCode::LimitExceeded, "too many markers", static_cast<std::int64_t>(kMaxMarkers));
+  for (const Marker& m : spec.markers)
+    if (m.tick < 0 || m.tick > 0x0FFFFFFF) return makeError(ErrorCode::OutOfRange, "invalid marker timing");
+  if (spec.endTick < 0 || spec.endTick > 0x0FFFFFFF) return makeError(ErrorCode::OutOfRange, "invalid end of track");
   std::vector<Ev> evs;
+  for (std::size_t i = 0; i < spec.markers.size(); ++i) evs.push_back({spec.markers[i].tick, 0, 0, 0, 0, static_cast<int>(i)});
   for (std::size_t i = 0; i < notes.size(); ++i) {
     if (end[i] <= notes[i].start) continue;
     evs.push_back({notes[i].start, 2, notes[i].note, notes[i].velocity, notes[i].channel});
@@ -100,11 +106,19 @@ Result<std::vector<std::uint8_t>> encode(const FileSpec& spec) {
   for (const Ev& e : evs) {
     vlq(trk, static_cast<std::uint32_t>(e.tick - now));
     now = e.tick;
+    if (e.marker >= 0) {
+      const std::string text = spec.markers[static_cast<std::size_t>(e.marker)].text.substr(0, 100);
+      trk.insert(trk.end(), {0xFF, 0x06});
+      vlq(trk, static_cast<std::uint32_t>(text.size()));
+      trk.insert(trk.end(), text.begin(), text.end());
+      continue;
+    }
     trk.push_back(static_cast<std::uint8_t>((e.order == 2 ? 0x90 : 0x80) | e.channel));
     trk.push_back(static_cast<std::uint8_t>(e.note));
     trk.push_back(static_cast<std::uint8_t>(e.order == 2 ? e.vel : 0));
   }
-  trk.insert(trk.end(), {0x00, 0xFF, 0x2F, 0x00});
+  vlq(trk, spec.endTick > now ? static_cast<std::uint32_t>(spec.endTick - now) : 0u);
+  trk.insert(trk.end(), {0xFF, 0x2F, 0x00});
 
   std::vector<std::uint8_t> out{'M', 'T', 'h', 'd'};
   be32(out, 6);
@@ -134,6 +148,7 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
   std::uint8_t running = 0;
   std::map<std::pair<int, int>, std::pair<Ticks, int>> open;
   bool ended = false;
+  Ticks lastEvent = 0;
   auto readVlq = [&](std::uint32_t& v) {
     v = 0;
     for (int i = 0; i < 4; ++i) {
@@ -164,7 +179,15 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
       const std::uint8_t type = d[p++];
       std::uint32_t ml;
       if (!readVlq(ml) || ml > endp - p) return bad("truncated meta event");
-      if (type == 0x2F) ended = true;
+      if (type == 0x2F) {
+        ended = true;
+        if (now > lastEvent) spec.endTick = now;
+      }
+      else if (type == 0x06) {
+        if (spec.markers.size() >= kMaxMarkers) return bad("too many markers");
+        spec.markers.push_back({now, std::string(reinterpret_cast<const char*>(d + p), ml)});
+        lastEvent = now;
+      }
       else if (type == 0x03) spec.trackName.assign(reinterpret_cast<const char*>(d + p), ml);
       else if (type == 0x51 && ml == 3) {
         const std::uint32_t mpq = static_cast<std::uint32_t>((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
@@ -190,6 +213,7 @@ Result<FileSpec> decode(const std::uint8_t* d, std::size_t n) {
       const int a = d[p], b = need == 2 ? d[p + 1] : 0;
       p += need;
       if (a > 127 || b > 127) return bad("invalid data byte");
+      if (kind == 0x80 || kind == 0x90) lastEvent = now;
       if (kind == 0x90 && b > 0) {
         if (open.count({ch, a})) return bad("note started twice");
         open[{ch, a}] = {now, b};

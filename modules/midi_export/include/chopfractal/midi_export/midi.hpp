@@ -19,12 +19,21 @@ struct Note {
   int channel = 0;     // 0..15
 };
 
+// A marker meta event (0xFF 0x06), e.g. a section name.
+struct Marker {
+  Ticks tick = 0;
+  std::string text;  // at most 100 bytes are written
+};
+constexpr std::size_t kMaxMarkers = 256;
+
 struct FileSpec {
   double bpm = 120.0;  // 20..999
   int numerator = 4;
   int denominator = 4;  // 1, 2, 4, 8, 16 or 32
   std::string trackName;
   std::vector<Note> notes;
+  std::vector<Marker> markers;  // written before the notes of the same tick
+  Ticks endTick = 0;            // end of track is placed here when it lies after the last event (0 = right after the last event)
 };
 
 constexpr std::size_t kMaxNotes = 65536;

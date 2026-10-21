@@ -181,4 +181,61 @@ std::string sceneClearPromptBody();                          // "This cannot be 
 std::string sceneEmptyText();                                // the empty-state line of the list
 std::string sceneStopFirstText();                            // "Stop scene playback first."
 
+// ---- Arrangement export (F18) ----
+// docs/specs/roadmap/F18-arrangement-export.md section 12 lists the session call behind every control.
+struct ArrangementRowInput {
+  int sceneNumber = 0;           // 1-based, 0 when the scene was deleted
+  std::string sceneName;
+  int patternBars = 0;
+  int bars = 4, repeats = 1;
+  bool deleted = false;
+  bool fits = true;
+};
+// `1  Scene 3 "Verse"  4 bars x 2   8 bars`; a scene that still has its default name shows `Scene 3`; a deleted one `Scene deleted`.
+std::string arrangementRowText(int index, const ArrangementRowInput& row);
+// "Total: 16 bars (32.0 s at 120 BPM)" or "Total: 6 bars (needs 8 to 32)".
+std::string arrangementTotalText(int totalBars, double bpm);
+// "Scene 2 has 4 bars; using the first 2" (empty when the section is at least as long as the pattern).
+std::string arrangementTruncationNote(int sceneNumber, int patternBars, int sectionBars);
+// The bar choices of the `Section bars` combo: multiples of the pattern length in {1,2,4,8}, else all four.
+std::vector<int> arrangementBarChoices(int patternBars);
+
+struct ArrangementViewInput {
+  std::vector<ArrangementRowInput> rows;
+  int selected = -1;
+  int totalBars = 0;
+  double bpm = 120.0;
+  int sceneCount = 0;            // scenes in the project
+  bool hasSource = false;
+  bool running = false;          // a job is running
+  int jobSection = 0, jobSections = 0;
+  double jobFraction = 0.0;
+  bool fadeOut = false;
+};
+struct ArrangementView {
+  std::vector<std::string> rows;
+  std::vector<std::string> notes;     // Info lines (truncation), one per affected row
+  std::string totalText;
+  std::string statusText;             // progress while running, else the bars warning when out of range, else empty
+  bool valid = false;                 // 8 <= total <= 32, no deleted or non-fitting scene, at least one section
+  bool exportEnabled = false;
+  std::string exportTooltip;          // why Export is disabled, empty when enabled
+  bool addEnabled = false, removeEnabled = false, moveUpEnabled = false, moveDownEnabled = false;
+  bool useChainEnabled = false, autoFillEnabled = false;
+  bool editable = true;               // false while a job runs
+  std::string closeLabel;             // "Cancel" while running, else "Close"
+  double progress = 0.0;
+};
+ArrangementView buildArrangementView(const ArrangementViewInput& in);
+// The "Arrange..." button.
+bool arrangeButtonEnabled(int sceneCount, bool hasSource);
+std::string arrangeButtonTooltip(int sceneCount);
+std::string arrangementProgressMessage(int section, int sections, double fraction);  // "Exporting arrangement: section 3 of 6 (42%)."
+std::string arrangementExportedMessage(const std::string& wavFileName, int bars, double seconds);  // "Arrangement exported: verse_arrangement.wav (16 bars, 32.0 s)."
+std::string arrangementCancelledMessage();                   // "Export cancelled. No files were written."
+std::string arrangementBarsMessage(int totalBars);           // "Arrangement needs 8 to 32 bars (now 6)."
+std::string arrangementSceneDeletedMessage(int sceneNumber); // "Scene 4 was deleted. Section removed."
+std::string arrangementWriteErrorMessage(const std::string& path, const std::string& reason);  // "Could not write <path>: <reason>"
+std::string arrangementRunningMessage();                     // "An arrangement export is already running."
+
 }  // namespace chopfractal::ui

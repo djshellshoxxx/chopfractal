@@ -258,3 +258,121 @@ CHOP_TEST(scene_messages_are_exact) {
   CHECK(sceneExportedMessage(1, "/tmp/x") == "Exported 1 scene to /tmp/x.");
   CHECK(sceneClearPromptTitle() == "Delete all scenes?" && sceneClearPromptBody() == "This cannot be undone.");
 }
+
+CHOP_TEST(arrangement_row_and_total_text_match_the_spec_examples) {
+  ArrangementRowInput r;
+  r.sceneNumber = 3;
+  r.sceneName = "Verse";
+  r.bars = 4;
+  r.repeats = 2;
+  CHECK(arrangementRowText(1, r) == "1  Scene 3 \"Verse\"  4 bars x 2   8 bars");
+  r.sceneName = "Scene 3";
+  CHECK(arrangementRowText(2, r) == "2  Scene 3  4 bars x 2   8 bars");
+  r.bars = 1;
+  r.repeats = 1;
+  CHECK(arrangementRowText(3, r) == "3  Scene 3  1 bar x 1   1 bar");
+  r.fits = false;
+  CHECK(arrangementRowText(3, r) == "3  Scene 3  1 bar x 1   1 bar (does not fit the chops)");
+  ArrangementRowInput d;
+  d.deleted = true;
+  d.bars = 2;
+  d.repeats = 4;
+  d.fits = false;
+  CHECK(arrangementRowText(4, d) == "4  Scene deleted  2 bars x 4   8 bars");
+  CHECK(arrangementTotalText(16, 120.0) == "Total: 16 bars (32.0 s at 120 BPM)");
+  CHECK(arrangementTotalText(8, 133.0) == "Total: 8 bars (14.4 s at 133 BPM)");
+  CHECK(arrangementTotalText(6, 120.0) == "Total: 6 bars (needs 8 to 32)");
+  CHECK(arrangementTotalText(33, 120.0) == "Total: 33 bars (needs 8 to 32)");
+  CHECK(arrangementTotalText(32, 120.4) == "Total: 32 bars (64.0 s at 120 BPM)");
+}
+
+CHOP_TEST(arrangement_bar_choices_and_truncation_note) {
+  CHECK((arrangementBarChoices(2) == std::vector<int>{2, 4, 8}));
+  CHECK((arrangementBarChoices(1) == std::vector<int>{1, 2, 4, 8}));
+  CHECK((arrangementBarChoices(4) == std::vector<int>{4, 8}));
+  CHECK((arrangementBarChoices(8) == std::vector<int>{8}));
+  CHECK((arrangementBarChoices(3) == std::vector<int>{1, 2, 4, 8}));
+  CHECK((arrangementBarChoices(16) == std::vector<int>{1, 2, 4, 8}));
+  CHECK(arrangementTruncationNote(2, 4, 2) == "Scene 2 has 4 bars; using the first 2");
+  CHECK(arrangementTruncationNote(2, 4, 4).empty() && arrangementTruncationNote(2, 2, 8).empty());
+}
+
+CHOP_TEST(arrangement_view_enable_rules) {
+  ArrangementViewInput in;
+  in.sceneCount = 3;
+  in.hasSource = true;
+  in.bpm = 120.0;
+  ArrangementView v = buildArrangementView(in);
+  CHECK(v.rows.empty() && !v.exportEnabled && v.exportTooltip == "Add at least one section.");
+  CHECK(v.addEnabled && v.useChainEnabled && v.autoFillEnabled && !v.removeEnabled && v.closeLabel == "Close");
+  for (int i = 0; i < 3; ++i) {
+    ArrangementRowInput r;
+    r.sceneNumber = i + 1;
+    r.sceneName = "Scene " + std::to_string(i + 1);
+    r.patternBars = 4;
+    r.bars = 4;
+    r.repeats = i == 0 ? 2 : 1;
+    in.rows.push_back(r);
+  }
+  in.totalBars = 16;
+  in.selected = 1;
+  v = buildArrangementView(in);
+  CHECK(v.valid && v.exportEnabled && v.exportTooltip.empty() && v.statusText.empty());
+  CHECK(v.totalText == "Total: 16 bars (32.0 s at 120 BPM)");
+  CHECK(v.removeEnabled && v.moveUpEnabled && v.moveDownEnabled);
+  in.selected = 0;
+  CHECK(!buildArrangementView(in).moveUpEnabled);
+  in.selected = 2;
+  CHECK(!buildArrangementView(in).moveDownEnabled);
+  // out of range: text warning, export off
+  in.totalBars = 6;
+  v = buildArrangementView(in);
+  CHECK(!v.valid && !v.exportEnabled && v.statusText == "Arrangement needs 8 to 32 bars (now 6)." && v.exportTooltip == v.statusText);
+  in.totalBars = 33;
+  CHECK(!buildArrangementView(in).exportEnabled);
+  in.totalBars = 8;
+  CHECK(buildArrangementView(in).exportEnabled);
+  // a deleted scene blocks the export and keeps its row
+  in.totalBars = 16;
+  in.rows[1].deleted = true;
+  v = buildArrangementView(in);
+  CHECK(!v.exportEnabled && v.rows.size() == 3 && v.rows[1].find("Scene deleted") != std::string::npos);
+  CHECK(v.statusText == "A section uses a scene that was deleted.");
+  in.rows[1].deleted = false;
+  in.rows[2].fits = false;
+  CHECK(!buildArrangementView(in).exportEnabled);
+  in.rows[2].fits = true;
+  // a 4-bar pattern cut to 2 bars gets the Info note
+  in.rows[0].bars = 2;
+  in.rows[0].repeats = 8;
+  v = buildArrangementView(in);
+  CHECK(v.notes.size() == 1 && v.notes[0] == "Scene 1 has 4 bars; using the first 2");
+  // no source: off with a reason
+  in.hasSource = false;
+  v = buildArrangementView(in);
+  CHECK(!v.exportEnabled && v.exportTooltip == "Load a source first.");
+  in.hasSource = true;
+  // running: everything frozen, Cancel offered, progress text
+  in.running = true;
+  in.jobSection = 3;
+  in.jobSections = 6;
+  in.jobFraction = 0.42;
+  v = buildArrangementView(in);
+  CHECK(v.statusText == "Exporting arrangement: section 3 of 6 (42%)." && v.closeLabel == "Cancel" && !v.editable);
+  CHECK(!v.exportEnabled && !v.addEnabled && !v.removeEnabled && !v.moveUpEnabled && !v.useChainEnabled && !v.autoFillEnabled);
+  CHECK(v.progress > 0.41 && v.progress < 0.43);
+}
+
+CHOP_TEST(arrangement_messages_are_exact) {
+  CHECK(arrangementProgressMessage(3, 6, 0.42) == "Exporting arrangement: section 3 of 6 (42%).");
+  CHECK(arrangementProgressMessage(1, 1, 1.5) == "Exporting arrangement: section 1 of 1 (100%).");
+  CHECK(arrangementExportedMessage("verse_arrangement.wav", 16, 32.0) == "Arrangement exported: verse_arrangement.wav (16 bars, 32.0 s).");
+  CHECK(arrangementCancelledMessage() == "Export cancelled. No files were written.");
+  CHECK(arrangementBarsMessage(6) == "Arrangement needs 8 to 32 bars (now 6).");
+  CHECK(arrangementSceneDeletedMessage(4) == "Scene 4 was deleted. Section removed.");
+  CHECK(arrangementWriteErrorMessage("/x/y.wav", "disk full") == "Could not write /x/y.wav: disk full");
+  CHECK(arrangementRunningMessage() == "An arrangement export is already running.");
+  CHECK(arrangeButtonEnabled(1, true) && !arrangeButtonEnabled(0, true) && !arrangeButtonEnabled(2, false));
+  CHECK(arrangeButtonTooltip(2) == "Build an 8 to 32 bar arrangement from your scenes and export WAV, MIDI and markers.");
+  CHECK(arrangeButtonTooltip(0) == "Record at least one scene first (Evolve scenes).");
+}

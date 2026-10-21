@@ -215,6 +215,8 @@ void ProjectSession::clearSceneState() {
   recordScenes_ = false;
   fitCache_.clear();
   fitChops_.reset();
+  arrangement_ = Arrangement{};  // it names scenes by id: a new source or a loaded project starts without one
+  sections_.erase(kTagArrangement);
 }
 
 Result<scenes::SceneId> ProjectSession::captureImpl(const std::string& nameIn, std::uint64_t evolveStep, int loops) {

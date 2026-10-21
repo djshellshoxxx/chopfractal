@@ -74,7 +74,7 @@ Version stays 3. Parameter ids are permanent and never reordered or reused; each
 
 ## 2e. State section tag registry (F01 `StateSection`)
 
-Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove` (F17), 15 `levelmatch` cache (F16), 16 `arrangement` (F18), 17 `fx` (E01, extended by E02). F19 keeps its data in a per-user file, not in project state. Pattern event flag bits: 1 to 32 used, **64 E01, 128 E02**; the byte is then full. The extension byte (formerly the has-child byte) carries bit 0 child, **bit 1 Stutter, bit 2 Roll**; five bits remain, readers reject unknown ones. Neither change alters the encoding of an event that has none of these blocks (the golden pattern hashes are unchanged).
+Authoritative table is F01 section 4.4. In use as built (2026-10-21): 11 `scenes` (F09), 16 `arrangement` (F18), both with decoders registered through the section API. Tags claimed by later specs: 14 `groove` (F17), 15 `levelmatch` cache (F16), 16 `arrangement` (F18), 17 `fx` (E01, extended by E02). F19 keeps its data in a per-user file, not in project state. Pattern event flag bits: 1 to 32 used, **64 E01, 128 E02**; the byte is then full. The extension byte (formerly the has-child byte) carries bit 0 child, **bit 1 Stutter, bit 2 Roll**; five bits remain, readers reject unknown ones. Neither change alters the encoding of an event that has none of these blocks (the golden pattern hashes are unchanged).
 
 ## 3. Branch, PR and merge rules
 
@@ -110,7 +110,7 @@ Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove`
 | `modules/audio_renderer/src/renderer.cpp` output stage and `Playback::build` | F16 (limiter, match gain), F17 (groove), E01/E02 (expansion, LFO) | sequential: F16, then F17, then E01, then E02 |
 | `modules/chop_contracts/src/event.cpp` (flags byte) | E01 (bit 64), E02 (bit 128) | none; no other feature may claim a flag bit |
 | `modules/pattern_engine/src/fx_pass.cpp` | RND (new file: `applyFxPass` for Echo, Tremolo-Pan, Stutter, Roll; ENG owns generation and does not touch it) | none |
-| `composition/src/{fx_level,groove,arrangement}.cpp` (`fx_level.cpp`: RND, setFx and level match) | F16, F17, E01/E02, F18 | thin declarations in `project_session.hpp` |
+| `composition/src/{fx_level,groove,arrangement*}.cpp` (`fx_level.cpp`: RND, setFx and level match) | F16, F17, E01/E02, F18 | thin declarations in `project_session.hpp` |
 | `plugin/src/CommandRegistry.*` | F19 | each panel registers its commands in its own `registerCommands()` |
 
 ## 5. Parameter and state budget

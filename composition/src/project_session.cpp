@@ -142,6 +142,7 @@ ProjectSession::ProjectSession() : history_(history::Config{}) {
   migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
   registerSectionDecoder(kTagGroove, "Groove", [this](const StateSection& sec) { return decodeGroove(sec); });
   registerSectionDecoder(kTagScenes, "scene", [this](const StateSection& sec) { return decodeScenes(sec); });
+  registerSectionDecoder(kTagArrangement, "arrangement", [this](const StateSection& sec) { return decodeArrangement(sec); });
 }
 
 void ProjectSession::notice(Notice::Level level, std::string text) { notices_.push_back({level, std::move(text)}); }

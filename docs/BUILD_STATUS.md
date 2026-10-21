@@ -151,4 +151,5 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F11, F12, F14 | Stems, input capture, tempo match | Not started |
 | F13 | MIDI drag-out | **Done** (logic and session API; GUI wiring pending): settings, per-variation export, Producer Kit |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
-| F16 to F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Arrangement Export, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |
+| F18 | Arrangement export | **Done** (logic and session API; GUI wiring pending): `arrangement` model and tag 16, `ArrangementJob` worker, `wav_export` cue chunk, `midi_export` markers; commands in spec section 12 |
+| F16, F17, F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |

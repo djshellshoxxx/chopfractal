@@ -29,6 +29,8 @@
 #include <chopfractal/chop_insight/insight.hpp>
 #include <chopfractal/evolve/evolve.hpp>
 #include <chopfractal/scenes/scenes.hpp>
+#include <chopfractal/composition/arrangement.hpp>
+#include <chopfractal/composition/arrangement_job.hpp>
 #include <chopfractal/fractal_rhythm/fractal.hpp>
 #include <chopfractal/groove/groove.hpp>
 #include <chopfractal/wav_export/wav.hpp>
@@ -192,6 +194,7 @@ struct StateSection {
 using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
 constexpr std::uint8_t kTagScenes = 11;       // owned by F09 Evolve scenes (composition/src/scenes.cpp)
+constexpr std::uint8_t kTagArrangement = 16;  // owned by F18 Arrangement export (composition/src/arrangement_session.cpp)
 constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
@@ -224,6 +227,26 @@ struct SceneStatus {
   int loops = 0;                     // loops `playing` lasts
   bool recording = false;
   bool waitingForTransport = false;  // running, but the host transport is stopped
+};
+
+// ---- Arrangement export (F18; composition/src/arrangement_session.cpp) ----
+struct ArrangementExportSettings {
+  std::string root;          // export folder, created when missing
+  double bpm = 120.0;        // 20..999, rounded to a whole BPM as playback does
+  wav::Options wavOptions;   // format and render sample rate
+  bool levelMatch = false;   // F16: recompute a match gain per scene
+  double matchTrimDb = 0.0;
+  std::function<void(float)> observer;  // test hook: called on the worker after every progress update
+};
+// One line of the arrangement list as the dialog shows it (the view model formats the text).
+struct ArrangementRow {
+  std::uint32_t sceneId = 0;
+  int sceneNumber = 0;        // 1-based position in the scene list, 0 when the scene was deleted
+  std::string sceneName;      // empty when deleted
+  int patternBars = 0;        // 0 when deleted
+  int bars = 4, repeats = 1;
+  bool deleted = false;       // the scene no longer exists: shown as "Scene deleted", export blocked
+  bool fits = true;           // the scene still flattens against today's chops
 };
 
 class ProjectSession {
@@ -344,6 +367,23 @@ class ProjectSession {
   SceneStatus sceneStatus() const;
   Status keepScene(scenes::SceneId id, const std::string& label = {});  // stops playback, finalize(scene pattern)
   Result<ExportReport> exportScenes(const std::string& directory, const SceneExportOptions& options) const;
+
+  // ---- Arrangement export (F18; composition/src/arrangement_session.cpp) ----
+  // The arrangement list is project state (section tag 16, absent while it is the default). It names scenes by id; a deleted
+  // scene keeps its row (flagged) and blocks the export. The export runs on one worker thread over an immutable snapshot.
+  const Arrangement& arrangement() const { return arrangement_; }
+  Status setArrangement(const Arrangement& a);  // stored even when the total is not 8..32
+  std::vector<ArrangementRow> arrangementRows() const;
+  Status fillArrangementFromChain();            // Use scene chain
+  Status autoFillArrangement();                 // Auto fill 16 bars
+  // The immutable snapshot a job renders (message thread). Validates in the order of the spec's messages.
+  Result<ArrangementPlan> planArrangementExport(const Arrangement& a, const std::string& name, const ArrangementExportSettings& settings) const;
+  // Validates (same order as the messages in the spec), snapshots and starts the worker. Returns "An arrangement export is
+  // already running." while a job runs; a finished job is replaced.
+  Status startArrangementExport(const Arrangement& a, const std::string& name, const ArrangementExportSettings& settings);
+  ArrangementJob* arrangementJob() const { return arrangementJob_.get(); }
+  void cancelArrangementExport();
+  void releaseArrangementJob();                 // after the result was read; cancels and joins a running one
 
   // ---- variation family tree ----
   const history::VariationTree& history() const { return history_; }
@@ -525,6 +565,13 @@ class ProjectSession {
   bool hostPlaying_ = false;
   mutable ChopSnapshotPtr fitChops_;
   mutable std::map<scenes::SceneId, bool> fitCache_;
+
+  // arrangement (F18)
+  Status storeArrangementSection();
+  Status decodeArrangement(const StateSection& s);
+  Result<midi::FileSpec> midiSpecFromPattern(const pattern::Pattern& fixed, const MidiExportOptions& options) const;
+  Arrangement arrangement_;
+  std::unique_ptr<ArrangementJob> arrangementJob_;
 
   // morph (F10)
   bool endMorph(bool withNotice);  // drops the preview state only; callers that change the pattern republish themselves

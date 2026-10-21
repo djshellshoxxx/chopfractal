@@ -1,7 +1,21 @@
 # F18 Arrangement Export
 
-**Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F09 (scenes and their chain), F01 (extras tag 16), F13 (MIDI file helper and export folder). Soft: F16 (level match and limiter in the render), F17 (groove), E01/E02 (render through the same path)  **Blocks:** none
+**Status:** Session layer done (branch feat/SESS-session-features); the dialog (`ArrangementDialog`) is the GUI worker's, see section 12  **Size:** L (9 engineer-days)  **Depends on:** F09 (scenes and their chain), F01 (extras tag 16), F13 (MIDI file helper and export folder). Soft: F16 (level match and limiter in the render), F17 (groove), E01/E02 (render through the same path)  **Blocks:** none
 **Category:** value. A finished, DAW-ready arrangement from stored scenes.
+
+## 0. Implementation status and decisions (2026-10-21)
+Built and tested: `composition/{arrangement,arrangement_job}.hpp`, `src/arrangement.cpp`, `src/arrangement_job.cpp`, `src/arrangement_session.cpp`, the `wav_export` cue writer (`encodeWithCues`), the `midi_export` markers (`FileSpec::markers`, `endTick`), tag 16, and the view model in `plugin_ui_adapter/session_views.hpp`. Not built: the dialog and the FeaturePanel button (GUI worker, section 12). Where the body and the code differ, **the code listed here is the contract**:
+- **Files.** The job lives in `arrangement_job.hpp` (model and state stay in `arrangement.hpp`, which has no audio types). A `ProjectSessionSnapshot` is the smaller `ArrangementPlan`: the scene `Playback`s (immutable, sharing the project's source), the MIDI notes of each scene pattern (taken with the F13 note mapping and velocity settings of the project), the output stage and the file settings. `ProjectSession::planArrangementExport(arrangement, name, settings)` builds it (message thread, const); `startArrangementExport(arrangement, name, settings)` plans and starts the worker. `ArrangementJob::start(plan)` is the spec's `start(snapshot, ...)`.
+- **MIDI grid.** 960 ticks per quarter (the `midi_export` module), not 480: bars are 3840 ticks. Format 0, tempo and 4/4 meta, one `0xFF 0x06` marker per section at `startBar * 3840`, end of track at the last bar boundary. Notes that start inside a section are clipped to the end of their repeat (or of the section when whole pattern lengths fill it). The project's meter is assumed 4/4 for bar maths.
+- **Bars and repeats.** `bars` is in {1,2,4,8}, `repeats` 1..8; the section is `bars * repeats` bars. When whole pattern lengths fill `bars` (a 2-bar pattern over 4 bars) the section is one continuous render of `bars * repeats / patternBars` cycles. Otherwise (a 4-bar pattern over 2 bars, a 3-bar pattern over 4) the render uses a copy of the playback that holds exactly `bars` bars of the pattern looped or cut, rendered `repeats` times in a row, so the pattern restarts at every repeat. Voices ring across repeat boundaries as in live playback.
+- **Render path.** Each section is one `render::renderOffline` call (512-frame blocks, the same `Renderer::process` as playback), so a single-scene arrangement equals `renderOffline` of that scene sample for sample except for the last 50 ms of the tail (test `export_matches_live_render_of_one_scene`). Cancel and progress are checked by its callback every 64 blocks (about 0.7 s of audio; far below 100 ms of wall time).
+- **Crossfade.** Overlap `N` = 10 ms or 50 ms of frames. The first `N` frames of section k+1 are scaled by `(i+1)/(N+1)` and the previous section's ring-out past its end by `1 - that`; the pair sums to 1 for every `i`. Total length is unchanged; `Cut` drops the ring-out.
+- **Tail and fade out.** With `tail` the file is `totalBars * barFrames + ceil(2.0 s * rate)` frames, the last 50 ms a linear fade to exactly 0. `fadeOut` applies a cosine fade over the last bar (exactly 0 on the last frame) and **replaces the tail** (no tail frames are added), because a ring-out after a fade would jump back up.
+- **Level match and limiter.** With `levelMatch` the job measures the source loop and a one-cycle render of every distinct scene (no gain, no limiter) and applies `levelmatch::computeMatch` per section (the F16 functions; silent scenes get 0 dB). The limiter runs once over the assembled mix: primed, `latencyFor(rate)` zero frames appended, the same number dropped from the start, so the length is unchanged. Sections themselves render with the limiter and match gain of the live stage switched off and the per-scene gain set.
+- **Files.** `<name>_arrangement.wav`, `.mid`, `_arrangement_cues.txt` (`bar,seconds,name`, 1-based bar, `%.3f` seconds, LF); on a collision all three get `_2`, `_3`, ... (`<name>_arrangement_2.wav`). Everything is written as `*.partial` and renamed WAV, MIDI, cue list; on any failure or cancel the partials and already renamed files of this run are removed. `Write markers` off also drops the WAV cue chunk, the MIDI markers and the cue file. Labels are `Scene N <name>` (just the name if it already starts with `Scene N`).
+- **Rates.** The render rate is `wavOptions.sampleRate`; the tempo is rounded to a whole BPM; the frame cap and the other limits give the section 3 messages.
+- **State.** Tag 16 is registered with feature name `arrangement` (decoder failure drops only that section: `Some arrangement settings could not be restored.`). Loading a source or a project clears the list; deleting a scene keeps its row (flagged).
+- **Test names.** Section 7 names are kept; additions: `stored_arrangements_are_validated_field_by_field`, `session_stores_section_16_only_when_not_default_and_restores_it`, `a_bad_section_16_drops_only_itself_with_the_warning`, `a_new_source_or_a_loaded_project_never_keeps_a_stale_arrangement`, `tail_ends_in_a_linear_fade_to_zero`, `notes_equal_the_scene_notes_repeated`, `level_match_gain_is_recomputed_per_scene`, `job_runs_on_a_worker_writes_three_files_and_suffixes_collisions`, `destroying_a_session_with_a_running_job_stops_it`; the view-model tests are in `plugin_ui_adapter/tests/test_session_views.cpp`; the GUI (xvfb) tests move with the dialog.
 
 ## 1. Summary and user value
 Turn the scenes recorded in F09 (pattern snapshots with seeds and per-scene loop counts) into a **single arrangement** of 8 to 32 bars: one WAV of the whole arrangement, one MIDI file with the same notes, and per-section markers (WAV cue chunks and MIDI marker meta events, plus a sidecar text list). The render is deterministic, runs on a worker thread with a progress bar and cancel, and uses the same render path as normal playback so what you export is what you hear. Producers drop one file pair on a DAW timeline and have a verse/hook/break structure already cut.
@@ -75,13 +89,14 @@ GUI (xvfb): `arrange_button_disabled_without_scenes`; `list_edit_updates_total_l
 Sanitizers: ASan/UBSan on all; TSan on progress atomics and cancel. Manual QA: 16-bar arrangement of 4 scenes imported to a DAW lines up with the grid (marker positions at bars 1, 5, 9, 13); MIDI and WAV align to the sample at the host tempo; cancel mid-way leaves no files.
 
 ## 8. Acceptance criteria
-- [ ] Export is allowed only for 8 to 32 total bars and produces exactly three files (WAV, MIDI, cue list) or none.
-- [ ] WAV length is `totalBars * barFrames` (+ tail when on); cue points sit at exact section starts; MIDI markers at the same bar positions.
-- [ ] Output bytes are deterministic for equal snapshots; live edits during export have no effect.
-- [ ] The job runs on a worker thread, reports monotonic progress, cancels within 100 ms of the next block, and removes partial files; the audio thread and `process()` are untouched.
-- [ ] Per-scene level match and the final limiter behave as in F16; groove/E01/E02 are applied as in playback.
-- [ ] State tag 16 round-trips and is absent when default; a project without arrangement saves byte-identically; no manifest changes.
-- [ ] Exact status strings of section 3 appear; all controls have titles and tooltips; docs updated.
+- [x] Export is allowed only for 8 to 32 total bars and produces exactly three files (WAV, MIDI, cue list) or none.
+- [x] WAV length is `totalBars * barFrames` (+ tail when on); cue points sit at exact section starts; MIDI markers at the same bar positions.
+- [x] Output bytes are deterministic for equal snapshots; live edits during export have no effect.
+- [x] The job runs on a worker thread, reports monotonic progress, cancels within 100 ms of the next block, and removes partial files; the audio thread and `process()` are untouched.
+- [x] Per-scene level match and the final limiter behave as in F16; groove/E01/E02 are applied as in playback.
+- [x] State tag 16 round-trips and is absent when default; a project without arrangement saves byte-identically; no manifest changes.
+- [x] Exact status strings of section 3 exist as tested functions (`ui::arrangement*Message`) and session errors; docs updated.
+- [ ] All dialog controls have titles and tooltips (the dialog is the GUI worker's).
 
 ## 9. Files touched
 | Path | New/Mod | Change |
@@ -103,3 +118,26 @@ Sanitizers: ASan/UBSan on all; TSan on progress atomics and cancel. Manual QA: 1
 
 ## 11. Implementation steps
 1. Model, validation, state tag, tests. 2. WAV cue writer and MIDI markers with format tests. 3. Snapshot builder shared with playback. 4. Section render, crossfades, limiter, tail, fade, determinism tests. 5. Job thread, progress, cancel, atomic file finish. 6. Dialog UI and wiring. 7. Parity test, docs, registries, QA.
+
+## 12. Commands the GUI must call
+All calls run on the message thread under `proc.withSession(...)`. Row and button state comes from `ui::buildArrangementView(...)` (fill `ArrangementViewInput` from `arrangementRows()`, `arrangement().totalBars()`, the project tempo, `sceneList().scenes.size()`, `hasSource()`, `arrangementJob()` and its `progress()`); texts from `plugin_ui_adapter/session_views.hpp`. Poll `arrangementJob()->progress()` at 20 Hz while a job runs.
+| Control | Call |
+|---|---|
+| "Arrange..." button, enabled state and tooltip | `ui::arrangeButtonEnabled(sceneCount, hasSource)`, `ui::arrangeButtonTooltip(sceneCount)` |
+| Section list rows, Total label, status label, notes, enable rules | `ui::buildArrangementView(input)` |
+| "Section scene" combo | `setArrangement(a)` with `a = arrangement()` and `a.sections[i].sceneId` changed |
+| "Section bars" combo | choices from `ui::arrangementBarChoices(row.patternBars)`; then `setArrangement(a)` with `sections[i].bars` |
+| "Section repeats" slider (1..8) | `setArrangement(a)` with `sections[i].repeats` |
+| "Add section" | `setArrangement(a)` after `a.sections.push_back({sceneId, defaultBars(patternBars), 1})` (at most 32) |
+| "Remove section" / Delete key | `setArrangement(a)` after erasing the row; when the row was `deleted`, also show `ui::arrangementSceneDeletedMessage(number)` |
+| "Move up" / "Move down" / Alt+Up, Alt+Down | `setArrangement(a)` after swapping two rows |
+| "Use scene chain" | `fillArrangementFromChain()` |
+| "Auto fill 16 bars" | `autoFillArrangement()` |
+| "Fade out last bar", "Add tail", "Section transition", "Write MIDI", "Write markers" | `setArrangement(a)` with `fadeOut`, `tail`, `transition`, `writeMidi`, `writeMarkers` |
+| "Name" editor | text kept by the dialog; passed to `startArrangementExport` (empty means the project name) |
+| "Export" (Enter) | `startArrangementExport(arrangement(), name, ArrangementExportSettings{root, bpm, wavOptions, levelMatch, matchTrimDb})`; `root` is the F13 export folder, `levelMatch`/`matchTrimDb` the F16 parameters; on error show `error().message` |
+| Progress bar and status text | `arrangementJob()->progress()` and `ui::arrangementProgressMessage(section, sections, fraction)` |
+| "Cancel" while running (Esc) | `cancelArrangementExport()`; the job ends with `ErrorCode::Cancelled` and `ui::arrangementCancelledMessage()` |
+| Job finished | `arrangementJob()->done()` then `result()`: on success `ui::arrangementExportedMessage(filename(result.wavPath), result.bars, result.seconds)`, otherwise `result.status.error().message`; then `releaseArrangementJob()` |
+| "Close" (Esc when idle) | close the dialog; a running job keeps running unless cancelled; closing the project or the plugin cancels and joins it |
+| Project change | the list follows `arrangement()`; nothing to do for load, new source or reset (the session clears it) |

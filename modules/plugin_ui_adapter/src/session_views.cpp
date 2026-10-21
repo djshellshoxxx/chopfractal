@@ -1,6 +1,7 @@
 #include <chopfractal/plugin_ui_adapter/session_views.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <cstdio>
 
@@ -207,6 +208,109 @@ SceneView buildSceneView(const SceneViewInput& in) {
   v.wrapOn = in.wrap;
   if (active && (selected || count > 0)) v.editTooltip = sceneStopFirstText();
   v.exportTooltip = "The exported WAV places each scene end to end with its tail overlapping the next. It matches live playback except where a ringing voice would have been stolen.";
+  return v;
+}
+
+// ---- Arrangement export (F18) ----
+
+namespace {
+std::string oneDecimal(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.1f", v);
+  return buf;
+}
+std::string barsWord(int n) { return std::to_string(n) + (n == 1 ? " bar" : " bars"); }
+}  // namespace
+
+std::string arrangementCancelledMessage() { return "Export cancelled. No files were written."; }
+std::string arrangementBarsMessage(int totalBars) { return "Arrangement needs 8 to 32 bars (now " + std::to_string(totalBars) + ")."; }
+std::string arrangementSceneDeletedMessage(int sceneNumber) { return "Scene " + std::to_string(sceneNumber) + " was deleted. Section removed."; }
+std::string arrangementWriteErrorMessage(const std::string& path, const std::string& reason) { return "Could not write " + path + ": " + reason; }
+std::string arrangementRunningMessage() { return "An arrangement export is already running."; }
+std::string arrangementExportedMessage(const std::string& wavFileName, int bars, double seconds) {
+  return "Arrangement exported: " + wavFileName + " (" + std::to_string(bars) + " bars, " + oneDecimal(seconds) + " s).";
+}
+std::string arrangementProgressMessage(int section, int sections, double fraction) {
+  const int pct = static_cast<int>(std::lround(100.0 * std::min(1.0, std::max(0.0, fraction))));
+  return "Exporting arrangement: section " + std::to_string(section) + " of " + std::to_string(sections) + " (" + std::to_string(pct) + "%).";
+}
+
+std::string arrangementRowText(int index, const ArrangementRowInput& r) {
+  std::string scene;
+  if (r.deleted) {
+    scene = "Scene deleted";
+  } else {
+    scene = "Scene " + std::to_string(r.sceneNumber);
+    const std::string plain = "Scene " + std::to_string(r.sceneNumber);
+    if (!r.sceneName.empty() && r.sceneName != plain) scene += " \"" + r.sceneName + "\"";
+  }
+  std::string text = std::to_string(index) + "  " + scene + "  " + barsWord(r.bars) + " x " + std::to_string(r.repeats) + "   " + barsWord(r.bars * r.repeats);
+  if (!r.deleted && !r.fits) text += " (does not fit the chops)";
+  return text;
+}
+
+std::string arrangementTotalText(int totalBars, double bpm) {
+  const double b = std::max(1.0, std::round(bpm));
+  if (totalBars < 8 || totalBars > 32) return "Total: " + std::to_string(totalBars) + " bars (needs 8 to 32)";
+  return "Total: " + std::to_string(totalBars) + " bars (" + oneDecimal(static_cast<double>(totalBars) * 4.0 * 60.0 / b) + " s at " + std::to_string(static_cast<int>(b)) + " BPM)";
+}
+
+std::string arrangementTruncationNote(int sceneNumber, int patternBars, int sectionBars) {
+  if (patternBars <= sectionBars) return {};
+  return "Scene " + std::to_string(sceneNumber) + " has " + std::to_string(patternBars) + " bars; using the first " + std::to_string(sectionBars);
+}
+
+std::vector<int> arrangementBarChoices(int patternBars) {
+  std::vector<int> out;
+  const int p = std::max(1, patternBars);
+  for (int b : {1, 2, 4, 8})
+    if (b % p == 0) out.push_back(b);
+  if (out.empty()) out = {1, 2, 4, 8};
+  return out;
+}
+
+bool arrangeButtonEnabled(int sceneCount, bool hasSource) { return sceneCount > 0 && hasSource; }
+std::string arrangeButtonTooltip(int sceneCount) {
+  return sceneCount > 0 ? "Build an 8 to 32 bar arrangement from your scenes and export WAV, MIDI and markers." : "Record at least one scene first (Evolve scenes).";
+}
+
+ArrangementView buildArrangementView(const ArrangementViewInput& in) {
+  ArrangementView v;
+  const int count = static_cast<int>(in.rows.size());
+  const bool selected = in.selected >= 0 && in.selected < count;
+  bool deleted = false, misfit = false;
+  for (int i = 0; i < count; ++i) {
+    const ArrangementRowInput& r = in.rows[static_cast<std::size_t>(i)];
+    v.rows.push_back(arrangementRowText(i + 1, r));
+    deleted = deleted || r.deleted;
+    misfit = misfit || (!r.deleted && !r.fits);
+    if (!r.deleted) {
+      const std::string note = arrangementTruncationNote(r.sceneNumber, r.patternBars, r.bars);
+      if (!note.empty()) v.notes.push_back(note);
+    }
+  }
+  v.totalText = arrangementTotalText(in.totalBars, in.bpm);
+  const bool inRange = count > 0 && in.totalBars >= 8 && in.totalBars <= 32;
+  v.valid = inRange && !deleted && !misfit;
+  v.editable = !in.running;
+  if (in.running) v.statusText = arrangementProgressMessage(std::max(1, in.jobSection), std::max(1, in.jobSections), in.jobFraction);
+  else if (count > 0 && !inRange) v.statusText = arrangementBarsMessage(in.totalBars);
+  else if (deleted) v.statusText = "A section uses a scene that was deleted.";
+  else if (misfit) v.statusText = "A section uses a scene that no longer fits the chops.";
+  v.exportEnabled = v.valid && in.hasSource && !in.running;
+  if (!v.exportEnabled && !in.running) {
+    if (!in.hasSource) v.exportTooltip = "Load a source first.";
+    else if (count == 0) v.exportTooltip = "Add at least one section.";
+    else v.exportTooltip = v.statusText;
+  }
+  v.addEnabled = in.sceneCount > 0 && count < 32 && !in.running;
+  v.removeEnabled = selected && !in.running;
+  v.moveUpEnabled = selected && in.selected > 0 && !in.running;
+  v.moveDownEnabled = selected && in.selected + 1 < count && !in.running;
+  v.useChainEnabled = in.sceneCount > 0 && !in.running;
+  v.autoFillEnabled = in.sceneCount > 0 && !in.running;
+  v.closeLabel = in.running ? "Cancel" : "Close";
+  v.progress = in.running ? std::min(1.0, std::max(0.0, in.jobFraction)) : 0.0;
   return v;
 }
 
