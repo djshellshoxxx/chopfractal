@@ -1,6 +1,6 @@
 # ChopFractal
 
-A deterministic loop-chopping and pattern-generation **VST3 audio effect**. Load or capture a loop, chop it
+A developing deterministic loop-chopping and pattern-generation **VST3 audio effect**. Load or capture a loop, chop it
 (automatically or by hand), and generate rhythmic variations through a visible phrase → bar → beat → hit
 hierarchy. A fixed seed always reproduces the same pattern; locks keep the parts you like while the rest
 mutates; any hit can be zoomed into to create a nested rhythm inside it; and every variation is kept as a
