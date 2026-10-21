@@ -81,3 +81,8 @@ Manual QA: a long vocal chop with Both at 1/8 sweeps in time; toggling mid-playb
 
 ## 11. Implementation steps
 1. Event block and flag-space check (after E01 step 1). 2. Pass extension and tests. 3. Voice LFO and tests. 4. Manifest rows and plumbing. 5. Tag 17 extension, undo. 6. UI. 7. Docs and registries, QA.
+
+
+## Implementation notes (as built, RND)
+
+- The LFO is phase-locked to the hit start (table sine, equal-power pan with unity at centre), evaluated per sample so output does not depend on the block size. Placement lives in `applyFxPass` (see E01 notes); fallbacks in `PlaybackOptions`. Flag bit 128 as specified; no UI call-out or state section yet.

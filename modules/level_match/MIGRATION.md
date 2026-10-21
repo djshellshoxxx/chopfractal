@@ -46,6 +46,7 @@ This module stores no project state.
 #include <chopfractal/level_match/level_match.hpp>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 

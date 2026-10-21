@@ -70,11 +70,11 @@ Rows A to D are used as built (about 848 to 870 px of the 920 px content height)
 
 ## 2d. Manifest policy (host parameters)
 
-Version stays 3. Parameter ids are permanent and never reordered or reused; each feature appends its rows after the last row present when it merges (the golden list test is updated in the same PR). Rows reserved by the specs, in expected merge order after `chaos`: F07 `perf_mode`, `perf_velocity_curve`; F11 `stems_enabled`; F16 `level_match`, `match_trim_db`, `limiter_enable`, `limiter_ceiling_db`; E01 `allow_echo`, `echo_amount`, `echo_rate`, `echo_decay`, `echo_tone`; E02 `allow_tremolo`, `trem_amount`, `trem_mode`, `trem_rate`, `trem_depth`; F17 `groove_enable`, `groove_template`, `groove_swing`, `groove_hum_time`, `groove_hum_vel`. F18 and F19 add none. Positions follow merge order, not this list; ids are what is fixed. Whether to freeze version 3 at first public release and use version 4 for later rows is a maintainer decision (open item).
+Version stays 3. Parameter ids are permanent and never reordered or reused; each feature appends its rows after the last row present when it merges (the golden list test is updated in the same PR). Rows reserved by the specs, in expected merge order after `chaos`: F07 `perf_mode`, `perf_velocity_curve`; F11 `stems_enabled`; F16 `level_match`, `match_trim_db`, `limiter_enable`, `limiter_ceiling_db`; E01 `allow_echo`, `echo_amount`, `echo_rate`, `echo_decay`, `echo_tone`; E02 `allow_tremolo`, `trem_amount`, `trem_mode`, `trem_rate`, `trem_depth`; RND (merged with the F16/E01/E02 rows, same merge): Stutter `allow_stutter`, `stutter_amount`, `stutter_rate`, `stutter_gate`, `stutter_decay_db`, `stutter_pitch`; Roll `allow_roll`, `roll_amount`, `roll_rate`, `roll_rate_end`, `roll_freeze`; renderer `slice_polish`; F17 `groove_enable`, `groove_template`, `groove_swing`, `groove_hum_time`, `groove_hum_vel`. F18 and F19 add none. Positions follow merge order, not this list; ids are what is fixed. Whether to freeze version 3 at first public release and use version 4 for later rows is a maintainer decision (open item).
 
 ## 2e. State section tag registry (F01 `StateSection`)
 
-Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove` (F17), 15 `levelmatch` cache (F16), 16 `arrangement` (F18), 17 `fx` (E01, extended by E02). F19 keeps its data in a per-user file, not in project state. Pattern event flag bits: 1 to 32 used, **64 E01, 128 E02**; the byte is then full, so the next per-event feature needs pattern schema 2 with an extension byte (E02 section 4.1).
+Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove` (F17), 15 `levelmatch` cache (F16), 16 `arrangement` (F18), 17 `fx` (E01, extended by E02). F19 keeps its data in a per-user file, not in project state. Pattern event flag bits: 1 to 32 used, **64 E01, 128 E02**; the byte is then full. The extension byte (formerly the has-child byte) carries bit 0 child, **bit 1 Stutter, bit 2 Roll**; five bits remain, readers reject unknown ones. Neither change alters the encoding of an event that has none of these blocks (the golden pattern hashes are unchanged).
 
 ## 3. Branch, PR and merge rules
 
@@ -91,7 +91,8 @@ Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove`
 |---|---|---|
 | Host parameter IDs | append-only, never reuse; manifest version bumps once per wave | `parameters.cpp` + golden list in `test_host_adapter.cpp` |
 | Module payload schemas | `composition` payload v2 introduced by F01; features add **sections**, not new versions | F01 spec |
-| Event flag bits (`writeEvent`) | bits 1-32 used; next free is 64 | `chop_contracts/src/event.cpp` |
+| Event flag bits (`writeEvent`) | bits 1-32 used; **64 Echo (E01) and 128 Tremolo-Pan (E02) claimed by RND**; the byte is full | `chop_contracts/src/event.cpp` |
+| Event extension byte (the old has-child byte) | bit 0 child, **bit 1 Stutter (E03) and bit 2 Roll (E04) claimed by RND**; bits 3-7 reserved and rejected on read; events without them encode exactly as before | `chop_contracts/src/event.cpp` |
 | Module IDs | lower_snake, one folder each, manifest + docs generated | `tools/gen_module_docs.py` |
 | Notice/status strings | defined in the spec's UX section, reused verbatim in tests | specs |
 
@@ -108,8 +109,8 @@ Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove`
 | `.github/workflows/ci.yml`, installers | F15 | feature PRs may add a test step only |
 | `modules/audio_renderer/src/renderer.cpp` output stage and `Playback::build` | F16 (limiter, match gain), F17 (groove), E01/E02 (expansion, LFO) | sequential: F16, then F17, then E01, then E02 |
 | `modules/chop_contracts/src/event.cpp` (flags byte) | E01 (bit 64), E02 (bit 128) | none; no other feature may claim a flag bit |
-| `modules/pattern_engine/src/fx_pass.cpp` | E01 creates, E02 extends | none |
-| `composition/src/{level_match,groove,fx_settings,arrangement}.cpp` | F16, F17, E01/E02, F18 | thin declarations in `project_session.hpp` |
+| `modules/pattern_engine/src/fx_pass.cpp` | RND (new file: `applyFxPass` for Echo, Tremolo-Pan, Stutter, Roll; ENG owns generation and does not touch it) | none |
+| `composition/src/{fx_level,groove,arrangement}.cpp` (`fx_level.cpp`: RND, setFx and level match) | F16, F17, E01/E02, F18 | thin declarations in `project_session.hpp` |
 | `plugin/src/CommandRegistry.*` | F19 | each panel registers its commands in its own `registerCommands()` |
 
 ## 5. Parameter and state budget

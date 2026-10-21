@@ -20,7 +20,7 @@ Modular plan: Stages A to D are complete; Stage E (portability and release) is c
 
 ## What exists
 
-Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 34 targets.
+Eighteen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 34 targets.
 
 | Module | Role | Test cases |
 |---|---|---|
@@ -37,9 +37,10 @@ Seventeen portable C++17 modules (no JUCE, no host types), a headless compositio
 | `fractal_rhythm` | self-similar motif groove as nested events | 8 |
 | `chop_insight` | chop features, role suggestions, loop/tempo suggestions | 4 |
 | `preset_store` | preset records, versioned checksummed file format, six factory presets, file-name sanitizing | 5 |
-| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 26 |
+| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, slice-quality stage, Echo/Tremolo-Pan/Stutter/Roll, match gain and true-peak safety limiter, lock-free handoff, latency-compensated offline render; `fx_audition` tool writes one WAV per effect | 70 |
+| `level_match` | BS.1770-4 loudness measurement and match-gain computation | 9 |
 | `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
-| `plugin_host_adapter` | parameter manifest (version 3: 15 parameters, `chaos` last), host-time validation, bus rules | 8 |
+| `plugin_host_adapter` | parameter manifest (version 3: 41 parameters; `chaos` then the F16, E01, E02, Stutter, Roll and slice-polish rows), host-time validation, bus rules | 8 |
 | `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 9 |
 | `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 30 |
 | `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 28 |
