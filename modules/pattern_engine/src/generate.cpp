@@ -98,38 +98,7 @@ class Gen {
     if (report_) report_->notes.push_back({k, rule, bar, beat});
   }
 
-  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop) const {
-    struct E {
-      int bar;
-      Ticks start;
-      std::uint64_t id;
-      ChopId chop;
-    };
-    std::vector<E> before;
-    for (int b = 0; b <= bar && b < static_cast<int>(p.bars.size()); ++b)
-      for (const Beat& bt : p.bars[static_cast<std::size_t>(b)].beats)
-        for (const Event& e : bt.events)
-          if (b < bar || e.start < startInBar) before.push_back({b, e.start, e.id.value, e.chop});
-    std::sort(before.begin(), before.end(), [](const E& a, const E& b) {
-      if (a.bar != b.bar) return a.bar < b.bar;
-      return a.start != b.start ? a.start < b.start : a.id < b.id;
-    });
-    CandidateQuery q;
-    q.chop = chop;
-    q.startInBar = startInBar;
-    q.scope.level = ScopeLevel::Event;
-    q.scope.bar = bar;
-    q.scope.barCount = s_.bars;
-    q.scope.beat = static_cast<int>(std::min<Ticks>(beats_ - 1, startInBar / beatT_));
-    q.scope.beatsPerBar = beats_;
-    for (const E& e : before) {
-      if (e.bar == bar) q.barSoFar.push_back(e.chop);
-    }
-    const std::size_t from = before.size() > 16 ? before.size() - 16 : 0;
-    for (std::size_t i = from; i < before.size(); ++i) q.recent.push_back(before[i].chop);
-    q.firstInBar = q.barSoFar.empty();
-    return q;
-  }
+  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop) const { return detail::buildQuery(p, s_, bar, startInBar, chop); }
 
   // Chooses the chop for a slot, honouring the optional policy. Returns an invalid id when blocked.
   ChopId selectChop(const Pattern& p, int bar, int beat, int slotIdx, Ticks t, double dAlt, double dPick) const {
@@ -573,6 +542,13 @@ Result<Pattern> mutate(const Pattern& pattern, const ChopSnapshot& chops, const 
   scratch.settings.seed = options.seed;
   Gen gen(chops, scratch.settings, policy, report, options.seed);
   return gen.mutateImpl(pattern, options);
+}
+
+CandidateQuery candidateQueryFor(const Pattern& p, EventId id) {
+  const auto loc = locate(p, id);
+  if (!loc) return CandidateQuery{};
+  const Event& e = p.bars[static_cast<std::size_t>(loc->bar)].beats[static_cast<std::size_t>(loc->beat)].events[loc->index];
+  return detail::buildQuery(p, p.settings, loc->bar, e.start, e.chop);
 }
 
 }  // namespace chopfractal::pattern

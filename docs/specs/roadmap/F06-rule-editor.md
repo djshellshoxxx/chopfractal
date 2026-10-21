@@ -4,7 +4,7 @@
 (F03 factory presets reuse `roles::describe` and the template builders)
 
 ## 0. Implementation status (audited 2026-10-20)
-**Not started.** The engine side (`chop_roles_grammar`: roles, serializable rules, `GrammarPolicy::explain`, templates) and the role combo with Set Role and Accept Roles exist and are tested; there is no rule UI. Audit notes: none of the body contradicts the as-built code. Panel placement uses F00's as-built FeaturePanel (rows A to D are full: the Rules entry point is a `Rules...` button, 90 px, appended to row A after Fractal: row A uses 648 of 920 px, 738 with this button). Host parameters: none (the manifest stays as shipped).
+**Built in G2 as the "Rules" drawer** (`plugin/src/RulesPanel.*`, see gui-redesign.md section 25) instead of a FeaturePanel button and overlay; the session methods, `describe`, `preservingRule`, `candidateQueryFor` and `RuleEditorModel` follow this spec. Earlier note: the engine side (`chop_roles_grammar`: roles, serializable rules, `GrammarPolicy::explain`, templates) and the role combo with Set Role and Accept Roles exist and are tested; there is no rule UI. Audit notes: none of the body contradicts the as-built code. Panel placement uses F00's as-built FeaturePanel (rows A to D are full: the Rules entry point is a `Rules...` button, 90 px, appended to row A after Fractal: row A uses 648 of 920 px, 738 with this button). Host parameters: none (the manifest stays as shipped).
 
 ## 1. Summary and user value
 `chop_roles_grammar` already evaluates roles and rules (Forbid, Require, Preserve, MaxCount, MaxConsecutiveRepeats, Prefer) and `ProjectSession::setRules` already validates and stores

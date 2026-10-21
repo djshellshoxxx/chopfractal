@@ -11,14 +11,6 @@ int sceneCount(ChopFractalProcessor& p) {
   p.withSession([&](cf::composition::ProjectSession& s) { n = static_cast<int>(s.sceneList().scenes.size()); });
   return n;
 }
-juce::Slider* findSlider(juce::Component& root, const juce::String& title) {
-  juce::Slider* found = nullptr;
-  forEachControl(root, [&](juce::Component& c) {
-    if (auto* s = dynamic_cast<juce::Slider*>(&c))
-      if (s->getTitle() == title) found = s;
-  });
-  return found;
-}
 juce::ToggleButton* findToggle(juce::Component& root, const juce::String& text) { return dynamic_cast<juce::ToggleButton*>(findButton(root, text)); }
 }  // namespace
 

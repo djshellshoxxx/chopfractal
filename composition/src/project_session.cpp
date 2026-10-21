@@ -156,6 +156,7 @@ std::vector<Notice> ProjectSession::takeNotices() {
 }
 
 void ProjectSession::noteReport(const pattern::GenerationReport& report) {
+  recordRuleNotes(report);
   int locked = 0;
   bool limited = false;
   for (const pattern::Note& n : report.notes) {
@@ -307,6 +308,7 @@ Status ProjectSession::loadSource(std::shared_ptr<const render::SourceData> data
   roles_ = roles::RoleMap{};
   resetPerChopRouting();
   rules_ = roles::RuleSet{};  // rules can name chop ids, which restart at 1 for a new source
+  ruleNotes_.clear();
   foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
@@ -325,6 +327,7 @@ void ProjectSession::clearSource() {
   roles_ = roles::RoleMap{};
   resetPerChopRouting();
   rules_ = roles::RuleSet{};
+  ruleNotes_.clear();
   foreignModules_.clear();
   patterns_.reset();
   history_ = history::VariationTree(history_.config());
@@ -985,6 +988,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   chops_ = std::move(newChops);
   roles_ = std::move(newRoles.roles);
   rules_ = std::move(newRoles.rules);
+  ruleNotes_.clear();
   foreignModules_ = std::move(foreign);
   history_ = std::move(newHistory);
   pendingActivation_ = history::kNoNode;

@@ -305,3 +305,72 @@ CHOP_TEST(hit_edit_geometry_converts_snaps_and_clamps) {
   CHECK(laneAtY(500, 100, 4) == 3 && laneAtY(-5, 100, 4) == 0);
   CHECK(laneAtY(10, 100, 0) == -1 && laneAtY(std::nan(""), 100, 4) == -1 && laneAtY(10, 0, 4) == -1);
 }
+
+CHOP_TEST(pattern_view_exposes_ticks_enabled_and_top_level_and_keeps_muted_hits) {
+  const ChopSnapshot chops = makeChops();
+  pattern::Pattern p = makePattern(chops);
+  auto view = buildPatternView(p, chops);
+  CHECK(!view.rects.empty());
+  const std::int64_t barT = pattern::barTicks(p.settings);
+  for (const auto& r : view.rects) {
+    CHECK(r.topLevel && r.depth == 0 && r.enabled);
+    CHECK(r.startTick == static_cast<std::int64_t>(r.bar) * barT + r.startInBar);
+    CHECK(std::llround(r.x0 * static_cast<double>(view.lengthTicks)) == r.startTick);
+    CHECK(std::llround(r.x1 * static_cast<double>(view.lengthTicks)) == r.startTick + r.durationTick);
+  }
+  const EventId id = view.rects.front().id;
+  auto muted = pattern::setEventEnabled(p, id, false);
+  CHECK(muted.ok());
+  if (!muted.ok()) return;
+  const auto mv = buildPatternView(muted.value(), chops);
+  CHECK(mv.rects.size() == view.rects.size());  // muted hits stay in the view
+  for (const auto& r : mv.rects)
+    if (r.id == id) CHECK(!r.enabled && r.description.find("muted") != std::string::npos);
+  // Zoomed (nested) hits are not top level.
+  pattern::Pattern zoomed = p;
+  auto child = std::make_shared<NestedPattern>();
+  child->depth = 1;
+  const Event* parent = pattern::findEvent(p, id);
+  CHECK(parent != nullptr);
+  if (!parent) return;
+  child->windowDuration = parent->duration;
+  Event inner;
+  inner.id = EventId{p.nextId + 1000};
+  inner.chop = parent->chop;
+  inner.start = 0;
+  inner.duration = parent->duration / 2;
+  child->events.push_back(inner);
+  auto set = pattern::setChild(p, id, child, chops);
+  if (set.ok()) {
+    int nested = 0;
+    for (const auto& r : buildPatternView(set.value(), chops).rects)
+      if (!r.topLevel) {
+        ++nested;
+        CHECK(r.depth > 0);
+      }
+    CHECK(nested == 1);
+  }
+}
+
+CHOP_TEST(marker_views_carry_positions_and_trims) {
+  source::SourceInfo info;
+  info.channels = 1;
+  info.sampleRate = 48000;
+  info.frames = 48000;
+  auto map = source::ChopMap::create(info);
+  CHECK(map.ok());
+  if (!map.ok()) return;
+  auto a = map.value().addMarker(1000);
+  auto b = map.value().addMarker(20000);
+  CHECK(a.ok() && b.ok());
+  if (!a.ok() || !b.ok()) return;
+  CHECK(map.value().setTrim(a.value(), 100, 200).ok());
+  const auto views = buildMarkerViews(map.value(), ViewWindow{0, 48000, 480.0});
+  bool found = false;
+  for (const auto& m : views)
+    if (m.id == a.value()) {
+      found = true;
+      CHECK(m.position == 1000 && m.trimStart == 100 && m.trimEnd == 200 && m.visible);
+    }
+  CHECK(found);
+}

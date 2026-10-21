@@ -17,6 +17,43 @@ inline double metricWeight(Ticks startInBar, Ticks beatT) {
   return 0.55;
 }
 
+// The query a policy sees for a candidate (or existing) event at `startInBar` of `bar`: moved verbatim from the generator so
+// generation and explanations agree. `settings` supplies the bar count and the beat geometry.
+inline CandidateQuery buildQuery(const Pattern& p, const Settings& settings, int bar, Ticks startInBar, ChopId chop) {
+  const Ticks beatT = beatTicksOf(settings);
+  const int beats = settings.timeSignature.numerator;
+  struct E {
+    int bar;
+    Ticks start;
+    std::uint64_t id;
+    ChopId chop;
+  };
+  std::vector<E> before;
+  for (int b = 0; b <= bar && b < static_cast<int>(p.bars.size()); ++b)
+    for (const Beat& bt : p.bars[static_cast<std::size_t>(b)].beats)
+      for (const Event& e : bt.events)
+        if (b < bar || e.start < startInBar) before.push_back({b, e.start, e.id.value, e.chop});
+  std::sort(before.begin(), before.end(), [](const E& a, const E& b) {
+    if (a.bar != b.bar) return a.bar < b.bar;
+    return a.start != b.start ? a.start < b.start : a.id < b.id;
+  });
+  CandidateQuery q;
+  q.chop = chop;
+  q.startInBar = startInBar;
+  q.scope.level = ScopeLevel::Event;
+  q.scope.bar = bar;
+  q.scope.barCount = settings.bars;
+  q.scope.beat = static_cast<int>(std::min<Ticks>(beats - 1, startInBar / beatT));
+  q.scope.beatsPerBar = beats;
+  for (const E& e : before) {
+    if (e.bar == bar) q.barSoFar.push_back(e.chop);
+  }
+  const std::size_t from = before.size() > 16 ? before.size() - 16 : 0;
+  for (std::size_t i = from; i < before.size(); ++i) q.recent.push_back(before[i].chop);
+  q.firstInBar = q.barSoFar.empty();
+  return q;
+}
+
 // Sets durations of the selected events to the gap before the next event (bounded by the bar end and
 // four grid cells). `onlyThese` == nullptr means every event in the bar. Retained events are untouched.
 inline void assignDurations(Pattern& p, int bar, const std::unordered_set<std::uint64_t>* onlyThese) {

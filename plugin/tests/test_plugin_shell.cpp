@@ -13,6 +13,11 @@
 #include "BuildInfo.h"
 #include <typeinfo>
 
+// Newer JUCE releases deprecate AudioFormat::createWriterFor(...); the pinned release still needs it.
+#if defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 #include "CdlTheme.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -432,11 +437,7 @@ std::size_t hitCount(ChopFractalProcessor& p) {
   });
   return n;
 }
-juce::Point<int> hitPoint(const ChopFractalEditor& ed, const cf::ui::EventRect& r, double fraction = 0.5) {
-  const auto b = ed.patternBounds();
-  const float laneH = static_cast<float>(b.getHeight()) / static_cast<float>(std::max(1, ed.laneCount()));
-  return {b.getX() + static_cast<int>((r.x0 + (r.x1 - r.x0) * fraction) * b.getWidth()), b.getY() + static_cast<int>((static_cast<float>(r.chopIndex) + 0.5f) * laneH)};
-}
+juce::Point<int> hitPoint(ChopFractalEditor& ed, const cf::ui::EventRect& r, double fraction = 0.5) { return hitPointOf(ed, r, fraction); }
 }  // namespace
 
 // Pass 3: chaos reroll, presets, drag-out files, and direct hit editing through real mouse events.
@@ -598,6 +599,7 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
   FuzzResult out;
   PresetManager::setFolderOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_fuzz_presets"));
   dragout::setFolderOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_fuzz_drag"));
+  cdl::settingsFile().deleteFile();  // the editor saves its size, theme and mode on close: every replay must start from the defaults
   ChopFractalProcessor p;
   prepare(p);
   makeSession(p);
@@ -612,13 +614,15 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
   auto pick = [&](int n) { return std::min(n - 1, static_cast<int>(rng.uniform01() * static_cast<double>(n))); };
   const int w = ed->getWidth(), h = ed->getHeight();
   // "Reroll" and "New Seed" draw system randomness, so they stay out of the reproducible run.
+  // Detect Chops opens an asynchronous call-out box (covered by test_editing_gui.cpp), which would make replays timing dependent.
   static const char* const kButtons[] = {"Generate", "Mutate", "Undo", "Redo", "Zoom In", "Collapse", "Lock Bar", "Fractal", "Store A", "Recall A", "Store B",
-                                         "Recall B", "Keep", "Smart Setup", "Accept Roles", "Use Tempo", "Detect Chops", "Set Role", "Play", "Stop"};
+                                         "Recall B", "Keep", "Smart Setup", "Accept Roles", "Use Tempo", "Generate", "Set Role", "Play", "Stop"};
   static const char* const kParams[] = {"density", "swing", "variation_amount", "fx_intensity", "chaos", "dry_mix", "pattern_bars", "allow_reverse",
                                         "allow_pitch", "allow_retrigger", "allow_filter", "allow_glide", "allow_crunch", "effect_enable"};
   FakePlayHead ph;
   p.setPlayHead(&ph);
   for (int i = 0; i < events; ++i) {
+    ed->model().refresh(false, ed->waveformBounds().getWidth());  // the view must not depend on how many timer ticks the dispatch loop happened to run
     switch (pick(6)) {
       case 0:
       case 1:
@@ -909,9 +913,9 @@ CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_
   ChopFractalEditor editor(p);
   const auto before = patternBytes(p);
   const auto bounds = editor.patternBounds();
-  const auto start = bounds.getTopLeft() + juce::Point<int>(1, 1);
-  const auto end = bounds.getBottomRight() - juce::Point<int>(1, 1);
+  const auto end = bounds.getTopLeft() + juce::Point<int>(1, 1);
   MouseSim sim(editor);
+  const auto start = sim.emptyPatternSpot(editor);  // the press must land on empty grid, otherwise it drags a hit
   sim.dragFromTo(start, end);
   CHECK(editor.selectedHits().size() > 1);
   CHECK(patternBytes(p) == before);
@@ -934,7 +938,7 @@ CHOP_TEST(waveform_drag_selects_multiple_source_sections) {
   ChopFractalEditor editor(p);
   const auto before = patternBytes(p);
   const auto bounds = editor.waveformBounds();
-  const auto start = bounds.getTopLeft() + juce::Point<int>(1, bounds.getHeight() / 2);
+  const auto start = bounds.getTopLeft() + juce::Point<int>(20, bounds.getHeight() / 2);  // clear of the marker at frame 0
   const auto end = bounds.getTopRight() + juce::Point<int>(-1, bounds.getHeight() / 2);
   MouseSim(editor).dragFromTo(start, end);
   CHECK(editor.selectedChops().size() > 1);
@@ -1040,10 +1044,10 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
 
     // 3. Drag selects multiple sections without editing; Zoom subdivides a selected hit.
     auto area = editor.patternBounds();
-    auto a = area.getTopLeft() + juce::Point<int>(1, 1);
-    auto b = area.getBottomRight() - juce::Point<int>(1, 1);
+    auto b = area.getTopLeft() + juce::Point<int>(1, 1);
     const auto unchanged = patternBytes(p);
     MouseSim sim(editor);
+    auto a = sim.emptyPatternSpot(editor);
     sim.dragFromTo(a, b);
     CHECK(editor.selectedHits().size() > 1);
     CHECK(patternBytes(p) == unchanged);
@@ -1054,7 +1058,7 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     bool zoomed = false;
     for (const auto& r : rects) {
       sim.click(hitPoint(editor, r, 0.5));
-      if (editor.selectedHits().empty()) continue;
+      if (!editor.selectedHit().valid()) continue;
       if (auto* button = findButton(editor, "Zoom In")) button->onClick();
       if (patternBytes(p) != unchanged) {
         zoomed = true;
@@ -1109,9 +1113,7 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
           dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
     auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
-    const std::size_t need = component.isEnabled() ? 20 : 8;  // a disabled control may carry just the short reason it is off
-    if (tooltip && tooltip->getTooltip().length() <= need) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
-                                                                     component.getParentComponent() ? component.getParentComponent()->getComponentID().toRawUTF8() : "-", tooltip->getTooltip().toRawUTF8());
+    const int need = component.isEnabled() ? 20 : 8;  // a disabled control may carry just the short reason it is off
     if (tooltip) CHECK(tooltip->getTooltip().length() > need);
     ++controls;
   });
