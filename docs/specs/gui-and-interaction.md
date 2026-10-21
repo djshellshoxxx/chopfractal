@@ -1,5 +1,7 @@
 # GUI and interaction
 
+> **Superseded in part by [gui-redesign.md](gui-redesign.md)** (layout, visual style, interaction, accessibility, implementation steps). This file stays as the record of the first-pass requirements until step S0 of the redesign lands.
+
 **Status:** Draft for review
 
 **Implementation (audited 2026-10-20):** The JUCE editor is a functional first pass: fixed 940 x 912 window, waveform, pattern grid, family tree, Orbit View, feature rows A to D, status log, static tooltips. Built interactions from this spec: click to audition, right-click menu on tree nodes (favorite, rename, compare, delete), locks, direct hit editing. Not built: top-bar preset menu layout as drawn here (presets live in feature row D), meters and clipping indicator (F05), keyboard focus order and accessibility handlers for painted views (F04), resizable layout and the Simple/Advanced split (F04), event context menu and double-click event editor (F02), reset-to-default per control group. The Space-key behavior is decided in F04 (host owns the transport in plugins; Standalone toggles local Play/Stop).

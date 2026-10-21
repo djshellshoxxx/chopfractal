@@ -1,0 +1,357 @@
+{
+  "name": "Circuit Drift Labs",
+  "version": 1,
+  "color": {
+    "themes": [
+      {
+        "id": "dark",
+        "name": "Night"
+      },
+      {
+        "id": "concrete",
+        "name": "Concrete"
+      }
+    ],
+    "tokens": [
+      {
+        "name": "bg",
+        "value": {
+          "dark": "#04060B",
+          "concrete": "#D5D9D8"
+        },
+        "usage": "Window background. Near-black with a trace of blue, close enough to black that you only see the blue next to a pure black swatch. Concrete theme: overcast grey."
+      },
+      {
+        "name": "panel",
+        "value": {
+          "dark": "#0B0F17",
+          "concrete": "#E6E9E8"
+        },
+        "usage": "Raised sections, module backgrounds, header strip, resting button fill."
+      },
+      {
+        "name": "edge",
+        "value": {
+          "dark": "#192031",
+          "concrete": "#B3BABB"
+        },
+        "usage": "1px separators, inner strokes, unfilled value arcs, fader tracks. Decoration only, about 1.3:1 on panel. Use edge-hi for any outline that must be seen."
+      },
+      {
+        "name": "edge-hi",
+        "value": {
+          "dark": "#6A757C",
+          "concrete": "#6D777B"
+        },
+        "usage": "Outline of any control that must be seen (button border when off, fader thumb outline, focus ring). 3:1 or better on bg and panel in both themes."
+      },
+      {
+        "name": "spray",
+        "value": {
+          "dark": "#FF2D7A",
+          "concrete": "#C0104F"
+        },
+        "usage": "Primary accent, the color of a fresh tag. Active value arcs, selected states, the corner notch, meter nominal zone. Fill, or text 18px and up. Small text uses spray-hi."
+      },
+      {
+        "name": "spray-hi",
+        "value": {
+          "dark": "#FF6FA3",
+          "concrete": "#A00D40"
+        },
+        "usage": "Small accent text (labels in the on state, section marks) on panel, bg and spray-wash. 4.5:1 or better on all three."
+      },
+      {
+        "name": "spray-wash",
+        "value": {
+          "dark": "rgba(255,45,122,0.15)",
+          "concrete": "rgba(192,16,79,0.12)"
+        },
+        "usage": "Background of a button in its on state, laid over panel."
+      },
+      {
+        "name": "on-spray",
+        "value": {
+          "dark": "{bg}",
+          "concrete": "{panel}"
+        },
+        "usage": "Text or glyph on a solid spray fill. 5:1 on spray in both themes."
+      },
+      {
+        "name": "rain",
+        "value": {
+          "dark": "#27E0D0",
+          "concrete": "#00756D"
+        },
+        "usage": "Secondary accent, the cyan of rain on neon. Modulation, links between controls, the low end of a meter, the drift tick on knobs. Never used for small text in Concrete. Plugins may re-tint one accent; rain is the one that stays."
+      },
+      {
+        "name": "ink",
+        "value": {
+          "dark": "#E4E9EA",
+          "concrete": "#101417"
+        },
+        "usage": "Labels and values on bg and panel."
+      },
+      {
+        "name": "ink-muted",
+        "value": {
+          "dark": "#8C979C",
+          "concrete": "#4A5559"
+        },
+        "usage": "Units, hints, inactive labels, footer version string on bg and panel."
+      },
+      {
+        "name": "ok",
+        "value": {
+          "dark": "#6BFF8E",
+          "concrete": "#12662A"
+        },
+        "usage": "Signal present, input locked, saved. Always paired with a word or a dot glyph."
+      },
+      {
+        "name": "warn",
+        "value": {
+          "dark": "#F5DC00",
+          "concrete": "#6B5A00"
+        },
+        "usage": "Hazard yellow. Near clip, value outside the stock range, compatibility warning, the stripe on stencil markings. Paired with a triangle glyph."
+      },
+      {
+        "name": "clip",
+        "value": {
+          "dark": "#FF5A44",
+          "concrete": "#B3261A"
+        },
+        "usage": "Clipping and hard errors. The source spec gave no red, so this one was chosen to hold 5:1 on bg in Night. Paired with the bracket glyph on meters."
+      },
+      {
+        "name": "knob-top",
+        "value": {
+          "dark": "#18202E",
+          "concrete": "#F4F6F5"
+        },
+        "usage": "Top stop of the knob body and fader thumb radial gradient."
+      },
+      {
+        "name": "knob-bottom",
+        "value": {
+          "dark": "#070A10",
+          "concrete": "#C3C9C8"
+        },
+        "usage": "Bottom stop of the knob body and fader thumb radial gradient."
+      }
+    ]
+  },
+  "type": {
+    "families": {
+      "sans": "\"Inter\", \"Space Grotesk\", system-ui, sans-serif",
+      "mono": "\"JetBrains Mono\", \"IBM Plex Mono\", ui-monospace, monospace",
+      "display": "\"Big Shoulders Stencil Display\", \"Saira Stencil One\", Impact, sans-serif",
+      "tag": "\"Rubik Spray Paint\", \"Big Shoulders Stencil Display\", sans-serif"
+    },
+    "groups": [
+      {
+        "name": "Display",
+        "family": "display",
+        "styles": [
+          {
+            "name": "title",
+            "fontSize": "20px",
+            "lineHeight": "22px",
+            "fontWeight": 900,
+            "letterSpacing": "0.06em",
+            "sample": "REVERSE VERB",
+            "usage": "Plugin name in the header strip. Uppercase, set by the stylesheet."
+          },
+          {
+            "name": "headline",
+            "fontSize": "64px",
+            "lineHeight": "60px",
+            "fontWeight": 900,
+            "letterSpacing": "0.03em",
+            "sample": "CIRCUIT DRIFT LABS",
+            "usage": "System name on the cover and splash screens. Uppercase, with the spray offset."
+          }
+        ]
+      },
+      {
+        "name": "Interface",
+        "family": "sans",
+        "styles": [
+          {
+            "name": "label",
+            "fontSize": "11px",
+            "lineHeight": "16px",
+            "fontWeight": 500,
+            "letterSpacing": "0.08em",
+            "sample": "ATTACK",
+            "usage": "Control labels. Set uppercase in the stylesheet, not in the string."
+          },
+          {
+            "name": "section",
+            "fontSize": "11px",
+            "lineHeight": "16px",
+            "fontWeight": 600,
+            "letterSpacing": "0.08em",
+            "sample": "ENVELOPE",
+            "usage": "Section headers, uppercase, next to the spray bar."
+          },
+          {
+            "name": "body",
+            "fontSize": "13px",
+            "lineHeight": "20px",
+            "fontWeight": 400,
+            "sample": "Couldn't read that preset.",
+            "usage": "Dialogs, help text, tooltips."
+          },
+          {
+            "name": "hint",
+            "fontSize": "11px",
+            "lineHeight": "16px",
+            "fontWeight": 400,
+            "sample": "Double-click to reset",
+            "usage": "Secondary lines under body text, in ink-muted."
+          }
+        ]
+      },
+      {
+        "name": "Readout",
+        "family": "mono",
+        "styles": [
+          {
+            "name": "value",
+            "fontSize": "13px",
+            "lineHeight": "16px",
+            "fontWeight": 500,
+            "sample": "-12.4 dB",
+            "usage": "Knob and fader values. Tabular figures on."
+          },
+          {
+            "name": "value-lg",
+            "fontSize": "14px",
+            "lineHeight": "20px",
+            "fontWeight": 500,
+            "sample": "120.00 BPM",
+            "usage": "Large readouts: tempo, peak meter number, preset index."
+          },
+          {
+            "name": "mono-xs",
+            "fontSize": "9px",
+            "lineHeight": "12px",
+            "fontWeight": 400,
+            "sample": "v0.9.4",
+            "usage": "Version string in the bottom-right footer."
+          }
+        ]
+      },
+      {
+        "name": "Tag",
+        "family": "tag",
+        "styles": [
+          {
+            "name": "tag",
+            "fontSize": "16px",
+            "lineHeight": "16px",
+            "fontWeight": 400,
+            "sample": "cdl",
+            "usage": "The sprayed signature next to the version string in the footer. Lowercase, one use per window, rotated -4 degrees."
+          }
+        ]
+      }
+    ]
+  },
+  "spacing": {
+    "tokens": [
+      {
+        "name": "space-1",
+        "value": "4px",
+        "usage": "Fine detail: gap between a knob and its arc, icon to label."
+      },
+      {
+        "name": "space-2",
+        "value": "8px",
+        "usage": "Base grid step. Gap between controls in a row."
+      },
+      {
+        "name": "space-3",
+        "value": "16px",
+        "usage": "Minimum distance from the window edge to any control. Panel padding."
+      },
+      {
+        "name": "space-4",
+        "value": "24px",
+        "usage": "Gap between sections."
+      },
+      {
+        "name": "space-5",
+        "value": "32px",
+        "usage": "Header strip height."
+      },
+      {
+        "name": "space-6",
+        "value": "48px",
+        "usage": "Default knob diameter, cover margins."
+      },
+      {
+        "name": "knob-sm",
+        "value": "36px",
+        "usage": "Small knob diameter."
+      },
+      {
+        "name": "knob-lg",
+        "value": "64px",
+        "usage": "Large knob diameter."
+      },
+      {
+        "name": "control-h",
+        "value": "28px",
+        "usage": "Height of buttons and toggles."
+      },
+      {
+        "name": "notch",
+        "value": "11px",
+        "usage": "Length of the diagonal notch in the top-left corner of the window. It is 11. Every earlier note said 12. Leave it."
+      }
+    ]
+  },
+  "radius": {
+    "tokens": [
+      {
+        "name": "radius-window",
+        "value": "6px",
+        "usage": "Main plugin window."
+      },
+      {
+        "name": "radius-panel",
+        "value": "4px",
+        "usage": "Inner panels, buttons, tooltips, dropdowns."
+      },
+      {
+        "name": "radius-control",
+        "value": "2px",
+        "usage": "Small controls: tick caps, thumb ends, inputs."
+      }
+    ]
+  },
+  "shadow": {
+    "tokens": [
+      {
+        "name": "shadow-raised",
+        "value": {
+          "dark": "0 2px 8px rgba(0,0,0,0.65)",
+          "concrete": "0 2px 8px rgba(20,28,30,0.30)"
+        },
+        "usage": "Hover lift on panels, popovers, tooltips."
+      },
+      {
+        "name": "spray-offset",
+        "value": {
+          "dark": "3px 3px 0 #FF2D7A",
+          "concrete": "3px 3px 0 #C0104F"
+        },
+        "usage": "Second-pass offset behind display type, as if sprayed twice. Titles and the cover name only."
+      }
+    ]
+  }
+}

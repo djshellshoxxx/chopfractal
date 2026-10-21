@@ -57,6 +57,7 @@ inline juce::String forName(const juce::String& name) {
     {"Depth", "Choose how many nested rhythm levels Fractal creates. Higher depth uses more of the event budget."},
     {"Fractal depth", "Choose 1 to 3 nested levels, then press Fractal. Higher values create finer rhythmic subdivisions."},
     {"Evolve", "Automatically mutate the pattern during playback. Every sets the cadence; amount sets the change size. Locked parts stay fixed. Keep preserves the current result."},
+    {"Run Evolve", "Same switch as the Evolve button in the strip below the pattern: automatically mutate the pattern during playback. Every, Amount, Depth and Motif apply to it."},
     {"Every", "Set the number of loops between Evolve changes."},
     {"Evolve every", "Choose how many playback loops pass between automatic Evolve steps."},
     {"Evolve amount", "Adjust how much Evolve changes the rhythm at each step. You can change it while Evolve runs."},

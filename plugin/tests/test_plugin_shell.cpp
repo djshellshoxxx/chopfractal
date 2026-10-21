@@ -11,6 +11,9 @@
 #include <string>
 
 #include "BuildInfo.h"
+#include <typeinfo>
+
+#include "CdlTheme.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
@@ -323,9 +326,22 @@ CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists
   CHECK(editor != nullptr);
   if (!editor) return;
   editor->setVisible(true);
+  // CHOPFRACTAL_SNAPSHOT_SIZE=880x560 and CHOPFRACTAL_THEME=concrete render the other sizes and the daylight theme;
+  // CHOPFRACTAL_SNAPSHOT_DRAWER=tools shows a drawer.
+  if (const char* size = std::getenv("CHOPFRACTAL_SNAPSHOT_SIZE")) {
+    int w = 0, h = 0;
+    if (std::sscanf(size, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) editor->setSize(w, h);
+  }
+  if (auto* ed = dynamic_cast<ChopFractalEditor*>(editor.get())) {
+    if (const char* theme = std::getenv("CHOPFRACTAL_THEME")) ed->setTheme(std::string(theme) == "concrete" ? cdl::ThemeId::Concrete : cdl::ThemeId::Night);
+    if (const char* drawer = std::getenv("CHOPFRACTAL_SNAPSHOT_DRAWER")) ed->openDrawer(drawer);
+    if (std::getenv("CHOPFRACTAL_SNAPSHOT_ADVANCED")) ed->setAdvanced(true);
+  }
   juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
   juce::Image img = editor->createComponentSnapshot(editor->getLocalBounds());
   CHECK(img.isValid() && img.getWidth() == editor->getWidth());
+  cdl::settingsFile().deleteFile();  // a snapshot at another size or theme must not leak into later tests
+  cdl::setCurrentTheme(cdl::ThemeId::Night);
   if (const char* out = std::getenv("CHOPFRACTAL_SNAPSHOT")) {
     juce::File f(out);
     f.deleteFile();
@@ -778,6 +794,8 @@ CHOP_TEST(version_stamp_matches_VERSION_file) {
 }
 
 int main() {
+  // The editor remembers theme and size per user; keep the tests away from the real profile.
+  cdl::setSettingsFileOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_ui.json"));
   const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
@@ -834,7 +852,7 @@ CHOP_TEST(local_transport_reports_missing_source_and_overrides_a_stopped_host) {
   CHECK(peak(run(p, ph, 8)) < 1e-6f);
 }
 
-CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
+CHOP_TEST(editor_has_visible_play_and_stop_controls_in_the_header) {
   if (!haveDisplay()) return;
   ChopFractalProcessor p;
   prepare(p);
@@ -845,12 +863,12 @@ CHOP_TEST(editor_has_visible_green_play_and_red_stop_controls) {
   CHECK(play != nullptr && stop != nullptr);
   if (!play || !stop) return;
   CHECK(play->isVisible() && stop->isVisible());
-  CHECK(play->getWidth() >= 90 && stop->getWidth() >= 90);
+  // The transport lives in the header strip: both buttons are sized to be hit, apart from each other, and inside the strip.
+  CHECK(play->getWidth() >= 44 && stop->getWidth() >= 44 && play->getHeight() >= 24);
   CHECK(!editor.getLocalArea(play->getParentComponent(), play->getBounds()).intersects(editor.getLocalArea(stop->getParentComponent(), stop->getBounds())));
-  CHECK(play->findColour(juce::TextButton::buttonColourId).getGreen() >
-        play->findColour(juce::TextButton::buttonColourId).getRed());
-  CHECK(stop->findColour(juce::TextButton::buttonColourId).getRed() >
-        stop->findColour(juce::TextButton::buttonColourId).getGreen());
+  CHECK(play->getParentComponent() == stop->getParentComponent() && play->getParentComponent()->getComponentID() == "TopBar");
+  CHECK(play->getParentComponent()->getLocalBounds().contains(play->getBounds()) && play->getParentComponent()->getLocalBounds().contains(stop->getBounds()));
+  CHECK(!play->getToggleState());
   play->onClick();
   juce::AudioBuffer<float> b(2, 512);
   juce::MidiBuffer midi;
@@ -875,7 +893,7 @@ CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
   CHECK(status->isReadOnly());
   CHECK(status->isMultiLine());
   CHECK(status->getText().startsWith(message));
-  CHECK(status->getHeight() >= 60);
+  CHECK(status->getHeight() >= 20);
   CHECK(editor.getLocalBounds().contains(editor.getLocalArea(status, status->getLocalBounds())));
 }
 
@@ -1087,6 +1105,8 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
           dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
     auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
+    if (tooltip && tooltip->getTooltip().length() <= 20) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
+                                                                     component.getParentComponent() ? component.getParentComponent()->getComponentID().toRawUTF8() : "-", tooltip->getTooltip().toRawUTF8());
     if (tooltip) CHECK(tooltip->getTooltip().length() > 20);
     ++controls;
   });
