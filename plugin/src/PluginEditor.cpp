@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "ControlHelp.h"
+#include "EditorTheme.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -8,11 +9,7 @@
 
 namespace cf = chopfractal;
 
-namespace {
-juce::Colour laneColour(int chopIndex) {
-  return juce::Colour::fromHSV(static_cast<float>(((chopIndex % 8) + 8) % 8) / 8.0f, 0.55f, 0.85f, 1.0f);
-}
-}  // namespace
+using editor_theme::laneColour;
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor) {
   setSize(940, 912);
@@ -45,7 +42,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   statusMessages_.setScrollbarsShown(true);
   statusMessages_.setCaretVisible(false);
   statusMessages_.setPopupMenuEnabled(true);
-  statusMessages_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff20252d));
+  statusMessages_.setColour(juce::TextEditor::backgroundColourId, editor_theme::canvas());
   statusMessages_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
   statusMessages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");
   addAndMakeVisible(statusMessages_);
@@ -785,15 +782,15 @@ void ChopFractalEditor::refresh(bool force) {
 // ---------------------------------------------------------------------------------------------
 
 void ChopFractalEditor::paint(juce::Graphics& g) {
-  g.fillAll(juce::Colour(0xff15181d));
+  g.fillAll(editor_theme::background());
   g.setColour(juce::Colours::white.withAlpha(0.85f));
   g.setFont(13.0f);
 
   // Source waveform with chop markers.
-  g.setColour(juce::Colour(0xff20252d));
+  g.setColour(editor_theme::canvas());
   g.fillRect(waveArea_);
   if (!peaks_.min.empty()) {
-    g.setColour(juce::Colour(0xff6fb1ff));
+    g.setColour(editor_theme::accentBlue());
     const int n = static_cast<int>(peaks_.min.size());
     const float cy = static_cast<float>(waveArea_.getCentreY());
     const float h = static_cast<float>(waveArea_.getHeight()) * 0.45f;
@@ -810,20 +807,20 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     if (std::find(selectedChops_.begin(), selectedChops_.end(), chop.id) != selectedChops_.end() && sourceFrames_ > 0) {
       const float x = static_cast<float>(waveArea_.getX()) + static_cast<float>(chop.range.start) / static_cast<float>(sourceFrames_) * waveArea_.getWidth();
       const float width = static_cast<float>(chop.range.length()) / static_cast<float>(sourceFrames_) * waveArea_.getWidth();
-      g.setColour(juce::Colour(0xff6fb1ff).withAlpha(0.3f));
+      g.setColour(editor_theme::accentBlue().withAlpha(0.3f));
       g.fillRect(x, static_cast<float>(waveArea_.getY()), width, static_cast<float>(waveArea_.getHeight()));
     }
   int markerNumber = 0;
   for (const auto& m : markers_) {
     ++markerNumber;
-    g.setColour(m.enabled ? juce::Colour(0xffffc857) : juce::Colours::grey);
+    g.setColour(m.enabled ? editor_theme::accentAmber() : juce::Colours::grey);
     const int x = waveArea_.getX() + static_cast<int>(m.x);
     g.drawVerticalLine(x, static_cast<float>(waveArea_.getY()), static_cast<float>(waveArea_.getBottom()));
     g.drawText(juce::String(markerNumber), x + 2, waveArea_.getY(), 28, 14, juce::Justification::left);
   }
 
   // Pattern grid: lanes by chop, numbered so colour is never the only indicator.
-  g.setColour(juce::Colour(0xff20252d));
+  g.setColour(editor_theme::canvas());
   g.fillRect(patternArea_);
   const int lanes = std::max(1, static_cast<int>(chops_.size()));
   const float laneH = static_cast<float>(patternArea_.getHeight()) / static_cast<float>(lanes);
@@ -835,7 +832,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     const int x = patternArea_.getX() + static_cast<int>(pattern_.barLines[b] * w);
     g.drawVerticalLine(x, static_cast<float>(patternArea_.getY()), static_cast<float>(patternArea_.getBottom()));
     if (b < pattern_.barLocked.size() && pattern_.barLocked[b]) {
-      g.setColour(juce::Colour(0xffff6b6b));
+      g.setColour(editor_theme::accentRed());
       g.drawText("locked", x + 3, patternArea_.getBottom() - 16, 60, 14, juce::Justification::left);
     }
   }
@@ -850,7 +847,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
       g.setColour(juce::Colours::white);
       g.drawRect(rect, 2.0f);
     } else if (r.locked || r.hasChild) {
-      g.setColour(r.locked ? juce::Colour(0xffff6b6b) : juce::Colours::white);
+      g.setColour(r.locked ? editor_theme::accentRed() : juce::Colours::white);
       g.drawRect(rect, 1.0f);
     }
     if (rect.getWidth() > 14.0f && rect.getHeight() > 12.0f) {
@@ -866,7 +863,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   // Variation family tree.
   g.saveState();
   g.reduceClipRegion(historyArea_);
-  g.setColour(juce::Colour(0xff20252d));
+  g.setColour(editor_theme::canvas());
   g.fillRect(historyArea_);
   for (const auto& n : tree_) {
     const auto np = treePos(n);
@@ -877,7 +874,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
         const auto pp = treePos(p);
         g.drawLine(static_cast<float>(pp.x), static_cast<float>(pp.y), static_cast<float>(x), static_cast<float>(y));
       }
-    g.setColour(n.active ? juce::Colour(0xff7cf29a) : (n.favorite ? juce::Colour(0xffffc857) : juce::Colour(0xff9aa4b2)));
+    g.setColour(n.active ? editor_theme::accentGreen() : (n.favorite ? editor_theme::accentAmber() : editor_theme::neutralGrey()));
     g.fillEllipse(static_cast<float>(x - 8), static_cast<float>(y - 8), 16.0f, 16.0f);
     g.setColour(juce::Colours::white.withAlpha(0.85f));
     g.drawText(n.label.empty() ? juce::String(static_cast<juce::int64>(n.id)) : juce::String(n.label), x + 10, y - 7, 90, 14, juce::Justification::left);
@@ -889,7 +886,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   g.restoreState();
 
   // Orbit View: one ring per chop (ring 1 outermost, numbered), the playhead sweeping clockwise from 12 o'clock.
-  g.setColour(juce::Colour(0xff20252d));
+  g.setColour(editor_theme::canvas());
   g.fillRect(orbitArea_);
   if (!orbit_.arcs.empty()) {
     const auto c = orbitArea_.getCentre().toFloat();
@@ -910,7 +907,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
       g.setColour(laneColour(a.ring).withAlpha(a.childActive ? 0.35f : static_cast<float>(0.45 + 0.4 * std::min(1.0, static_cast<double>(a.level))) ).brighter(static_cast<float>(pulse)));
       g.strokePath(path, juce::PathStrokeType(static_cast<float>(std::max(2.0, rr.outer - rr.inner)), juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
       if (a.locked) {
-        g.setColour(juce::Colour(0xffff6b6b));
+        g.setColour(editor_theme::accentRed());
         g.strokePath(path, juce::PathStrokeType(1.0f));
       }
       if (a.id == selected_) {
@@ -924,7 +921,7 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     for (int ring = 0; ring < orbit_.rings; ++ring) g.drawText(juce::String(ring + 1), static_cast<int>(c.x) - 8, static_cast<int>(c.y - R + ring * ringW), 16, 10, juce::Justification::centred);
     if (posTicks >= 0.0) {
       const double a = cf::ui::playheadAngle(ph, orbit_.lengthTicks);
-      g.setColour(juce::Colour(0xff7cf29a));
+      g.setColour(editor_theme::accentGreen());
       g.drawLine(juce::Line<float>(pt(0.0, a), pt(R + 3.0, a)), 1.5f);
     }
   } else {
@@ -949,9 +946,9 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
 
   if (selectingSections_) {
     const auto rectangle = juce::Rectangle<int>(selectionStart_, selectionEnd_);
-    g.setColour(juce::Colour(0xff6fb1ff).withAlpha(0.2f));
+    g.setColour(editor_theme::accentBlue().withAlpha(0.2f));
     g.fillRect(rectangle);
-    g.setColour(juce::Colour(0xff6fb1ff));
+    g.setColour(editor_theme::accentBlue());
     g.drawRect(rectangle, 1);
   }
 }
