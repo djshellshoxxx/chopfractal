@@ -2,6 +2,7 @@
 #include <chopfractal/time_stretch/stretch.hpp>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 

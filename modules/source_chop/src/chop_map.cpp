@@ -20,6 +20,39 @@ Result<ChopMap> ChopMap::create(SourceInfo info, std::int64_t minRegionFrames) {
   return ChopMap(std::move(info), minRegionFrames);
 }
 
+namespace {
+// Same arithmetic as chopfractal::stretch::mapPosition (kept local so this module needs no stretch dependency;
+// composition tests assert the two agree). x, in, out are non-negative and below 2^31.
+std::int64_t scaleFrames(std::int64_t x, std::int64_t in, std::int64_t out) { return (2 * x * out + in) / (2 * in); }
+}  // namespace
+
+Result<ChopMap> ChopMap::rescaled(const ChopMap& from, SourceInfo newInfo, std::int64_t inFrames, std::int64_t outFrames) {
+  constexpr std::int64_t kMax = 2000000000ll;
+  if (inFrames <= 0 || outFrames <= 0 || inFrames > kMax || outFrames > kMax || inFrames != from.info_.frames || newInfo.frames != outFrames)
+    return makeError(ErrorCode::InvalidArgument, "the frame counts do not match the source being rescaled");
+  auto created = ChopMap::create(std::move(newInfo), from.minRegion_);
+  if (!created.ok()) return created.error();
+  ChopMap map = std::move(created.value());
+  State next = from.history_.current();
+  for (Marker& m : next.markers) {
+    m.position = scaleFrames(std::clamp<std::int64_t>(m.position, 0, inFrames), inFrames, outFrames);
+    m.trimStart = static_cast<std::uint32_t>(scaleFrames(m.trimStart, inFrames, outFrames));
+    m.trimEnd = static_cast<std::uint32_t>(scaleFrames(m.trimEnd, inFrames, outFrames));
+    m.fadeIn = static_cast<std::uint32_t>(scaleFrames(m.fadeIn, inFrames, outFrames));
+    m.fadeOut = static_cast<std::uint32_t>(scaleFrames(m.fadeOut, inFrames, outFrames));
+  }
+  std::int64_t tooClose = 0;
+  for (std::size_t i = 0; i < next.markers.size(); ++i) {
+    const bool gap = i > 0 && next.markers[i].position - next.markers[i - 1].position < map.minRegion_;
+    if (gap || next.markers[i].position > outFrames - map.minRegion_) ++tooClose;
+  }
+  if (tooClose > 0) return makeError(ErrorCode::Conflict, "scaling would make markers closer than the minimum region length", tooClose);
+  Status v = map.validate(next);
+  if (!v.ok()) return v.error();
+  map.history_ = SnapshotStack<State>(std::move(next));
+  return map;
+}
+
 const Marker* ChopMap::find(ChopId id) const {
   for (const Marker& m : markers())
     if (m.id == id) return &m;
