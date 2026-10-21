@@ -75,6 +75,14 @@ bool updateMeter(MeterState& s, const MeterInput& in, double dt, bool reducedMot
     }
     s.holdAge[c] = age;
   }
+  {
+    const float target = std::isfinite(in.grDb) ? std::min(0.f, in.grDb) : 0.f;
+    float gr = s.grDb;
+    if (target <= gr) gr = target;
+    else gr = reducedMotion ? target : std::min(target, gr + fall);
+    if (std::fabs(gr - s.grDb) >= 0.1f || (gr == 0.f && s.grDb != 0.f)) changed = true;
+    s.grDb = gr;
+  }
   if (in.clipSamples > 0 && !s.clipLatched) {
     s.clipLatched = true;
     changed = true;
@@ -82,9 +90,12 @@ bool updateMeter(MeterState& s, const MeterInput& in, double dt, bool reducedMot
   return changed;
 }
 
+std::string grText(float grDb) { return grDb > -0.05f ? std::string() : "GR " + dbText(grDb); }
+
 std::string meterTooltip(const MeterState& s) {
-  return "Output peak: L " + dbText(s.holdDb[0] > s.db[0] ? s.holdDb[0] : s.db[0]) + ", R " + dbText(s.holdDb[1] > s.db[1] ? s.holdDb[1] : s.db[1]) +
-         ". CLIP lights when the output exceeds 0 dBFS, click it to reset";
+  std::string t = "Output peak: L " + dbText(s.holdDb[0] > s.db[0] ? s.holdDb[0] : s.db[0]) + ", R " + dbText(s.holdDb[1] > s.db[1] ? s.holdDb[1] : s.db[1]);
+  if (s.grDb <= -0.05f) t += ". Limiter gain reduction " + dbText(s.grDb);
+  return t + ". CLIP lights when the output exceeds 0 dBFS, click it to reset";
 }
 
 std::string voiceText(int active, int maxVoices) { return "V " + std::to_string(std::max(0, active)) + "/" + std::to_string(std::max(1, maxVoices)); }

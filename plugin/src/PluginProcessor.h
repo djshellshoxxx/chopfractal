@@ -82,7 +82,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void setProgressMessage(const juce::String& message);  // the status line only, not the log: progress ticks would flood it
   Severity statusSeverity() const;
   NoticeLog& noticeLog() { return noticeLog_; }
-  chopfractal::render::MeterReading takeMeter() { return renderer_.meter().take(); }  // UI thread: the maximum since the last call
+  chopfractal::render::MeterReading takeMeter() { return renderer_.meter().take(); }
+  float takeLimiterGr() { return renderer_.limiterTelemetry().takeGr(); }  // UI thread: most negative gain reduction (dB, <= 0) since the last call  // UI thread: the maximum since the last call
 
   std::atomic<bool> embedSource{false};
   std::atomic<double> manualBpm{120.0};

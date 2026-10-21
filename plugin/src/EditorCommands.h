@@ -115,6 +115,11 @@ class EditorCommands {
   chopfractal::Status startExport(const ExportRequest&);  // the FileChooser flows end here (public so tests can skip the dialog)
   void cancelExport();
   juce::File makeDragFile(bool wav, const ExportUi&);
+  // F13: a family-tree node dragged out as MIDI (or, Alt-drag, as audio). Renders that node's variation, not the active one, and
+  // never changes the session. An empty File (and a status line) when the node cannot be rendered.
+  juce::File makeVariationDragFile(chopfractal::history::NodeId node, bool wav);
+  // The node menu items "Export MIDI..." and "Export WAV...": a save dialog, then the variation is written there.
+  void exportVariation(chopfractal::history::NodeId node, bool wav);
 
   NoticeLog& noticeLog() { return proc_.noticeLog(); }
 

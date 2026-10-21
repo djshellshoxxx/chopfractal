@@ -43,6 +43,7 @@ void MeterStrip::tickOnce(double dt) {
   in.peak[0] = r.peak[0];
   in.peak[1] = r.peak[1];
   in.clipSamples = r.clipSamples;
+  in.grDb = model_.takeLimiterGr();
   const bool wasLatched = state_.clipLatched;
   if (cf::ui::updateMeter(state_, in, dt, cdl::reducedMotion())) {
     ++repaints_;
@@ -68,7 +69,8 @@ void MeterStrip::refreshAccessibility() {
   if (t == lastTooltip_) return;
   lastTooltip_ = t;
   setTooltip(t);
-  setDescription("Left " + juce::String(cf::ui::dbText(state_.db[0])) + ", right " + juce::String(cf::ui::dbText(state_.db[1])));
+  setDescription("Left " + juce::String(cf::ui::dbText(state_.db[0])) + ", right " + juce::String(cf::ui::dbText(state_.db[1])) +
+                 (state_.grDb <= -0.05f ? ", limiter reducing " + juce::String(cf::ui::dbText(state_.grDb)) : juce::String()));
 }
 
 void MeterStrip::resized() {
@@ -121,6 +123,16 @@ void MeterStrip::paint(juce::Graphics& g) {
     }
     g.setColour(p.edge);
     g.drawRect(left, y, width, barH, 1.0f);
+  }
+  if (const juce::String gr = juce::String(cf::ui::grText(state_.grDb)); gr.isNotEmpty()) {  // limiter working: a text pill on the bars
+    const auto f = cdl::font(cdl::FontRole::MonoXs, std::max(0.7f, cdl::uiScale()));
+    const int w = juce::GlyphArrangement::getStringWidthInt(f, gr) + static_cast<int>(8 * s);
+    juce::Rectangle<float> pill(left + width - static_cast<float>(w), top - 1.0f, static_cast<float>(w), totalH + 2.0f);
+    g.setColour(p.bg.withAlpha(0.85f));
+    g.fillRect(pill);
+    g.setColour(p.warn);
+    g.setFont(f);
+    g.drawText(gr, pill.toNearestInt(), juce::Justification::centred, false);
   }
   const float zeroX = left + cf::ui::dbToFraction(0.f) * width;  // the 0 dB tick
   g.setColour(p.inkMuted);

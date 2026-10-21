@@ -305,10 +305,15 @@ void EditorCommands::historyMenu(cf::history::NodeId id, juce::Component* anchor
   m.addItem(2, "Rename...");
   m.addItem(3, "Compare with active variation");
   m.addItem(4, "Delete this branch");
+  m.addSeparator();
+  m.addItem(5, "Export MIDI...");
+  m.addItem(6, "Export WAV...");
   juce::Component::SafePointer<juce::Component> alive(anchor);  // the panel lives exactly as long as this object
   m.showMenuAsync(juce::PopupMenu::Options(), [this, alive, id](int choice) {
     if (alive == nullptr) return;
-    if (choice == 1) {
+    if (choice == 5 || choice == 6) {
+      exportVariation(id, choice == 6);
+    } else if (choice == 1) {
       bool now = false;
       proc_.withSession([&](cf::composition::ProjectSession& s) {
         for (const auto& n : s.history().listAll())
@@ -536,6 +541,59 @@ juce::File EditorCommands::makeDragFile(bool wav, const ExportUi& ui) {
   }
   model_.setStatus(status.ok() ? juce::String() : juce::String(cf::ui::dragRenderErrorMessage(status.error().message)));
   return f;
+}
+
+juce::File EditorCommands::makeVariationDragFile(cf::history::NodeId node, bool wav) {
+  cf::Status status;
+  std::vector<std::uint8_t> bytes;
+  int skipped = 0;
+  std::string name = "variation";
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& n : s.history().listAll())
+      if (n.id == node && !n.label.empty()) name = n.label;
+    if (wav) {
+      auto r = s.renderVariationWav(node, wavOptions(exportUi()));
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    } else {
+      auto r = s.renderVariationMidi(node, midiOptions(), &skipped);
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    }
+  });
+  juce::File f;
+  if (status.ok()) {
+    juce::String stem = juce::File::createLegalFileName(juce::String(name)).trim();
+    if (stem.isEmpty()) stem = "variation";
+    f = dragout::writeTemp("chopfractal-" + stem.substring(0, 40), wav ? "wav" : "mid", bytes);
+    if (f == juce::File()) status = cf::makeError(cf::ErrorCode::InvalidArgument, "could not write the temporary file");
+  }
+  if (!status.ok()) model_.setStatus(juce::String(cf::ui::dragRenderErrorMessage(status.error().message)), Severity::Warning);
+  else if (skipped > 0) model_.setStatus(juce::String(cf::ui::dragSkippedEventsMessage(skipped)), Severity::Warning);
+  else model_.setStatus({});
+  return f;
+}
+
+void EditorCommands::exportVariation(cf::history::NodeId node, bool wav) {
+  const juce::String ext = wav ? "wav" : "mid";
+  chooser_ = std::make_unique<juce::FileChooser>(wav ? "Export this variation as WAV" : "Export this variation as MIDI",
+                                                 juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("chopfractal-variation." + ext), "*." + ext);
+  chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                        [this, node, wav, ext](const juce::FileChooser& fc) {
+                          juce::File f = fc.getResult();
+                          if (f == juce::File()) return;
+                          const bool extensionAdded = !f.hasFileExtension(ext);
+                          if (extensionAdded) f = f.getParentDirectory().getChildFile(f.getFileName() + "." + ext);
+                          cf::Status st;
+                          proc_.withSession([&](cf::composition::ProjectSession& s) {
+                            if (wav) {
+                              auto r = s.exportVariationWav(node, f.getFullPathName().toStdString(), wavOptions(exportUi()));
+                              if (!r.ok()) st = r.error();
+                            } else {
+                              auto r = s.exportVariationMidi(node, f.getFullPathName().toStdString(), midiOptions(), !extensionAdded);
+                              if (!r.ok()) st = r.error();
+                            }
+                          });
+                          model_.setStatus(st.ok() ? "Exported " + f.getFileName() + "." : juce::String(st.error().message), st.ok() ? Severity::Info : Severity::Error);
+                        });
 }
 
 std::unique_ptr<dragout::DragFileSet> EditorCommands::makeKitDragSet() {

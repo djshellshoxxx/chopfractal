@@ -161,6 +161,7 @@ class EditorModel {
   bool dropHover() const { return dropHover_; }
   void setDropHover(bool on);                                                 // a file drag is over the editor (Change::Flags)
   chopfractal::render::MeterReading takeMeter() { return proc_.takeMeter(); }
+  float takeLimiterGr() { return proc_.takeLimiterGr(); }
   static constexpr int kMaxVoices = 8;
   juce::String syncText(bool compact) const;
 
