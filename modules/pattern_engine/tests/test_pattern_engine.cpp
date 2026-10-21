@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <chopfractal/chop_contracts/bytes.hpp>
+#include <chopfractal/pattern_engine/fx_pass.hpp>
 #include <chopfractal/pattern_engine/pattern.hpp>
 #include <chopfractal/pattern_engine/session.hpp>
 #include <set>
@@ -1049,4 +1051,148 @@ CHOP_TEST(mapRegions_scales_nested_regions_and_leaves_hashes_alone) {
   // An invalid mapping is refused.
   CHECK(!mapRegions(p, [](SampleRange r) { return SampleRange{r.end, r.start}; }).ok());
   CHECK(!mapRegions(p, nullptr).ok());
+}
+
+// ---- G2 direct editing: minimum length, cross-bar duplicate, probability, gesture blocks ----
+CHOP_TEST(resize_has_a_one_sixty_fourth_minimum_and_cross_bar_duplicate_keeps_the_hit) {
+  const auto chops = makeChops();
+  const Pattern p = gen(chops, baseSettings());
+  const Event* e = firstEventOf(p, 0);
+  CHECK(e != nullptr);
+  if (!e) return;
+  const EventId id = e->id;
+  CHECK(!resizeEvent(p, id, 59).ok());
+  CHECK(resizeEvent(p, id, 60).ok());
+
+  auto withFx = setEventFx(p, id, EventFx{FilterType::LowPass, 0.4f, 0.3f, 3.f, 0.2f});
+  CHECK(withFx.ok());
+  if (!withFx.ok()) return;
+  auto q = setEventProbability(withFx.value(), id, 0.5f);
+  CHECK(q.ok());
+  if (!q.ok()) return;
+  EventId copy;
+  const std::size_t before = eventCount(q.value());
+  auto d = duplicateEvent(q.value(), id, 2, 480, &copy);
+  CHECK(d.ok() && copy.valid() && copy != id);
+  if (!d.ok()) return;
+  CHECK(eventCount(d.value()) == before + 1 && validate(d.value()).ok());
+  const Event* c = findEvent(d.value(), copy);
+  CHECK(c != nullptr);
+  if (c) {
+    CHECK(c->start == 480 && c->chop == e->chop && c->fx == findEvent(q.value(), id)->fx && c->probability == 0.5f);
+    CHECK(c->userOwned && !c->locked && !c->child);
+    CHECK(locate(d.value(), copy)->bar == 2);
+  }
+  CHECK(!duplicateEvent(q.value(), id, 99, 0).ok() && !duplicateEvent(q.value(), id, 0, barTicks(p.settings)).ok());
+  auto barLocked = setLock(q.value(), ScopeRef{ScopeLevel::Bar, 3, 0, EventId{}}, true);
+  CHECK(barLocked.ok());
+  if (barLocked.ok()) CHECK(duplicateEvent(barLocked.value(), id, 3, 0).error().code == ErrorCode::Blocked);
+  Pattern capped = q.value();
+  capped.settings.maxEvents = static_cast<int>(before);
+  CHECK(duplicateEvent(capped, id, 1, 0).error().code == ErrorCode::LimitExceeded);
+}
+
+CHOP_TEST(probability_and_gesture_blocks_are_set_user_owned_and_survive_serialize) {
+  const auto chops = makeChops();
+  const Pattern p = gen(chops, baseSettings());
+  const Event* e = firstEventOf(p, 0);
+  CHECK(e != nullptr);
+  if (!e) return;
+  const EventId id = e->id;
+  CHECK(!setEventProbability(p, id, 1.5f).ok() && !setEventProbability(p, id, -0.1f).ok());
+  CHECK(setEventProbability(p, id, std::nanf("")).error().code == ErrorCode::OutOfRange);
+
+  GestureFx g;
+  EchoFx echo;
+  echo.repeats = 3;
+  echo.level = 128 + 40;
+  g.echo = echo;
+  TremPanFx tp;
+  tp.mode = 2;
+  tp.rateIndex = 1;
+  tp.depth = 128 + 60;
+  g.tremPan = tp;
+  StutterFx st;
+  st.rate = 5;
+  st.gate = 70;
+  g.stutter = st;
+  RollFx roll;
+  roll.rate = 3;
+  g.roll = roll;
+  auto r = setEventGestureFx(p, id, g);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  const Event* f = findEvent(r.value(), id);
+  CHECK(f && f->userOwned && f->echo && f->echo->repeats == 3 && f->tremPan && f->stutter && f->stutter->rate == 5 && f->roll);
+  auto back = deserialize(serialize(r.value()).data(), serialize(r.value()).size());
+  CHECK(back.ok());
+  if (back.ok()) {
+    const Event* b = findEvent(back.value(), id);
+    CHECK(b && b->echo == f->echo && b->tremPan == f->tremPan && b->stutter == f->stutter && b->roll == f->roll);
+  }
+  auto cleared = setEventGestureFx(r.value(), id, GestureFx{});
+  CHECK(cleared.ok() && !findEvent(cleared.value(), id)->echo && !findEvent(cleared.value(), id)->roll);
+  // The effect pass leaves forced blocks and user-owned Stutter / Roll alone.
+  FxPassSettings fxs;
+  fxs.echoAmount = 1.0;
+  fxs.stutterAmount = 1.0;
+  const Pattern passed = applyFxPass(r.value(), fxs);
+  const Event* kept = findEvent(passed, id);
+  CHECK(kept && kept->echo == f->echo && kept->tremPan == f->tremPan && kept->stutter == f->stutter);
+  // Locked scopes refuse.
+  auto locked = setLock(p, ScopeRef{ScopeLevel::Event, 0, 0, id}, true);
+  CHECK(locked.ok());
+  if (locked.ok()) CHECK(setEventGestureFx(locked.value(), id, g).error().code == ErrorCode::Blocked && setEventProbability(locked.value(), id, 0.5f).error().code == ErrorCode::Blocked);
+}
+
+namespace {
+// Records every query the generator hands to the policy; allows everything.
+struct SpyPolicy : ICandidatePolicy {
+  mutable std::vector<CandidateQuery> seen;
+  Decision evaluate(const CandidateQuery& q) const override {
+    seen.push_back(q);
+    return {};
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext&, const std::vector<ChopId>&) const override { return {}; }
+};
+}  // namespace
+
+CHOP_TEST(candidate_query_for_matches_the_query_used_during_generation) {
+  const ChopSnapshot c = makeChops();
+  Settings s;
+  s.bars = 2;
+  s.density = 0.7;
+  s.seed = 9;
+  SpyPolicy spy;
+  auto g = generate(c, s, &spy);
+  CHECK(g.ok());
+  if (!g.ok()) return;
+  const Pattern& p = g.value();
+  int compared = 0;
+  for (std::size_t b = 0; b < p.bars.size(); ++b)
+    for (const Beat& bt : p.bars[b].beats)
+      for (const Event& e : bt.events) {
+        const CandidateQuery mine = candidateQueryFor(p, e.id);
+        CHECK(mine.chop == e.chop);
+        // Some spy query carries the same chop, bar and start and the same history.
+        bool match = false;
+        for (const CandidateQuery& q : spy.seen)
+          if (q.chop == e.chop && q.startInBar == e.start && q.scope.bar == static_cast<int>(b) && q.recent == mine.recent && q.barSoFar == mine.barSoFar &&
+              q.firstInBar == mine.firstInBar && q.scope.beat == mine.scope.beat)
+            match = true;
+        CHECK(match);
+        ++compared;
+      }
+  CHECK(compared > 0);
+}
+
+CHOP_TEST(candidate_query_for_unknown_id_returns_invalid_chop) {
+  const ChopSnapshot c = makeChops();
+  Settings s;
+  s.bars = 2;
+  auto g = generate(c, s);
+  CHECK(g.ok());
+  if (!g.ok()) return;
+  CHECK(!candidateQueryFor(g.value(), EventId{999999}).chop.valid());
 }

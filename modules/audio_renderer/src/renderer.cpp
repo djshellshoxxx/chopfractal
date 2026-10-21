@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace chopfractal::render {
@@ -102,6 +103,17 @@ bool chokes(std::uint8_t incoming, std::uint8_t sounding) {
 }
 
 bool finiteIn(float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; }
+
+// Finite and |a| >= 1e-30 (so no NaN, Inf, zero or denormal), else 0. Done on the bit pattern: MSVC compiles std::isfinite(float)
+// to a library call, which made the 16-lane aux write loop several times slower there than on GCC/Clang.
+inline float keepAuxSample(float a) {
+  constexpr std::uint32_t kMinBits = 0x0DA24260u;  // bit pattern of 1e-30f
+  constexpr std::uint32_t kInfBits = 0x7F800000u;
+  std::uint32_t u;
+  std::memcpy(&u, &a, sizeof u);
+  u &= 0x7FFFFFFFu;
+  return (u - kMinBits) < (kInfBits - kMinBits) ? a : 0.f;
+}
 
 }  // namespace
 
@@ -698,8 +710,7 @@ struct Renderer::Impl {
         float* dst = aux.bus[b][c];
         const double* g = gainRamp.data();
         for (int i = 0; i < frames; ++i) {
-          const float a = static_cast<float>(m[i] * g[i]);
-          dst[i] = (std::isfinite(a) && std::fabs(a) >= 1e-30f) ? a : 0.f;
+          dst[i] = keepAuxSample(static_cast<float>(m[i] * g[i]));
         }
         if (delayed) {
           float* ring = auxDelay.data() + lane * static_cast<std::size_t>(auxDelayLen);

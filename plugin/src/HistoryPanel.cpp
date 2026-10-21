@@ -65,6 +65,7 @@ void HistoryPanel::mouseDown(const juce::MouseEvent& e) {
     const auto np = treePos(n);
     if (std::abs(pt.x - np.x) < 11 && std::abs(pt.y - np.y) < 11) {
       const cf::history::NodeId id = n.id;
+      if (onNode) onNode(id);
       if (e.mods.isPopupMenu()) {
         cmd_.historyMenu(id, this);
         break;

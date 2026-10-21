@@ -10,6 +10,7 @@ Exact folders, in dependency order (minimum versions in parentheses):
 
 - `modules/chop_contracts/` (^0.1)
 - `modules/source_chop/` (^0.1)
+- `modules/chop_roles_grammar/` (^0.1)
 - `modules/break_engine/` (required by a dependency)
 - `modules/pattern_engine/` (^0.1)
 - `modules/variation_history/` (^0.1)
@@ -31,6 +32,7 @@ or copy the folders by hand, keeping any `LICENSE`/`NOTICE` files. Do not use a 
 ```cmake
 add_subdirectory(modules/chop_contracts)
 add_subdirectory(modules/source_chop)
+add_subdirectory(modules/chop_roles_grammar)
 add_subdirectory(modules/break_engine)
 add_subdirectory(modules/pattern_engine)
 add_subdirectory(modules/variation_history)

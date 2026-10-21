@@ -10,6 +10,8 @@
 namespace chopfractal::pattern {
 namespace {
 
+constexpr Ticks kMinHitTicks = 60;  // 1/64 note
+
 Error blocked(const std::string& what) { return makeError(ErrorCode::Blocked, what + " is locked; unlock it first"); }
 
 Event& at(Pattern& p, const Location& l) { return p.bars[static_cast<std::size_t>(l.bar)].beats[static_cast<std::size_t>(l.beat)].events[l.index]; }
@@ -263,7 +265,7 @@ Result<Pattern> resizeEvent(const Pattern& p, EventId id, Ticks newDuration) {
   if (locationLocked(p, *loc)) return blocked("this event");
   const Event* e0 = findEvent(p, id);
   const Ticks barT = barTicks(p.settings);
-  if (newDuration <= 0 || newDuration > barT - e0->start) return makeError(ErrorCode::OutOfRange, "the hit must stay inside its bar");
+  if (newDuration < kMinHitTicks || newDuration > barT - e0->start) return makeError(ErrorCode::OutOfRange, "the hit must stay inside its bar and be at least 1/64 note long");
   Pattern q = p;
   Event& e = at(q, *loc);
   if (e.duration != newDuration) {
@@ -296,6 +298,59 @@ Result<Pattern> duplicateEvent(const Pattern& p, EventId id, Ticks newStartInBar
   auto& dst = q.bars[static_cast<std::size_t>(loc->bar)].beats[static_cast<std::size_t>(destBeat)];
   dst.events.push_back(std::move(e));
   dst.userOwned = true;
+  return q;
+}
+
+Result<Pattern> duplicateEvent(const Pattern& p, EventId id, int bar, Ticks startInBar, EventId* newId) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (bar < 0 || bar >= static_cast<int>(p.bars.size())) return makeError(ErrorCode::OutOfRange, "bar index out of range");
+  const Ticks barT = barTicks(p.settings);
+  if (startInBar < 0 || startInBar >= barT) return makeError(ErrorCode::OutOfRange, "start lies outside the bar");
+  const int destBeat = beatOf(p, startInBar);
+  if (scopeLocked(p, bar, destBeat)) return blocked("the destination beat");
+  if (static_cast<int>(eventCount(p)) >= p.settings.maxEvents) return makeError(ErrorCode::LimitExceeded, "event cap reached", p.settings.maxEvents);
+  Pattern q = p;
+  Event e = at(q, *loc);
+  e.id = EventId{q.nextId++};
+  e.start = startInBar;
+  e.duration = std::min<Ticks>(e.duration, barT - startInBar);
+  e.child.reset();
+  e.childActive = true;
+  e.locked = false;
+  e.userOwned = true;
+  if (newId) *newId = e.id;
+  auto& dst = q.bars[static_cast<std::size_t>(bar)].beats[static_cast<std::size_t>(destBeat)];
+  dst.events.push_back(std::move(e));
+  dst.userOwned = true;
+  return q;
+}
+
+Result<Pattern> setEventProbability(const Pattern& p, EventId id, float probability) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (!(probability >= 0.f && probability <= 1.f)) return makeError(ErrorCode::OutOfRange, "probability must be between 0 and 1");
+  if (locationLocked(p, *loc)) return blocked("this event");
+  Pattern q = p;
+  Event& e = at(q, *loc);
+  e.probability = probability;
+  e.userOwned = true;
+  return q;
+}
+
+Result<Pattern> setEventGestureFx(const Pattern& p, EventId id, const GestureFx& fx) {
+  auto loc = locate(p, id);
+  if (!loc) return makeError(ErrorCode::NotFound, "event not found");
+  if (locationLocked(p, *loc)) return blocked("this event");
+  Pattern q = p;
+  Event& e = at(q, *loc);
+  e.echo = fx.echo ? std::optional<EchoFx>(sanitize(*fx.echo)) : std::nullopt;
+  e.tremPan = fx.tremPan ? std::optional<TremPanFx>(sanitize(*fx.tremPan)) : std::nullopt;
+  e.stutter = fx.stutter ? std::optional<StutterFx>(sanitize(*fx.stutter)) : std::nullopt;
+  e.roll = fx.roll ? std::optional<RollFx>(sanitize(*fx.roll)) : std::nullopt;
+  e.userOwned = true;
+  Status v = validateEvent(e);
+  if (!v.ok()) return v.error();
   return q;
 }
 

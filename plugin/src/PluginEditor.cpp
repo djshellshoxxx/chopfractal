@@ -15,7 +15,7 @@
 namespace cf = chopfractal;
 
 namespace {
-constexpr int kLegacyW = 920, kLegacyH = 460;
+constexpr int kLegacyW = 920, kLegacyH = 344;
 }
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
@@ -31,9 +31,13 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       controls_(model_, commands_, processor.apvts),
       features_(model_, commands_),
       history_(model_, commands_),
+      historyDrawer_(model_, commands_, history_),
       orbit_(model_, commands_),
       presets_(model_, commands_),
       export_(model_, commands_),
+      inspector_(model_, commands_),
+      fxRack_(model_, commands_),
+      rules_(model_, commands_),
       perform_(processor, model_, commands_),
       registry_(*this),
       quickCard_(model_, commands_, quickStartTracker_),
@@ -52,8 +56,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   // Tools drawer: the older panels, unchanged, at their old relative positions.
   controls_.setBounds(0, 0, 920, 232 - 36 + 30);
   features_.setBounds(0, 232 - 36 + 30 + 6, 920, 104);
-  history_.setBounds(0, 340, 808, 106);
-  for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_, &history_}) legacyBody_.addAndMakeVisible(*c);  // the Orbit View has its own drawer
+  for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_}) legacyBody_.addAndMakeVisible(*c);  // the Orbit View and the family tree have their own drawers
   legacyBody_.setSize(kLegacyW, kLegacyH);
   legacyView_.setViewedComponent(&legacyBody_, false);
   legacyView_.setScrollBarsShown(true, true);
@@ -75,6 +78,12 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   presets_.onApplied = [this](const juce::String& name) { topBar_.setPresetName(name); };
   registerDrawer("export", "Export", export_, 400);
   registerDrawer("tools", "Tools", legacyView_, 420);
+  registerMenuDrawer("inspector", "Inspector", inspector_, 320);
+  registerMenuDrawer("fx", "Effects", fxRack_, 340);
+  registerMenuDrawer("rules", "Rules", rules_, 420);
+  registerMenuDrawer("history", "History", historyDrawer_, 440);
+  inspector_.onOpenFx = [this] { openDrawer("fx"); };
+  pattern_.onEditHit = [this](chopfractal::EventId) { openDrawer("inspector"); };
   registerDrawer("settings", "Settings", settings_, 300, false);
   perform_.registerAll([this](const juce::String& id, const juce::String& title, juce::Component& c, int w) { registerMenuDrawer(id, title, c, w); });
   registerMenuDrawer("orbit", "Orbit", orbit_, 320);
@@ -239,9 +248,9 @@ void ChopFractalEditor::timerCallback() {
 juce::String ChopFractalEditor::getTooltip() {
   const auto point = getMouseXYRelative();
   if (wave_.getBounds().contains(point))
-    return "Source waveform: click a chop to select and audition it; drag across sections to select several. Shift-click adds a marker; Alt-click removes the nearest marker. Drop a sample anywhere to load it.";
+    return "Source waveform: click a chop to audition it, drag a marker to move it (it snaps to transients), double-click or Shift-click adds a marker, right-click for marker actions. The wheel zooms, Shift+wheel scrolls. Drop a sample anywhere to load it.";
   if (pattern_.getBounds().contains(point))
-    return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
+    return "Pattern grid: drag a hit to move it, drag its right edge to resize, Alt-drag copies, double-click opens the inspector or adds a hit, right-click for hit actions. Drag empty space to select hits; the wheel scrolls the lanes. M mutes, D duplicates, Delete removes.";
   const auto screen = juce::Desktop::getMousePosition();
   if (history_.isShowing() && history_.getScreenBounds().contains(screen))
     return "Variation family tree: click a node to recall it, at the next loop boundary during playback. Right-click for favorite, rename, compare and delete actions. Each Generate, Mutate, Zoom and completed edit adds a branch.";

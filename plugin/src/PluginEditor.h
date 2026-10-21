@@ -18,13 +18,17 @@
 #include "EditorModel.h"
 #include "EditorTheme.h"
 #include "FeaturePanel.h"
+#include "HistoryDrawer.h"
 #include "HistoryPanel.h"
 #include "MacroStrip.h"
+#include "FxRackPanel.h"
+#include "InspectorPanel.h"
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
 #include "ExportDrawer.h"
 #include "PresetBrowser.h"
 #include "PerformDrawers.h"
+#include "RulesPanel.h"
 #include "PluginProcessor.h"
 #include "QuickStartCard.h"
 #include "QuickStartTracker.h"
@@ -103,6 +107,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void toggleEvolve();
   void observeQuickStart();  // the 10 Hz tick: marks steps that really happened
   void refreshAccessibility();
+  // Tests only: stop the 10 Hz refresh and run one tick on demand, so a replay does not depend on the wall clock.
+  void stopRefreshTimerForTesting() { stopTimer(); }
+  void refreshForTesting() { timerCallback(); }
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
@@ -114,6 +121,10 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   TopBar& topBar() { return topBar_; }
   HistoryPanel& historyPanel() { return history_; }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
+  chopfractal::ui::LaneGeometry laneGeometry() const { return model_.lanes(); }
+  bool waveZoomed() const { return model_.waveZoomed(); }
+  void fitWave() { model_.fitWave(); }
+  void revealLane(int lane) { model_.revealLane(lane); }
   int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
   chopfractal::EventId selectedHit() const { return model_.selected(); }
   const std::vector<chopfractal::EventId>& selectedHits() const { return model_.selectedHits(); }
@@ -141,10 +152,14 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   ControlsPanel controls_;
   FeaturePanel features_;
   HistoryPanel history_;
+  HistoryDrawer historyDrawer_;
   OrbitPanel orbit_;
   PresetBrowser presets_;
   ExportDrawer export_;
   juce::Viewport legacyView_;
+  InspectorPanel inspector_;
+  FxRackPanel fxRack_;
+  RulesPanel rules_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
   PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model

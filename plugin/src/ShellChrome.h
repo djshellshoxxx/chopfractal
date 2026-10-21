@@ -13,6 +13,7 @@ class ShellChrome : public EditorPanelBase {
   void paint(juce::Graphics&) override;
   void resized() override;
   void mouseDown(const juce::MouseEvent&) override;
+  void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
   static juce::String roleName(chopfractal::DrumRole, int chopIndex);
   static const char* roleLetter(chopfractal::DrumRole);
@@ -20,12 +21,17 @@ class ShellChrome : public EditorPanelBase {
  private:
   void modelChanged(Change) override;
   void layoutWidgets();
+  void syncWaveButtons();
 
   juce::AudioProcessorValueTreeState& apvts_;
   shell::ShellRects rects_;
   bool advanced_ = false;
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, zoom_{"Zoom In"}, collapse_{"Collapse"}, lock_{"Lock Bar"};
-  juce::ToggleButton editMode_{"Move / resize hits"};
+  juce::TextButton fit_{"Fit"}, undoMarker_{"Undo Marker"}, redoMarker_{"Redo Marker"};
+  juce::ComboBox snap_;
+  juce::ToggleButton editMode_{"Move / resize hits"};  // retained for saved projects; hits are always editable now, so it is hidden
+  juce::ToggleButton gridSnap_{"Snap"};
+  juce::ComboBox snapDivision_;
   juce::ComboBox bars_;
   juce::Label barsLabel_{{}, "Length"};
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> barsAttachment_;

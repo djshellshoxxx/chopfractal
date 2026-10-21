@@ -81,7 +81,7 @@ void TopBar::addDrawerButton(const juce::String& id, const juce::String& label, 
 void TopBar::addMenuEntry(const juce::String& id, const juce::String& title) {
   if (menuEntries_.empty()) {
     panels_.setTitle("Panels");
-    panels_.setTooltip("Open Capture, Tempo, Pads, Scenes, Evolve, Outputs, Arrange and Orbit");
+    panels_.setTooltip("Open Capture, Tempo, Pads, Scenes, Evolve, Outputs, Arrange, Orbit, Inspector, Effects, Rules and History");
     panels_.onClick = [this] { showPanelsMenu(); };
     addAndMakeVisible(panels_);
   }

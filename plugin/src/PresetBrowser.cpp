@@ -350,7 +350,7 @@ void PresetBrowser::updateButtons() {
   delete_.setEnabled(mine);
   favorite_.setEnabled(have);
   const bool fav = have && items_[static_cast<std::size_t>(selected_)].favorite;
-  favorite_.setButtonText(fav ? "Unfavorite" : "Favorite");
+  favorite_.setButtonText(fav ? "Unfavorite preset" : "Favorite preset");
   favorite_.setTitle(favorite_.getButtonText());
   undo_.setEnabled(cmd_.canUndoPreset());
 }

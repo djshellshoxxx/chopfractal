@@ -131,24 +131,26 @@ void EditorCommands::handleDroppedFiles(const juce::StringArray& files) {
 // generation and history
 // ---------------------------------------------------------------------------------------------
 
-void EditorCommands::detectChops(DetectChoice choice) {
-  const int mode = static_cast<int>(choice);
+cf::composition::DetectOptions EditorCommands::detectOptionsFor(int mode, cf::composition::ProjectSession& s) const {
   const int hostBeats = proc_.hostBeatsPerBar.load(), hostUnit = std::max(1, proc_.hostBeatUnit.load());
   static const int kBars[] = {1, 2, 4, 8};
   const int loopBars = kBars[std::max(0, std::min(3, static_cast<int>(std::lround(proc_.currentParams().get(cf::host::kPatternBars)))))];
-  run([=](cf::composition::ProjectSession& s) {
-    cf::composition::DetectOptions d;
-    d.merge = (mode == 2) ? cf::source::MergeMode::Merge : cf::source::MergeMode::Replace;  // Merge keeps the markers you placed
-    if (mode >= 3) {
-      d.mode = cf::composition::DetectMode::EvenGrid;
-      d.grid.division = mode == 3 ? 8 : 16;
-      // Quarter notes in the loop: bars x beats per bar x (4 / beat unit), from the pattern if there is one, else the host meter and Length control.
-      const cf::TimeSignature ts = s.pattern() ? s.pattern()->settings.timeSignature : cf::TimeSignature{hostBeats, hostUnit};
-      const int bars = s.pattern() ? s.pattern()->settings.bars : loopBars;
-      d.grid.loopBeats = static_cast<double>(bars) * static_cast<double>(ts.numerator) * 4.0 / static_cast<double>(ts.denominator);
-    }
-    return s.applyChops(d);
-  });
+  cf::composition::DetectOptions d;
+  d.merge = (mode == 2) ? cf::source::MergeMode::Merge : cf::source::MergeMode::Replace;  // Merge keeps the markers you placed
+  if (mode >= 3) {
+    d.mode = cf::composition::DetectMode::EvenGrid;
+    d.grid.division = mode == 3 ? 8 : 16;
+    // Quarter notes in the loop: bars x beats per bar x (4 / beat unit), from the pattern if there is one, else the host meter and Length control.
+    const cf::TimeSignature ts = s.pattern() ? s.pattern()->settings.timeSignature : cf::TimeSignature{hostBeats, hostUnit};
+    const int bars = s.pattern() ? s.pattern()->settings.bars : loopBars;
+    d.grid.loopBeats = static_cast<double>(bars) * static_cast<double>(ts.numerator) * 4.0 / static_cast<double>(ts.denominator);
+  }
+  return d;
+}
+
+void EditorCommands::detectChops(DetectChoice choice) {
+  const int mode = static_cast<int>(choice);
+  run([=](cf::composition::ProjectSession& s) { return s.applyChops(detectOptionsFor(mode, s)); });
 }
 
 void EditorCommands::generate() {
@@ -166,7 +168,11 @@ void EditorCommands::generate() {
   run([=](cf::composition::ProjectSession& session) { return session.generate(s); });
 }
 
-void EditorCommands::mutate() {
+void EditorCommands::mutate() { mutateImpl(-1.0, {}); }
+
+void EditorCommands::mutateAll() { mutateImpl(1.0, "Mutate (rules)"); }
+
+void EditorCommands::mutateImpl(double amountOverride, const std::string& label) {
   const cf::host::ParamValues params = proc_.currentParams();
   const std::uint64_t seed = model_.seed() + 1;
   const double tempo = std::min(999.0, std::max(20.0, proc_.activeBpm.load()));
@@ -189,11 +195,11 @@ void EditorCommands::mutate() {
     live.variation = {v, v, v, v};
     cf::pattern::MutateOptions opt;
     opt.seed = seed;
-    opt.amount = cf::composition::mutateAmountFromParams(params);
+    opt.amount = amountOverride >= 0.0 ? amountOverride : cf::composition::mutateAmountFromParams(params);
     cf::composition::applyBreakParams(params, live, false);  // profile, anchors, groove, fill; the engine version stays the pattern's own
     live.brk.tempoHint = tempo;
     live = cf::composition::applyChaos(live, params.get(cf::host::kChaos));
-    return session.mutate(opt, &live);
+    return session.mutate(opt, &live, label);
   });
 }
 

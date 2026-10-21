@@ -80,7 +80,7 @@ class PresetBrowser : public EditorPanelBase, private juce::ListBoxModel, privat
   juce::TextEditor search_;
   juce::TextButton all_{"All"}, factory_{"Factory"}, user_{"User"}, favs_{"Favorites"};
   juce::ListBox list_{"Presets", this};
-  juce::TextButton load_{"Load"}, save_{"Save as"}, rename_{"Rename"}, delete_{"Delete"}, favorite_{"Favorite"}, undo_{"Undo preset"};
+  juce::TextButton load_{"Load"}, save_{"Save as"}, rename_{"Rename preset"}, delete_{"Delete preset"}, favorite_{"Favorite preset"}, undo_{"Undo preset"};
   juce::ToggleButton autoGenerate_{"Apply and generate"};
   juce::Rectangle<int> detailsArea_;
 };

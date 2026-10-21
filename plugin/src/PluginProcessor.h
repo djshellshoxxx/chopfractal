@@ -133,6 +133,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Tests only: pretend the host gave this many input channels (-1 = use the real count). The bus layout rules never allow
   // fewer than one, so this is the only way to reach the "no input" refusal.
   void overrideInputChannelsForTesting(int channels) { inputOverride_.store(channels); }
+  // Tests only: stop the 30 Hz poll so the test decides when pollAudioFlags() runs (wall-clock ticks make a replay non-deterministic).
+  void stopPollTimerForTesting() { stopTimer(); }
   // Everything buildCaptureView() needs, read from the engine, the host state and the session (message thread).
   chopfractal::ui::CaptureUiInput captureUiInput(chopfractal::capture::CaptureMode mode, int bars, double maxSeconds);
 

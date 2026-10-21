@@ -63,6 +63,27 @@ struct Notice {
   std::string text;
 };
 
+// Rule editor support (rules.cpp, G2 / F06).
+struct RuleNote {  // one change a rule blocked during the last Generate, Mutate or Evolve step
+  int bar = 0;
+  int beat = 0;
+  std::uint32_t rule = 0;  // 0 = a rule (unknown)
+  std::string text;
+};
+struct EventExplanation {
+  bool allowed = true;
+  bool preserved = false;   // a Preserve rule protects the hit from Mutate
+  bool handPlaced = false;  // the user placed or edited it: Mutate keeps it whatever the rules say
+  double weight = 1.0;
+  std::vector<std::uint32_t> rules;  // rules that took part, ascending
+  std::string text;
+};
+struct RulePreview {
+  int events = 0;
+  int blocked = 0;
+  std::vector<std::pair<std::uint32_t, int>> blockedByRule;  // sorted by rule id; id 0 is "a rule"
+};
+
 enum class DetectMode { Transients, EvenGrid };
 struct DetectOptions {
   DetectMode mode = DetectMode::Transients;
@@ -342,6 +363,8 @@ class ProjectSession {
   Status editMarkers(const std::function<Status(source::ChopMap&)>& edit);
   Status undoMarkers();
   Status redoMarkers();
+  bool canUndoMarkers() const { return chopMap_ && chopMap_->canUndo(); }
+  bool canRedoMarkers() const { return chopMap_ && chopMap_->canRedo(); }
   std::shared_ptr<const render::SourceData> sourceData() const { return sourceData_; }
   // True when the source has no file behind it (captured or stretched), so project state must embed the audio.
   bool sourceNeedsEmbed() const;
@@ -360,6 +383,11 @@ class ProjectSession {
   Status setRules(roles::RuleSet rules);
   const roles::RoleMap& roleMap() const { return roles_; }
   const roles::RuleSet& rules() const { return rules_; }
+  Status clearRole(ChopId chop);                          // NotFound for an unknown chop; no-op when unassigned
+  const std::vector<RuleNote>& lastRuleNotes() const { return ruleNotes_; }
+  Result<EventExplanation> explainEvent(EventId id) const;  // why the hit is allowed, weighted or protected
+  // Pure: generates into a scratch pattern with `draft` and the current roles; nothing is committed or announced.
+  Result<RulePreview> previewRules(const roles::RuleSet& draft, const pattern::Settings& settings) const;
 
   // ---- pattern ----
   const pattern::Pattern* pattern() const { return patterns_.hasPattern() ? &patterns_.current() : nullptr; }
@@ -563,6 +591,7 @@ class ProjectSession {
   void notice(Notice::Level level, std::string text);
   std::map<std::uint8_t, std::vector<std::uint8_t>> extrasBlocks() const;  // the blocks saveState would write (empty = schema 1)
   void noteReport(const pattern::GenerationReport& report);
+  void recordRuleNotes(const pattern::GenerationReport& report);
   std::unique_ptr<roles::GrammarPolicy> makePolicy() const;
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
@@ -581,6 +610,7 @@ class ProjectSession {
   ChopSnapshotPtr chops_;
   roles::RoleMap roles_;
   roles::RuleSet rules_;
+  std::vector<RuleNote> ruleNotes_;  // transient: BlockedByRule notes of the last generation step
   std::map<std::string, codec::ModulePayload> foreignModules_;  // modules written by a newer build: kept and re-saved untouched
   pattern::PatternSession patterns_;
   history::VariationTree history_;

@@ -148,6 +148,9 @@ struct Location {
 };
 
 std::optional<Location> locate(const Pattern& p, EventId id);
+// The query a rule policy sees for an existing top-level event (the one generation used when it placed it); chop is invalid when
+// the id is not a top-level event.
+CandidateQuery candidateQueryFor(const Pattern& p, EventId id);
 const Event* findEvent(const Pattern& p, EventId id);
 bool isLocked(const Pattern& p, EventId id);  // effective: the event or any ancestor scope is locked
 
@@ -168,6 +171,23 @@ Result<Pattern> setEventEnabled(const Pattern& p, EventId id, bool enabled);  //
 Result<Pattern> setEventChop(const Pattern& p, EventId id, ChopId chop, const ChopSnapshot& chops);
 Result<Pattern> setEventTransform(const Pattern& p, EventId id, const EventTransform& tx);
 Result<Pattern> setEventFx(const Pattern& p, EventId id, const EventFx& fx);
+// Cross-bar duplicate (G2/F02): the copy lands at (bar, startInBar), keeps chop, region, transform, fx, gesture blocks,
+// probability and enabled flag, has no child, is unlocked and user-owned, and its duration is clipped to the bar end.
+// Refused with Blocked when the destination beat or bar is locked, LimitExceeded at the event cap. `newId` receives the copy's id.
+Result<Pattern> duplicateEvent(const Pattern& p, EventId id, int bar, Ticks startInBar, EventId* newId = nullptr);
+// Chance (0..1) that the hit plays in a given loop (resolved deterministically at flatten time).
+Result<Pattern> setEventProbability(const Pattern& p, EventId id, float probability);
+// The optional per-hit gesture blocks (Echo, Tremolo-Pan, Stutter, Roll) set together; an empty optional removes the block.
+// Hand-set Echo and Tremolo-Pan blocks are written as "user forced" (level / depth plus 128, Tremolo-Pan mode 254 for off) so the
+// effect pass leaves them alone; Stutter and Roll are protected by the event being user-owned.
+struct GestureFx {
+  std::optional<EchoFx> echo;
+  std::optional<TremPanFx> tremPan;
+  std::optional<StutterFx> stutter;
+  std::optional<RollFx> roll;
+  friend bool operator==(const GestureFx& a, const GestureFx& b) { return a.echo == b.echo && a.tremPan == b.tremPan && a.stutter == b.stutter && a.roll == b.roll; }
+};
+Result<Pattern> setEventGestureFx(const Pattern& p, EventId id, const GestureFx& fx);
 // Replaces every event of one bar (e.g. a generated Fractal Rhythm bar). Refused in locked scopes; the
 // bar becomes user-owned. Events must already be valid, with unique ids not used elsewhere.
 Result<Pattern> setBarEvents(const Pattern& p, int bar, std::vector<Event> events, const ChopSnapshot& chops);

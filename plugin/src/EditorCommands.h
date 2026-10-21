@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+#include <chopfractal/plugin_ui_adapter/edit_geometry.hpp>
+
+#include <chopfractal/plugin_ui_adapter/fx_rack_view.hpp>
+
 #include "DragOut.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
@@ -73,6 +77,8 @@ class EditorCommands {
   void detectChops(DetectChoice);
   void generate();
   void mutate();
+  // Mutate that re-evaluates every unlocked, non-hand-placed beat (amount 1.0) under the label "Mutate (rules)"; used by the rules editor.
+  void mutateAll();
   void reroll();
   void undo();
   void redo();
@@ -84,6 +90,15 @@ class EditorCommands {
   void recallSnapshot(std::size_t slot);
   void setRoleOfSelected(const juce::String& role);
   void activateNode(chopfractal::history::NodeId);  // at the next loop boundary while the host plays
+  // ---- history drawer (G2) ----
+  void setNodeFavorite(chopfractal::history::NodeId, bool favorite);
+  void renameNode(chopfractal::history::NodeId, const std::string& name);
+  void deleteBranch(chopfractal::history::NodeId);
+  juce::String compareText(chopfractal::history::NodeId a, chopfractal::history::NodeId b);  // "12 vs 14 events; bars that differ: 2"; also the status line
+  void beginMorph(double t);   // needs both comparison slots
+  void setMorph(double t);
+  void commitMorph();          // keeps the blend as a new family-tree node
+  void cancelMorph();
   void historyMenu(chopfractal::history::NodeId, juce::Component* anchor);
 
   // ---- Smart Setup, Fractal, Evolve, export ----
@@ -157,9 +172,65 @@ class EditorCommands {
 
   void say(const juce::String& text) { model_.setStatus(text); }
 
+  // ---- direct editing (G2 / F02; EditorEditCommands.cpp) ----
+  // Every pattern command is one session edit (one undo step, one "Edited hits" history node) and refuses locked or nested hits
+  // with the messages of docs/specs/roadmap/F02-direct-editing.md. `lane` is an index into the chop list, -1 keeps the hit's chop.
+  static constexpr const char* kMsgLocked = "That hit is locked. Unlock it or its bar first.";
+  static constexpr const char* kMsgNested = "Zoomed hits cannot be edited here. Collapse the zoom first.";
+  // Empty when the hit can be edited, else the message to show.
+  juce::String hitGuard(chopfractal::EventId) const;
+  void moveHit(chopfractal::EventId, int bar, chopfractal::Ticks startInBar, int lane);
+  void resizeHit(chopfractal::EventId, chopfractal::Ticks newDuration);
+  void duplicateHit(chopfractal::EventId, int bar, chopfractal::Ticks startInBar, int lane);
+  void addHit(int bar, chopfractal::Ticks startInBar, int lane);
+  void deleteHit(chopfractal::EventId);
+  void setHitEnabled(chopfractal::EventId, bool);
+  void setHitLocked(chopfractal::EventId, bool);
+  void resetHit(chopfractal::EventId);  // transform, filter / glide / crunch and gesture effects back to defaults
+  // Inspector and effects rack: the same change applied to several hits as one undo step. Mutators receive each hit's current value.
+  void setHitsTransform(const std::vector<chopfractal::EventId>&, const std::function<void(chopfractal::EventTransform&)>&);
+  void setHitsFx(const std::vector<chopfractal::EventId>&, const std::function<void(chopfractal::EventFx&)>&);
+  void setHitsGesture(const std::vector<chopfractal::EventId>&, const std::function<void(chopfractal::pattern::GestureFx&)>&);
+  // The rack: every selected hit's effect state (filter / glide / crunch plus the four gesture blocks) rewritten in one undo step.
+  void setHitsFxState(const std::vector<chopfractal::EventId>&, const std::function<void(chopfractal::ui::HitFx&)>&);
+  void setRoleOfHits(const std::vector<chopfractal::EventId>&, const juce::String& role);  // the role of every chop the hits use
+  void setHitsProbability(const std::vector<chopfractal::EventId>&, float probability);
+  void setHitsLocked(const std::vector<chopfractal::EventId>&, bool);
+  void setHitsLane(const std::vector<chopfractal::EventId>&, int lane);  // change the chop (source) of the hits
+  // ---- rules editor (G2 / F06; EditorEditCommands.cpp). Rule logic lives in the session; these only route and phrase the result. ----
+  bool applyRules(const chopfractal::roles::RuleSet&);          // false (with the module's message as status) when refused
+  void testRules(const chopfractal::roles::RuleSet&);           // preview without changing anything; the result goes to the status line
+  juce::String explainSelected();                               // why the selected hit is there; also the status line; empty with no selection
+  bool setChopRole(chopfractal::ChopId, const juce::String&);  // empty clears the role
+  void selectBeat(int bar, int beat);                           // highlights the first hit of that beat
+  void moveMarker(chopfractal::ChopId, std::int64_t frame);
+  void deleteMarker(chopfractal::ChopId);
+  void setMarkerEnabled(chopfractal::ChopId, bool);
+  void renameMarker(chopfractal::ChopId, const std::string&);
+  void trimMarker(chopfractal::ChopId, std::uint32_t trimStart, std::uint32_t trimEnd);
+  void undoMarkers();
+  void redoMarkers();
+  bool canUndoMarkers() const;
+  bool canRedoMarkers() const;
+  void setMarkerSnap(int mode);   // 0 Off, 1 Transient, 2 Zero crossing (saved with the project)
+  void setGridSnap(bool on);
+  void setSnapDivision(int division);  // 0 = the pattern grid, else 4, 8, 16, 32
+  // Snapped frame for a marker placed or dragged at `frame` (honours the project's snap mode; `bypass` is the Cmd key).
+  std::int64_t snapFrame(std::int64_t frame, double framesPerPixel, bool bypass) const;
+  // Detection: preview proposes markers (nothing changes), applyDetect commits them, cancelDetect drops the preview.
+  // With no markers yet there is nothing to merge, so beginDetect applies at once; it returns true when a preview is waiting.
+  bool beginDetect(DetectChoice);
+  void setDetectMerge(bool merge);  // Replace (false) or Merge with my markers (true); refreshes the preview
+  void applyDetect();
+  void cancelDetect();
+  chopfractal::Ticks snapGridTicks() const;  // the effective snap step: the project grid or the chosen division
+
  private:
+  void mutateImpl(double amountOverride, const std::string& label);
   ChopFractalProcessor& proc_;
   EditorModel& model_;
+  chopfractal::composition::DetectOptions detectOptionsFor(int mode, chopfractal::composition::ProjectSession&) const;
+  void refreshDetectPreview(const chopfractal::composition::DetectOptions&);
   std::unique_ptr<juce::FileChooser> chooser_;
   struct PresetUndo {
     bool valid = false;
@@ -169,4 +240,5 @@ class EditorCommands {
   } presetUndo_;
   void setParamPlain(const std::string& id, double plain);
   bool normalizeExport_ = false;
+  int detectMode_ = 1;
 };

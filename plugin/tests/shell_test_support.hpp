@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <chopfractal/plugin_ui_adapter/edit_geometry.hpp>
+
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
 
@@ -141,6 +143,26 @@ inline juce::Component* findById(juce::Component& root, const juce::String& id) 
   return found;
 }
 
+// The slider whose accessibility title matches (the first one found).
+inline juce::Slider* findSlider(juce::Component& root, const juce::String& title) {
+  juce::Slider* found = nullptr;
+  forEachControl(root, [&](juce::Component& c) {
+    if (auto* sl = dynamic_cast<juce::Slider*>(&c))
+      if (!found && sl->getTitle() == title) found = sl;
+  });
+  return found;
+}
+
+// The combo box whose accessibility title matches (the first one found).
+inline juce::ComboBox* findComboBox(juce::Component& root, const juce::String& title) {
+  juce::ComboBox* found = nullptr;
+  forEachControl(root, [&](juce::Component& c) {
+    if (auto* cb = dynamic_cast<juce::ComboBox*>(&c))
+      if (!found && cb->getTitle() == title) found = cb;
+  });
+  return found;
+}
+
 // Exactly one button must carry the text, or the helper fails the test (a second match would make a click ambiguous).
 inline juce::Button* findButton(juce::Component& root, const juce::String& text) {
   juce::Button* found = nullptr;
@@ -184,6 +206,16 @@ inline juce::TextEditor* findTextEditor(juce::Component& root, const juce::Strin
 // windowing layer would: the press picks the target, the drag and release go to the same target even outside it,
 // and events are expressed in the target's own coordinates. Presses over buttons, sliders and other widgets are
 // dropped (the helper simulates canvas gestures; widgets are driven through their own API).
+// The point on a hit rectangle in editor coordinates; scrolls the lane into view first (lanes scroll when they do not fit).
+template <class Editor, class Rect>
+juce::Point<int> hitPointOf(Editor& ed, const Rect& r, double fraction = 0.5) {
+  ed.revealLane(r.chopIndex);
+  const auto b = ed.patternBounds();
+  const auto g = ed.laneGeometry();
+  const double y = chopfractal::ui::laneTop(g, r.chopIndex) + g.laneHeight * 0.5;
+  return {b.getX() + static_cast<int>((r.x0 + (r.x1 - r.x0) * fraction) * b.getWidth()), b.getY() + static_cast<int>(y)};
+}
+
 class MouseSim {
  public:
   explicit MouseSim(juce::Component& root) : root_(root) {}
@@ -212,7 +244,44 @@ class MouseSim {
       target_ = nullptr;
     }
   }
+  // A move without a button (cursor and hover handling).
+  void move(juce::Point<int> rootPoint, juce::ModifierKeys mods = {}) {
+    if (auto* c = canvasAt(root_, rootPoint)) {
+      target_ = c;
+      c->mouseMove(event(rootPoint, mods));
+      target_ = nullptr;
+    }
+  }
+  // A wheel turn over the canvas under the point (deltaY > 0 is away from the user, like the OS: zoom in / scroll up).
+  void wheel(juce::Point<int> rootPoint, float deltaY, juce::ModifierKeys mods = {}, float deltaX = 0.0f) {
+    if (auto* c = canvasAt(root_, rootPoint)) {
+      target_ = c;
+      juce::MouseWheelDetails d;
+      d.deltaX = deltaX;
+      d.deltaY = deltaY;
+      d.isReversed = false;
+      d.isSmooth = false;
+      d.isInertial = false;
+      c->mouseWheelMove(event(rootPoint, mods), d);
+      target_ = nullptr;
+    }
+  }
   // A press, a move and a release in one call.
+  // A point inside the pattern grid that is not on a hit: a press there starts a marquee instead of moving a hit.
+  template <class Editor>
+  juce::Point<int> emptyPatternSpot(Editor& ed) {
+    const auto area = ed.patternBounds();
+    for (int y = area.getBottom() - 2; y > area.getY(); y -= 3)
+      for (int x = area.getRight() - 2; x > area.getX(); x -= 7) {
+        const juce::Point<int> pt(x, y);
+        down(pt);
+        const bool onHit = ed.selectedHit().valid();
+        up(pt);
+        if (!onHit) return pt;
+      }
+    return area.getTopLeft() + juce::Point<int>(1, 1);
+  }
+
   void dragFromTo(juce::Point<int> from, juce::Point<int> to, juce::ModifierKeys mods = {}) {
     down(from, mods);
     drag(to, mods);
@@ -224,13 +293,20 @@ class MouseSim {
   // is the target, any other widget is not. A point no child covers belongs to `root` itself, so the helper also
   // works on a component that draws its canvases directly.
   static bool isCanvasId(const juce::String& id) {
-    return id == "WavePanel" || id == "PatternPanel" || id == "HistoryPanel" || id == "OrbitPanel" || id.startsWith("pad-") || id.startsWith("canvas-");
+    return id == "WavePanel" || id == "PatternPanel" || id == "HistoryPanel" || id == "OrbitPanel" || id == "ShellChrome" || id.startsWith("pad-") || id.startsWith("canvas-");
   }
   static juce::Component* canvasAt(juce::Component& c, juce::Point<int> local, bool isRoot = true) {
     for (int i = c.getNumChildComponents(); --i >= 0;) {
       auto* child = c.getChildComponent(i);
       if (!child->isVisible() || !child->getBounds().contains(local)) continue;
-      if (isCanvasId(child->getComponentID())) return child;
+      if (isCanvasId(child->getComponentID())) {
+        // The chrome draws furniture behind its own buttons: a press on one of them is a widget press, not a canvas press.
+        for (int j = child->getNumChildComponents(); --j >= 0;) {
+          auto* inner = child->getChildComponent(j);
+          if (inner->isVisible() && inner->getBounds().contains(local - child->getPosition()) && isLeafWidget(inner)) return nullptr;
+        }
+        return child;
+      }
       if (isLeafWidget(child) || child->getNumChildComponents() == 0) return nullptr;
       return canvasAt(*child, local - child->getPosition(), false);  // a container panel
     }

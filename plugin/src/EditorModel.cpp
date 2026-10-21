@@ -32,7 +32,7 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
   juce::String pendingLabelNow;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     juce::String sig;
-    sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<int>(s.history().size()) << "|"
+    sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<juce::int64>(waveStart_) << "-" << static_cast<juce::int64>(waveEnd_) << "|" << static_cast<int>(s.history().size()) << "|"
         << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1) << "|"
         << (s.morphActive() ? juce::String(s.morphAmount(), 4) : juce::String("-")) << "|" << (s.displayPattern() != s.pattern() ? "p" : "-");
     sourceMissing_ = s.sourceMissing();
@@ -53,15 +53,26 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     next.barCount = view_.barCount;
     const auto pb = s.playback();
     if (s.chopMap()) next.sourceFrames = s.chopMap()->info().frames;
-    if (pb && pb->source && (next.peaks.min.empty() || peaksSource_ != pb->source.get() || peaksWidth_ != waveWidthPx)) {
+    // The zoom window belongs to one source and one length; anything else shows the whole clip again.
+    if (!pb || !pb->source || waveSource_ != pb->source.get() || waveEnd_ > next.sourceFrames) {
+      waveSource_ = pb && pb->source ? pb->source.get() : nullptr;
+      waveStart_ = 0;
+      waveEnd_ = 0;
+    }
+    const std::int64_t winStart = waveEnd_ > waveStart_ ? waveStart_ : 0;
+    const std::int64_t winEnd = waveEnd_ > waveStart_ ? waveEnd_ : std::max<std::int64_t>(1, next.sourceFrames);
+    next.window = cf::ui::ViewWindow{winStart, winEnd, static_cast<double>(std::max(1, waveWidthPx))};
+    if (pb && pb->source && (next.peaks.min.empty() || peaksSource_ != pb->source.get() || peaksWidth_ != waveWidthPx || peaksStart_ != winStart || peaksEnd_ != winEnd)) {
       peaksSource_ = pb->source.get();
       peaksWidth_ = waveWidthPx;
+      peaksStart_ = winStart;
+      peaksEnd_ = winEnd;
       const auto ptrs = std::vector<const float*>{pb->source->channel(0), pb->source->channel(pb->source->channels - 1)};
-      next.peaks = cf::ui::computePeaks(ptrs.data(), pb->source->channels, pb->source->frames, {0, pb->source->frames}, std::max(1, waveWidthPx));
+      next.peaks = cf::ui::computePeaks(ptrs.data(), pb->source->channels, pb->source->frames, {winStart, winEnd}, std::max(1, waveWidthPx));
     }
     if (!pb || !pb->source) next.peaks = {};
     if (s.chopMap()) {
-      next.markers = cf::ui::buildMarkerViews(*s.chopMap(), cf::ui::ViewWindow{0, std::max<std::int64_t>(1, next.sourceFrames), static_cast<double>(waveWidthPx)});
+      next.markers = cf::ui::buildMarkerViews(*s.chopMap(), next.window);
       if (s.chops()) next.chops = s.chops()->chops;
       if (const auto* shown = s.displayPattern(); shown && s.chops()) {
         next.pattern = cf::ui::buildPatternView(*shown, *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
@@ -81,6 +92,7 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     next.hasPattern = s.pattern() != nullptr;
     next.hasSource = next.sourceFrames > 0;
     view_ = std::move(next);
+    laneScroll_ = cf::ui::clampLaneScroll(lanes(), laneScroll_);  // fewer chops can shrink the scroll range
     haveSetup_ = false;  // Smart Setup suggestions belong to the chops they were made for
     const auto& rects = view_.pattern.rects;
     if (selected_.valid() && std::none_of(rects.begin(), rects.end(), [&](const cf::ui::EventRect& r) { return r.id == selected_; })) {
@@ -94,6 +106,10 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     selectedChops_.erase(std::remove_if(selectedChops_.begin(), selectedChops_.end(), [&](cf::ChopId id) {
       return std::none_of(view_.chops.begin(), view_.chops.end(), [&](const cf::ChopInfo& chop) { return chop.id == id; });
     }), selectedChops_.end());
+    if (selectedMarker_.valid() && std::none_of(view_.markers.begin(), view_.markers.end(), [&](const cf::ui::MarkerView& m) { return m.id == selectedMarker_; })) {
+      selectedMarker_ = cf::ChopId{};
+      selectionChanged = true;
+    }
     selectionChanged = selectionChanged || hitsBefore != selectedHits_.size() || chopsBefore != selectedChops_.size();
   });
 
@@ -198,14 +214,83 @@ void EditorModel::selectSectionsInPattern(juce::Rectangle<int> band, juce::Point
   selectedHits_.clear();
   selectedChops_.clear();
   selected_ = {};
-  const float laneHeight = static_cast<float>(canvas.getHeight()) / static_cast<float>(std::max<std::size_t>(1, view_.chops.size()));
+  const auto lanes = this->lanes();
+  const float laneHeight = static_cast<float>(lanes.laneHeight > 0.0 ? lanes.laneHeight : canvas.getHeight() / static_cast<double>(std::max<std::size_t>(1, view_.chops.size())));
+  const float scroll = static_cast<float>(lanes.scroll);
   for (const auto& hit : view_.pattern.rects) {
-    const juce::Rectangle<float> bounds(canvas.getX() + static_cast<float>(hit.x0) * canvas.getWidth(), canvas.getY() + hit.chopIndex * laneHeight,
+    const juce::Rectangle<float> bounds(canvas.getX() + static_cast<float>(hit.x0) * canvas.getWidth(), canvas.getY() + hit.chopIndex * laneHeight - scroll,
                                         static_cast<float>(hit.x1 - hit.x0) * canvas.getWidth(), laneHeight);
     if (hit.depth == 0 && (click ? bounds.contains(end.toFloat()) : bounds.intersects(band.toFloat()))) selectedHits_.push_back(hit.id);
   }
   if (!selectedHits_.empty()) selected_ = selectedHits_.front();
   announceSelection();
+}
+
+void EditorModel::setWaveWindow(std::int64_t startFrame, std::int64_t endFrame) {
+  const std::int64_t total = view_.sourceFrames;
+  if (total <= 0) return;
+  const std::int64_t span = std::min(total, std::max<std::int64_t>(std::min<std::int64_t>(256, total), endFrame - startFrame));
+  const std::int64_t start = std::max<std::int64_t>(0, std::min(startFrame, total - span));
+  const bool whole = start == 0 && span >= total;
+  const std::int64_t newStart = whole ? 0 : start, newEnd = whole ? 0 : start + span;
+  if (newStart == waveStart_ && newEnd == waveEnd_) return;
+  waveStart_ = newStart;
+  waveEnd_ = newEnd;
+  rebuild();
+}
+
+void EditorModel::zoomWaveAround(double x, double factor) {
+  if (view_.sourceFrames <= 0) return;
+  const auto w = view_.window;
+  const std::int64_t anchor = cf::ui::xToFrame(w, x);
+  const double span = static_cast<double>(w.endFrame - w.startFrame);
+  const double minFactor = span / static_cast<double>(view_.sourceFrames);       // cannot zoom out past the whole clip
+  const double maxFactor = span / static_cast<double>(std::min<std::int64_t>(256, view_.sourceFrames));  // nor in past 256 frames
+  const double f = std::max(minFactor, std::min(maxFactor, factor));
+  const auto z = cf::ui::zoomAround(w, anchor, f, view_.sourceFrames);
+  setWaveWindow(z.startFrame, z.endFrame);
+}
+
+void EditorModel::scrollWaveBy(double deltaPx) {
+  if (view_.sourceFrames <= 0) return;
+  const auto s = cf::ui::scrolledBy(view_.window, deltaPx, view_.sourceFrames);
+  setWaveWindow(s.startFrame, s.endFrame);
+}
+
+void EditorModel::selectMarker(cf::ChopId id) {
+  if (selectedMarker_ == id) return;
+  selectedMarker_ = id;
+  emit(Change::Selection);
+}
+
+void EditorModel::setLaneView(double viewHeight, double minLaneHeight) {
+  if (laneViewH_ == viewHeight && minLaneH_ == minLaneHeight) return;
+  laneViewH_ = viewHeight;
+  minLaneH_ = minLaneHeight;
+  laneScroll_ = lanes().scroll;  // re-clamp after a resize
+  emit(Change::Scroll);
+}
+
+cf::ui::LaneGeometry EditorModel::lanes() const { return cf::ui::laneGeometry(laneViewH_, static_cast<int>(view_.chops.size()), minLaneH_, laneScroll_); }
+
+void EditorModel::setLaneScroll(double scroll) {
+  const double next = cf::ui::clampLaneScroll(lanes(), scroll);
+  if (next == laneScroll_) return;
+  laneScroll_ = next;
+  emit(Change::Scroll);
+}
+
+void EditorModel::revealLane(int lane) { setLaneScroll(cf::ui::scrollToRevealLane(lanes(), lane)); }
+
+void EditorModel::setDetectPreview(DetectPreview p) {
+  detect_ = std::move(p);
+  emit(Change::Detect);
+}
+
+void EditorModel::clearDetectPreview() {
+  if (!detect_.active && detect_.frames.empty()) return;
+  detect_ = {};
+  emit(Change::Detect);
 }
 
 bool EditorModel::setExtras(const std::function<void(cf::composition::ProjectExtras&)>& mutate) {
@@ -267,4 +352,92 @@ void EditorModel::setDropHover(bool on) {
 juce::String EditorModel::syncText(bool compact) const {
   return juce::String(cf::ui::describeSync(activeBpm(), proc_.hostBeatsPerBar.load(), std::max(1, proc_.hostBeatUnit.load()), usedFallbackTempo(), usedFallbackMeter(),
                                            proc_.hostPlaying.load(), compact));
+}
+
+chopfractal::ui::InspectorView EditorModel::inspector() {
+  const auto ids = targetHits();
+  chopfractal::ui::InspectorView v;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    if (s.pattern() && s.chops()) v = cf::ui::buildInspectorView(*s.pattern(), ids, *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
+    else v = cf::ui::buildInspectorView(cf::pattern::Pattern{}, {}, cf::ChopSnapshot{});
+  });
+  return v;
+}
+
+chopfractal::ui::FxRackView EditorModel::fxRack() {
+  const auto ids = targetHits();
+  chopfractal::ui::FxRackView v;
+  proc_.withSession([&](cf::composition::ProjectSession& s) { v = cf::ui::buildFxRackView(s.pattern() ? *s.pattern() : cf::pattern::Pattern{}, ids); });
+  return v;
+}
+
+bool EditorModel::firstHitFx(chopfractal::ui::HitFx& out) {
+  const auto ids = targetHits();
+  bool found = false;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    if (ids.empty() || !s.pattern()) return;
+    if (const auto* e = cf::pattern::findEvent(*s.pattern(), ids.front())) {
+      out = cf::ui::hitFxOf(*e);
+      found = true;
+    }
+  });
+  return found;
+}
+
+EditorModel::RulesSnapshot EditorModel::rulesSnapshot() {
+  RulesSnapshot out;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    out.rules = s.rules();
+    out.roles = s.roleMap();
+    out.notes = s.lastRuleNotes();
+    if (s.pattern()) out.patternBars = static_cast<int>(s.pattern()->bars.size());
+    if (s.chops()) {
+      out.chops = s.chops()->chops;
+      out.sampleRate = s.chops()->sampleRate;
+    }
+  });
+  return out;
+}
+
+bool EditorModel::nodeSummary(cf::history::NodeId id, cf::history::NodeSummary& out) {
+  bool found = false;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& n : s.history().listAll())
+      if (n.id == id) {
+        out = n;
+        found = true;
+      }
+  });
+  return found;
+}
+
+bool EditorModel::nodePatternView(cf::history::NodeId id, cf::ui::PatternView& out) {
+  bool ok = false;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    if (!s.chops()) return;
+    auto snap = s.history().getSnapshot(id);
+    if (!snap.ok() || !snap.value().payload) return;
+    auto p = cf::pattern::deserialize(snap.value().payload->data(), snap.value().payload->size());
+    if (!p.ok()) return;
+    out = cf::ui::buildPatternView(p.value(), *s.chops());
+    ok = true;
+  });
+  return ok;
+}
+
+EditorModel::SnapshotState EditorModel::snapshotState() {
+  SnapshotState st;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    st.hasA = s.hasSnapshot(0);
+    st.hasB = s.hasSnapshot(1);
+    st.morphActive = s.morphActive();
+    st.morphAmount = s.morphAmount();
+  });
+  return st;
+}
+
+cf::history::NodeId EditorModel::activeNode() const {
+  for (const auto& n : view_.tree)
+    if (n.active) return n.id;
+  return cf::history::kNoNode;
 }

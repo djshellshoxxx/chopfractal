@@ -276,3 +276,96 @@ CHOP_TEST(state_roundtrips_and_malformed_state_is_rejected) {
     if (r.ok()) CHECK(validateRules(r.value().rules).ok());  // survivors are still valid rule sets
   }
 }
+
+CHOP_TEST(describe_renders_every_action_kind_in_plain_english) {
+  CHECK(describe(templates::excludeRole(7, "hat", 2, 3)) == "Forbid hat in bars 3-4");
+  CHECK(describe(templates::requireInFinalBeat(1, "kick")) == "Require kick in the final beat");
+  CHECK(describe(templates::preferAtPhraseBoundary(2, "snare")) == "Prefer snare at phrase boundaries (x3)");
+  CHECK(describe(templates::avoidAdjacentRepeats(3)) == "Allow at most 1 of the same chop in a row");
+  CHECK(describe(templates::preserveFirst(4, "kick")) == "Keep kick first in each bar");
+  Rule count;
+  count.action.kind = ActionKind::MaxCount;
+  count.action.count = 3;
+  count.when.role = "hat";
+  CHECK(describe(count) == "Allow at most 3 hat per bar");
+  Rule chop;
+  chop.action.kind = ActionKind::Preserve;
+  chop.when.chop = ChopId{5};
+  CHECK(describe(chop) == "Keep chop #5");
+  Rule beats;
+  beats.action.kind = ActionKind::Forbid;
+  beats.when.role = "snare";
+  beats.when.beatMin = 0;
+  beats.when.beatMax = 1;
+  CHECK(describe(beats) == "Forbid snare on beats 1-2");
+  beats.when.beatMax = -1;
+  beats.when.beatMin = 1;
+  CHECK(describe(beats) == "Forbid snare from beat 2");
+  Rule open;
+  open.action.kind = ActionKind::Forbid;
+  open.when.role = "hat";
+  open.when.barMin = 2;
+  CHECK(describe(open) == "Forbid hat from bar 3");
+  Rule single;
+  single.action.kind = ActionKind::Forbid;
+  single.when.role = "hat";
+  single.when.barMin = 2;
+  single.when.barMax = 2;
+  CHECK(describe(single) == "Forbid hat in bar 3");
+  Rule avoid;
+  avoid.action.kind = ActionKind::Prefer;
+  avoid.weight = 0.5;
+  avoid.when.role = "hat";
+  CHECK(describe(avoid) == "Avoid hat (x0.5)");
+  Rule roleRuns;
+  roleRuns.action.kind = ActionKind::MaxConsecutiveRepeats;
+  roleRuns.action.repeatBy = RepeatBy::SameRole;
+  roleRuns.action.count = 2;
+  CHECK(describe(roleRuns) == "Allow at most 2 of the same role in a row");
+}
+
+CHOP_TEST(describe_never_exceeds_200_chars_and_is_deterministic) {
+  std::uint64_t x = 12345;
+  auto next = [&](int n) {
+    x = x * 6364136223846793005ull + 1442695040888963407ull;
+    return static_cast<int>((x >> 33) % static_cast<std::uint64_t>(n));
+  };
+  for (int i = 0; i < 500; ++i) {
+    Rule r;
+    r.action.kind = static_cast<ActionKind>(next(6));
+    r.action.count = 1 + next(16);
+    r.action.repeatBy = next(2) ? RepeatBy::SameChop : RepeatBy::SameRole;
+    r.when.role = next(2) ? std::string(1 + static_cast<std::size_t>(next(32)), 'a') : std::string();
+    if (next(2)) r.when.chop = ChopId{static_cast<std::uint64_t>(1 + next(900000))};
+    r.when.position = static_cast<Position>(next(4));
+    r.when.barMin = next(8);
+    r.when.barMax = next(2) ? -1 : r.when.barMin + next(3);
+    r.when.beatMin = next(4);
+    r.when.beatMax = next(2) ? -1 : r.when.beatMin + next(3);
+    r.weight = 0.1 + next(100) / 10.0;
+    const std::string a = describe(r), b = describe(r);
+    CHECK(a == b && !a.empty() && a.size() <= 200);
+  }
+}
+
+CHOP_TEST(preserving_rule_returns_first_matching_enabled_preserve_rule_or_zero) {
+  Rule disabled = templates::preserveFirst(3, "kick");
+  disabled.enabled = false;
+  Rule hat = templates::preserveFirst(5, "hat");
+  Rule kick = templates::preserveFirst(7, "kick");
+  const auto policy = policyOf({disabled, hat, kick});
+  CandidateQuery q;
+  q.chop = ChopId{1};  // kick
+  q.firstInBar = true;
+  q.scope.level = ScopeLevel::Event;
+  q.scope.barCount = 4;
+  q.scope.beatsPerBar = 4;
+  CHECK(policy.preservingRule(q) == 7);  // the disabled rule 3 is skipped
+  q.chop = ChopId{3};
+  CHECK(policy.preservingRule(q) == 5);
+  q.chop = ChopId{2};  // snare: nothing preserves it
+  CHECK(policy.preservingRule(q) == 0);
+  q.chop = ChopId{1};
+  q.firstInBar = false;  // not first in the bar any more
+  CHECK(policy.preservingRule(q) == 0);
+}

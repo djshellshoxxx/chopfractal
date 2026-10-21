@@ -1,10 +1,12 @@
 #include "ShellChrome.h"
 
 #include <algorithm>
+#include <cmath>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <initializer_list>
 
 #include "CdlLookAndFeel.h"
+#include "DetectDialog.h"
 #include "EditorTheme.h"
 
 namespace cf = chopfractal;
@@ -16,13 +18,55 @@ ShellChrome::ShellChrome(EditorModel& model, EditorCommands& commands, juce::Aud
     b->setTitle(b->getButtonText());
   }
   load_.onClick = [this] { cmd_.chooseFile(); };
-  detect_.onClick = [this] { cmd_.detectChops(static_cast<DetectChoice>(model_.detectMode())); };
+  detect_.setTooltip("Find chop points in the sample; with markers already placed it shows the proposals and asks how to merge");
+  detect_.onClick = [this] {
+    if (cmd_.beginDetect(static_cast<DetectChoice>(model_.detectMode()))) {
+      if (auto* top = getParentComponent()) DetectDialog::launch(*top, detect_.getBounds(), model_, cmd_);
+    }
+  };
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&fit_, &undoMarker_, &redoMarker_}) {
+    addAndMakeVisible(*b);
+    b->setTitle(b->getButtonText());
+  }
+  fit_.setTooltip("Show the whole sample in the waveform");
+  fit_.onClick = [this] { model_.fitWave(); };
+  undoMarker_.setTooltip("Undo the last marker edit");
+  undoMarker_.onClick = [this] { cmd_.undoMarkers(); };
+  redoMarker_.setTooltip("Redo the marker edit you undid");
+  redoMarker_.onClick = [this] { cmd_.redoMarkers(); };
+  snap_.addItem("Snap off", 1);
+  snap_.addItem("Snap transient", 2);
+  snap_.addItem("Snap zero crossing", 3);
+  snap_.setTitle("Marker snap");
+  snap_.setTooltip("Where a dragged or new marker lands: off, on the nearest transient, or on a zero crossing");
+  snap_.setSelectedId(model_.extras().ui.markerSnap + 1, juce::dontSendNotification);
+  snap_.onChange = [this] { cmd_.setMarkerSnap(snap_.getSelectedId() - 1); };
+  addAndMakeVisible(snap_);
   zoom_.setTooltip("Subdivide the selected pattern hits into nested rhythms. Select hits or waveform sections first.");
   zoom_.onClick = [this] { cmd_.zoomInSelected(); };
   collapse_.onClick = [this] { cmd_.collapseSelected(); };
   lock_.onClick = [this] { cmd_.toggleLockSelectedBar(); };
   addAndMakeVisible(editMode_);
-  editMode_.setTooltip("Off: drag to select sections. On: drag a hit to move or resize it.");
+  editMode_.setTooltip("Hits are always editable by dragging; this switch is kept for older projects");
+  editMode_.setVisible(false);
+  gridSnap_.setTitle("Snap to grid");
+  gridSnap_.setTooltip("Hits land on the snap step when moved, resized or added");
+  gridSnap_.setToggleState(model_.extras().ui.gridSnap, juce::dontSendNotification);
+  gridSnap_.onClick = [this] { cmd_.setGridSnap(gridSnap_.getToggleState()); };
+  addAndMakeVisible(gridSnap_);
+  snapDivision_.addItemList({"Pattern grid", "1/4", "1/8", "1/16", "1/32"}, 1);
+  snapDivision_.setTitle("Snap division");
+  snapDivision_.setTooltip("The step hits snap to: the pattern grid or a fixed note value");
+  {
+    static const int kDiv[] = {0, 4, 8, 16, 32};
+    for (int i = 0; i < 5; ++i)
+      if (kDiv[i] == model_.extras().ui.snapDivision) snapDivision_.setSelectedId(i + 1, juce::dontSendNotification);
+  }
+  snapDivision_.onChange = [this] {
+    static const int kDiv[] = {0, 4, 8, 16, 32};
+    cmd_.setSnapDivision(kDiv[std::max(0, std::min(4, snapDivision_.getSelectedId() - 1))]);
+  };
+  addAndMakeVisible(snapDivision_);
   editMode_.setToggleState(model_.editMode(), juce::dontSendNotification);
   editMode_.onClick = [this] { model_.setEditMode(editMode_.getToggleState()); };
   bars_.addItemList(juce::StringArray::fromTokens(cf::host::parameterManifest()[cf::host::kPatternBars].choices, "|", ""), 1);
@@ -63,18 +107,35 @@ const char* ShellChrome::roleLetter(cf::DrumRole r) {
   }
 }
 
+void ShellChrome::syncWaveButtons() {
+  const bool src = model_.view().hasSource;
+  fit_.setEnabled(src && model_.waveZoomed());
+  undoMarker_.setEnabled(src && cmd_.canUndoMarkers());
+  redoMarker_.setEnabled(src && cmd_.canRedoMarkers());
+  snap_.setEnabled(src);
+}
+
 void ShellChrome::modelChanged(Change c) {
   switch (c) {
     case Change::View:
       detect_.setEnabled(model_.view().hasSource);
+      syncWaveButtons();
       repaint();
       break;
     case Change::Selection:
+    case Change::Scroll:
       repaint();
       break;
     case Change::Flags:
     case Change::Extras:
       if (editMode_.getToggleState() != model_.editMode()) editMode_.setToggleState(model_.editMode(), juce::dontSendNotification);
+      if (snap_.getSelectedId() != model_.extras().ui.markerSnap + 1) snap_.setSelectedId(model_.extras().ui.markerSnap + 1, juce::dontSendNotification);
+      if (gridSnap_.getToggleState() != model_.extras().ui.gridSnap) gridSnap_.setToggleState(model_.extras().ui.gridSnap, juce::dontSendNotification);
+      {
+        static const int kDiv[] = {0, 4, 8, 16, 32};
+        for (int i = 0; i < 5; ++i)
+          if (kDiv[i] == model_.extras().ui.snapDivision && snapDivision_.getSelectedId() != i + 1) snapDivision_.setSelectedId(i + 1, juce::dontSendNotification);
+      }
       break;
     default:
       break;
@@ -99,6 +160,16 @@ void ShellChrome::layoutWidgets() {
     load_.setBounds(t.removeFromLeft(px(104)).reduced(0, px(2)));
     t.removeFromLeft(gap);
     detect_.setBounds(t.removeFromLeft(px(124)).reduced(0, px(2)));
+    // Marker tools, as many as fit: the chop count on the right needs about 90 px.
+    t.removeFromRight(px(96));
+    struct Slot { juce::Component* c; int w; };
+    for (const Slot& slot : {Slot{&fit_, 44}, Slot{&undoMarker_, 112}, Slot{&redoMarker_, 112}, Slot{&snap_, 128}}) {
+      const int w = px(static_cast<float>(slot.w));
+      t.removeFromLeft(gap);
+      const bool fits = t.getWidth() >= w;
+      slot.c->setVisible(fits);
+      if (fits) slot.c->setBounds(t.removeFromLeft(w).reduced(0, px(2)));
+    }
   }
   {
     auto t = rects_.patternParts.header;
@@ -111,8 +182,14 @@ void ShellChrome::layoutWidgets() {
       c->setBounds(t.removeFromLeft(px(70)).reduced(0, px(2)));
       t.removeFromLeft(gap);
     }
-    editMode_.setVisible(advanced_);
-    editMode_.setBounds(t.removeFromLeft(px(150)));
+    // Snap controls on the right of the header, as many as fit.
+    for (const auto& slot : {std::pair<juce::Component*, int>{&gridSnap_, 62}, std::pair<juce::Component*, int>{&snapDivision_, 104}}) {
+      const int w = px(static_cast<float>(slot.second));
+      const bool fits = t.getWidth() >= w;
+      slot.first->setVisible(fits);
+      if (fits) slot.first->setBounds(t.removeFromLeft(w).reduced(0, px(2)));
+      t.removeFromLeft(gap);
+    }
   }
 }
 
@@ -123,16 +200,22 @@ void ShellChrome::mouseDown(const juce::MouseEvent& e) {
   const auto& grid = rects_.patternParts.grid;
   if (lh.contains(pt) && !v.chops.empty()) {
     grabEditorFocus();
-    const float laneH = static_cast<float>(grid.getHeight()) / static_cast<float>(v.chops.size());
-    const int lane = juce::jlimit(0, static_cast<int>(v.chops.size()) - 1, static_cast<int>(static_cast<float>(pt.y - grid.getY()) / laneH));
-    const juce::Rectangle<int> band(0, static_cast<int>(static_cast<float>(lane) * laneH), grid.getWidth(), std::max(1, static_cast<int>(laneH)));
+    const auto lanes = model_.lanes();
+    const int lane = std::max(0, cf::ui::laneAtScrolledY(lanes, static_cast<double>(pt.y - grid.getY())));
+    const float laneH = static_cast<float>(lanes.laneHeight);
+    const juce::Rectangle<int> band(0, static_cast<int>(cf::ui::laneTop(lanes, lane)), grid.getWidth(), std::max(1, static_cast<int>(laneH)));
     model_.selectSectionsInPattern(band, band.getCentre(), false, {0, 0, grid.getWidth(), grid.getHeight()});
     return;
   }
   const auto& strip = rects_.sourceParts.chopStrip;
   if (strip.contains(pt) && v.sourceFrames > 0) {
     grabEditorFocus();
-    model_.selectSectionsInWave(pt.x - strip.getX(), pt.x - strip.getX(), true, strip.getWidth());
+    // The strip is aligned with the (possibly zoomed) waveform; the selection helper wants whole-clip pixels.
+    auto win = model_.waveWindow();
+    win.widthPx = static_cast<double>(std::max(1, strip.getWidth()));
+    const std::int64_t frame = cf::ui::xToFrame(win, static_cast<double>(pt.x - strip.getX()));
+    const int fullX = static_cast<int>(static_cast<double>(frame) / static_cast<double>(std::max<std::int64_t>(1, v.sourceFrames)) * strip.getWidth());
+    model_.selectSectionsInWave(fullX, fullX, true, strip.getWidth());
     for (const auto id : model_.selectedChops()) {
       cmd_.audition(id);
       break;
@@ -163,11 +246,16 @@ void ShellChrome::paint(juce::Graphics& g) {
     g.drawText(v.hasSource ? juce::String(v.chops.size()) + (v.chops.size() == 1 ? " chop" : " chops") : juce::String("no sample loaded"), sp.toolbar, juce::Justification::centredRight, false);
     cdl::paintTrace(g, static_cast<float>(sp.toolbar.getX()), static_cast<float>(sp.toolbar.getRight()), static_cast<float>(sp.toolbar.getBottom()) - 1.0f,
                     static_cast<float>(sp.toolbar.getX()) + 0.3f * static_cast<float>(sp.toolbar.getWidth()));
-    // ruler: a tick and the chop number at every chop start
+    // ruler: a tick and the chop number at every chop start, aligned with the (possibly zoomed) waveform
+    auto win = model_.waveWindow();
+    win.widthPx = static_cast<double>(std::max(1, sp.wave.getWidth()));
+    if (win.endFrame <= win.startFrame) win.endFrame = win.startFrame + 1;
     if (v.sourceFrames > 0) {
       g.setFont(cdl::font(cdl::FontRole::Value, 0.9f * s));
       for (std::size_t i = 0; i < v.chops.size(); ++i) {
-        const int x = sp.wave.getX() + static_cast<int>(static_cast<double>(v.chops[i].range.start) / static_cast<double>(v.sourceFrames) * sp.wave.getWidth());
+        const double fx = cf::ui::frameToX(win, v.chops[i].range.start);
+        if (fx < 0.0 || fx > sp.wave.getWidth()) continue;
+        const int x = sp.wave.getX() + static_cast<int>(fx);
         g.setColour(p.edgeHi);
         g.fillRect(x, sp.ruler.getBottom() - 4, 1, 4);
         g.setColour(p.inkMuted);
@@ -176,10 +264,13 @@ void ShellChrome::paint(juce::Graphics& g) {
     }
     // chop strip
     const auto selected = model_.selectedChops();
+    juce::Graphics::ScopedSaveState stripClip(g);
+    g.reduceClipRegion(sp.chopStrip);
     for (std::size_t i = 0; i < v.chops.size() && v.sourceFrames > 0; ++i) {
       const auto& c = v.chops[i];
-      const float x0 = static_cast<float>(sp.chopStrip.getX()) + static_cast<float>(static_cast<double>(c.range.start) / static_cast<double>(v.sourceFrames) * sp.chopStrip.getWidth());
-      const float x1 = static_cast<float>(sp.chopStrip.getX()) + static_cast<float>(static_cast<double>(c.range.end) / static_cast<double>(v.sourceFrames) * sp.chopStrip.getWidth());
+      const float x0 = static_cast<float>(sp.chopStrip.getX()) + static_cast<float>(cf::ui::frameToX(win, c.range.start) * sp.chopStrip.getWidth() / win.widthPx);
+      const float x1 = static_cast<float>(sp.chopStrip.getX()) + static_cast<float>(cf::ui::frameToX(win, c.range.end) * sp.chopStrip.getWidth() / win.widthPx);
+      if (x1 < static_cast<float>(sp.chopStrip.getX()) || x0 > static_cast<float>(sp.chopStrip.getRight())) continue;
       const auto cell = juce::Rectangle<float>(x0, static_cast<float>(sp.chopStrip.getY()) + 4.0f, std::max(2.0f, x1 - x0 - 2.0f), static_cast<float>(sp.chopStrip.getHeight()) - 4.0f);
       const auto lane = editor_theme::laneColour(static_cast<int>(i));
       const bool sel = std::find(selected.begin(), selected.end(), c.id) != selected.end();
@@ -219,15 +310,19 @@ void ShellChrome::paint(juce::Graphics& g) {
       g.setColour(p.inkMuted);
       g.drawText(juce::String(b + 1), x + 4, pp.ruler.getY(), 28, pp.ruler.getHeight(), juce::Justification::centredLeft, false);
     }
-    // lane headers, one per role
+    // lane headers, one per role; they scroll together with the grid and are clipped to their column
     if (!v.chops.empty()) {
-      const float laneH = static_cast<float>(pp.grid.getHeight()) / static_cast<float>(v.chops.size());
+      const auto lanes = model_.lanes();
+      const float laneH = static_cast<float>(lanes.laneHeight > 0.0 ? lanes.laneHeight : pp.grid.getHeight() / static_cast<double>(v.chops.size()));
+      const float scroll = static_cast<float>(lanes.scroll);
+      juce::Graphics::ScopedSaveState laneClip(g);
+      g.reduceClipRegion(pp.laneHeaders);
       std::vector<bool> laneSelected(v.chops.size(), false);
       for (const auto& r : pat.rects)
         if (r.id == model_.selected() || std::find(model_.selectedHits().begin(), model_.selectedHits().end(), r.id) != model_.selectedHits().end())
           if (r.chopIndex >= 0 && r.chopIndex < static_cast<int>(laneSelected.size())) laneSelected[static_cast<std::size_t>(r.chopIndex)] = true;
       for (std::size_t i = 0; i < v.chops.size(); ++i) {
-        const auto row = juce::Rectangle<float>(static_cast<float>(pp.laneHeaders.getX()), static_cast<float>(pp.grid.getY()) + static_cast<float>(i) * laneH,
+        const auto row = juce::Rectangle<float>(static_cast<float>(pp.laneHeaders.getX()), static_cast<float>(pp.grid.getY()) + static_cast<float>(i) * laneH - scroll,
                                                 static_cast<float>(pp.laneHeaders.getWidth()) - 6.0f, laneH);
         const auto lane = editor_theme::laneColour(static_cast<int>(i));
         if (laneSelected[i]) {
@@ -245,5 +340,20 @@ void ShellChrome::paint(juce::Graphics& g) {
         }
       }
     }
+  }
+}
+
+void ShellChrome::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) {
+  const auto pt = e.getPosition();
+  if (rects_.patternParts.laneHeaders.contains(pt)) {  // wheel over the lane headers scrolls the lanes
+    model_.setLaneScroll(model_.laneScroll() - static_cast<double>(wheel.deltaY) * 3.0 * model_.lanes().laneHeight);
+    return;
+  }
+  const auto& strip = rects_.sourceParts.chopStrip;
+  if (strip.contains(pt) && model_.view().sourceFrames > 0) {  // wheel over the chop strip zooms / scrolls the waveform like the waveform itself
+    if (e.mods.isShiftDown() || std::fabs(wheel.deltaX) > std::fabs(wheel.deltaY))
+      model_.scrollWaveBy(-(std::fabs(wheel.deltaX) > std::fabs(wheel.deltaY) ? wheel.deltaX : wheel.deltaY) * strip.getWidth() * 0.5f);
+    else
+      model_.zoomWaveAround(static_cast<double>(pt.x - strip.getX()), std::pow(1.25, static_cast<double>(wheel.deltaY) * 4.0));
   }
 }
