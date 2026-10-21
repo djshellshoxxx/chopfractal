@@ -16,6 +16,7 @@
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
 #include "PresetManager.h"
+#include "WavePanel.h"
 #include "StatusBar.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
@@ -29,10 +30,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void filesDropped(const juce::StringArray& files, int x, int y) override;
   void paint(juce::Graphics&) override;
   void resized() override;
-  void mouseDown(const juce::MouseEvent&) override;
-  void mouseDoubleClick(const juce::MouseEvent&) override;
-  void mouseDrag(const juce::MouseEvent&) override;
-  void mouseUp(const juce::MouseEvent&) override;
   bool keyPressed(const juce::KeyPress&) override;
 
   // Public so tests can drive them without modal dialogs.
@@ -50,7 +47,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   chopfractal::EventId selectedHit() const { return model_.selected(); }
   const std::vector<chopfractal::EventId>& selectedHits() const { return model_.selectedHits(); }
   const std::vector<chopfractal::ChopId>& selectedChops() const { return model_.selectedChops(); }
-  juce::Rectangle<int> waveformBounds() const { return waveArea_; }
+  juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
 
  private:
   using Attachment = juce::AudioProcessorValueTreeState;
@@ -74,7 +71,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   ExportUi exportUi() const;
   void pushEvolve();
 
-  void updateSectionSelection(juce::Point<int> point);
   void modelChanged(EditorModel::Change) override;
   ChopFractalProcessor& proc_;
   EditorModel model_;
@@ -83,9 +79,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   OrbitPanel orbit_;
   HistoryPanel history_;
   PatternPanel pattern_;
+  WavePanel wave_;
   juce::ToggleButton editMode_{"Move / resize hits"};
-  bool selectingSections_ = false;
-  juce::Point<int> selectionStart_, selectionEnd_;
 
   juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
@@ -124,7 +119,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
 
-  juce::Rectangle<int> waveArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };

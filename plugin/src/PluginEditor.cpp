@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 
 using editor_theme::laneColour;
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_), history_(model_, commands_), pattern_(model_, commands_) {
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_), history_(model_, commands_), pattern_(model_, commands_), wave_(model_, commands_) {
   model_.addListener(this);
   setSize(940, 912);
   setResizable(false, false);
@@ -42,6 +42,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   addAndMakeVisible(orbit_);
   addAndMakeVisible(history_);
   addAndMakeVisible(pattern_);
+  addAndMakeVisible(wave_);
   load_.onClick = [this] { commands_.chooseFile(); };
   detect_.onClick = [this] { commands_.detectChops(static_cast<DetectChoice>(detectMode_.getSelectedId())); };
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
@@ -211,7 +212,7 @@ ChopFractalEditor::~ChopFractalEditor() {
 
 juce::String ChopFractalEditor::getTooltip() {
   const auto point = getMouseXYRelative();
-  if (waveArea_.contains(point))
+  if (wave_.getBounds().contains(point))
     return "Source waveform: click a chop to select and audition it; drag across sections to select several. Shift-click adds a marker; Alt-click removes the nearest marker. Drop a sample anywhere to load it.";
   if (pattern_.getBounds().contains(point))
     return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
@@ -311,7 +312,7 @@ void ChopFractalEditor::resized() {
   dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
   dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
   area.removeFromTop(6);
-  waveArea_ = area.removeFromTop(120);
+  wave_.setBounds(area.removeFromTop(120));
   area.removeFromTop(6);
   pattern_.setBounds(area.removeFromTop(230));
   area.removeFromTop(6);
@@ -337,7 +338,7 @@ void ChopFractalEditor::refresh(bool force) {
     // Include the standalone wrapper's Options and feedback-notice Settings controls.
     control_help::applyToTree(*root);
   }
-  const bool rebuilt = model_.refresh(force, waveArea_.getWidth());
+  const bool rebuilt = model_.refresh(force, wave_.getWidth());
   const bool playing = proc_.playheadQuarters() >= 0.0;
   if (force || rebuilt) repaint();
   else if (playing || lastPlaying_) {  // only the playhead views change while the transport runs
@@ -393,110 +394,11 @@ void ChopFractalEditor::modelChanged(EditorModel::Change change) {
   }
 }
 
-// ---------------------------------------------------------------------------------------------
-// drawing and mouse
-// ---------------------------------------------------------------------------------------------
-
-void ChopFractalEditor::paint(juce::Graphics& g) {
-  g.fillAll(editor_theme::background());
-  g.setColour(juce::Colours::white.withAlpha(0.85f));
-  g.setFont(13.0f);
-
-  // Source waveform with chop markers.
-  g.setColour(editor_theme::canvas());
-  g.fillRect(waveArea_);
-  if (!model_.view().peaks.min.empty()) {
-    g.setColour(editor_theme::accentBlue());
-    const int n = static_cast<int>(model_.view().peaks.min.size());
-    const float cy = static_cast<float>(waveArea_.getCentreY());
-    const float h = static_cast<float>(waveArea_.getHeight()) * 0.45f;
-    for (int i = 0; i < n; ++i)
-      g.drawVerticalLine(waveArea_.getX() + i, cy - model_.view().peaks.max[static_cast<std::size_t>(i)] * h, cy - model_.view().peaks.min[static_cast<std::size_t>(i)] * h);
-  } else {
-    g.setColour(juce::Colours::grey);
-    g.drawText(model_.sourceMissing() ? "The project's audio file was not found. Press Locate Source (your markers, pattern and history are kept)."
-                              : "Drop an audio sample here, or press Load Loop. Then Detect Chops, Generate and Play.",
-               waveArea_, juce::Justification::centred);
-  }
-  // Waveform selections correspond to complete chop sections, not destructive source trims.
-  for (const auto& chop : model_.view().chops)
-    if (std::find(model_.selectedChops().begin(), model_.selectedChops().end(), chop.id) != model_.selectedChops().end() && model_.view().sourceFrames > 0) {
-      const float x = static_cast<float>(waveArea_.getX()) + static_cast<float>(chop.range.start) / static_cast<float>(model_.view().sourceFrames) * waveArea_.getWidth();
-      const float width = static_cast<float>(chop.range.length()) / static_cast<float>(model_.view().sourceFrames) * waveArea_.getWidth();
-      g.setColour(editor_theme::accentBlue().withAlpha(0.3f));
-      g.fillRect(x, static_cast<float>(waveArea_.getY()), width, static_cast<float>(waveArea_.getHeight()));
-    }
-  int markerNumber = 0;
-  for (const auto& m : model_.view().markers) {
-    ++markerNumber;
-    g.setColour(m.enabled ? editor_theme::accentAmber() : juce::Colours::grey);
-    const int x = waveArea_.getX() + static_cast<int>(m.x);
-    g.drawVerticalLine(x, static_cast<float>(waveArea_.getY()), static_cast<float>(waveArea_.getBottom()));
-    g.drawText(juce::String(markerNumber), x + 2, waveArea_.getY(), 28, 14, juce::Justification::left);
-  }
-
-  if (selectingSections_) {
-    const auto rectangle = juce::Rectangle<int>(selectionStart_, selectionEnd_);
-    g.setColour(editor_theme::accentBlue().withAlpha(0.2f));
-    g.fillRect(rectangle);
-    g.setColour(editor_theme::accentBlue());
-    g.drawRect(rectangle, 1);
-  }
-}
-
-void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
-  const auto pt = e.getPosition();
-  selectingSections_ = false;
-  if (!e.mods.isShiftDown() && !e.mods.isAltDown() && !e.mods.isPopupMenu() && waveArea_.contains(pt) && model_.view().sourceFrames > 0) {
-    grabKeyboardFocus();
-    selectingSections_ = true;
-    selectionStart_ = selectionEnd_ = pt;
-    updateSectionSelection(pt);
-    for (const auto id : model_.selectedChops()) { commands_.audition(id); break; }
-    return;
-  }
-  if (waveArea_.contains(pt) && model_.view().sourceFrames > 0) {
-    const cf::ui::ViewWindow w{0, model_.view().sourceFrames, static_cast<double>(waveArea_.getWidth())};
-    const std::int64_t frame = cf::ui::xToFrame(w, static_cast<double>(pt.x - waveArea_.getX()));
-    if (e.mods.isAltDown())  // Alt-click removes the nearest marker
-      commands_.removeMarkerNear(static_cast<double>(pt.x - waveArea_.getX()));
-    else if (e.mods.isShiftDown())  // Shift-click adds a marker; a plain click only auditions the chop under the cursor
-      commands_.addMarkerAt(frame);
-    else
-      commands_.auditionFrame(frame);
-  }
-}
-
-void ChopFractalEditor::mouseDoubleClick(const juce::MouseEvent& e) {
-  const auto pt = e.getPosition();
-  if (!waveArea_.contains(pt) || model_.view().sourceFrames <= 0) return;
-  const cf::ui::ViewWindow w{0, model_.view().sourceFrames, static_cast<double>(waveArea_.getWidth())};
-  const std::int64_t frame = cf::ui::xToFrame(w, static_cast<double>(pt.x - waveArea_.getX()));
-  commands_.auditionFrame(frame);
-}
+void ChopFractalEditor::paint(juce::Graphics& g) { g.fillAll(editor_theme::background()); }
 
 // ---------------------------------------------------------------------------------------------
 // direct hit editing, presets, chaos reroll, drag-out
 // ---------------------------------------------------------------------------------------------
-
-void ChopFractalEditor::updateSectionSelection(juce::Point<int> point) {
-  selectionEnd_ = {juce::jlimit(waveArea_.getX(), waveArea_.getRight() - 1, point.x), juce::jlimit(waveArea_.getY(), waveArea_.getBottom() - 1, point.y)};
-  const auto rect = juce::Rectangle<int>(selectionStart_, selectionEnd_);
-  const bool click = rect.getWidth() < 3 && rect.getHeight() < 3;
-  model_.selectSectionsInWave(selectionStart_.x - waveArea_.getX(), selectionEnd_.x - waveArea_.getX(), click, waveArea_.getWidth());
-  repaint();
-}
-
-void ChopFractalEditor::mouseDrag(const juce::MouseEvent& e) {
-  if (selectingSections_) updateSectionSelection(e.getPosition());
-}
-
-void ChopFractalEditor::mouseUp(const juce::MouseEvent& e) {
-  if (!selectingSections_) return;
-  updateSectionSelection(e.getPosition());
-  selectingSections_ = false;
-  refresh(true);
-}
 
 void ChopFractalEditor::reloadPresets() {
   int skipped = 0;
