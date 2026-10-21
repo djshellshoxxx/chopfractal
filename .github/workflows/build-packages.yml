@@ -135,7 +135,7 @@ jobs:
       - name: Package
         run: |
           python tools/package_artifacts.py --platform ${{ matrix.platform }} --artefacts build-plugin/plugin/ChopFractal_artefacts/Release \
-            --out dist --version "${{ steps.ver.outputs.version }}" --suffix "${{ steps.ver.outputs.suffix }}"
+            --out dist --version "${{ steps.ver.outputs.version }}" --suffix="${{ steps.ver.outputs.suffix }}"
           ls -l dist
       - name: Keep the raw macOS build for the universal merge
         if: runner.os == 'macOS'
@@ -227,7 +227,7 @@ jobs:
       - name: Package
         run: |
           python tools/package_artifacts.py --platform macos-universal --artefacts universal --out dist \
-            --version "${{ steps.ver.outputs.version }}" --suffix "${{ steps.ver.outputs.suffix }}"
+            --version "${{ steps.ver.outputs.version }}" --suffix="${{ steps.ver.outputs.suffix }}"
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
