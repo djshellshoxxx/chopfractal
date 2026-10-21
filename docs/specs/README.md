@@ -13,6 +13,7 @@
 | [Pattern generation engine](pattern-generation-engine.md) | Hierarchical rhythmic generation, constraints, determinism |
 | [Audio engine, effects, and routing](audio-engine-and-routing.md) | Playback voices, real-time rules, event transforms, signal flow |
 | [GUI and interaction](gui-and-interaction.md) | Layout, visualization, accessibility, interaction behavior |
+| [GUI redesign](gui-redesign.md) | From-scratch GUI spec: research, diagnosis, layout grid, tokens, LookAndFeel, screens, implementation steps |
 | [State, presets, automation, and export](state-presets-automation-export.md) | Project recall, parameter contract, presets, rendering/export |
 | [Testing and acceptance](testing-and-acceptance.md) | Functional, audio, host, performance, and release gates |
 | [Build plan](build-plan.md) | Ordered delivery stages, dependencies, and exit criteria |
