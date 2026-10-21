@@ -2,6 +2,12 @@
 
 **Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F00 (ControlsPanel/StatusBar split), F01 (state v2, trailing-block registry)  **Blocks:** none (F07/F08 only need the routing fields to stay append-only)
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** The plugin has one stereo input and one stereo output (`isBusesLayoutSupported` accepts mono or stereo main only). Decisions recorded by the audit:
+- **Manifest:** the parameter manifest is at version 3 (pass 3 added `chaos`); this feature adds no parameter, so the body's "stays at version 2 unless F07/F08 bump it" reads "stays at the shipped version 3 plus whatever F07 appends". The optional `stems_enabled` parameter named in the roadmap README budget is **not created**: routing is state and the host enables aux buses itself.
+- **State:** routing is F01 extras tag 9 (already claimed here), cap 64 KiB. F16 (limiter) and F11 interact: the safety limiter acts on the main bus only; aux buses are raw (F16 section 6).
+- Land after F07 and F12 as the README orders it; nothing in the as-built code conflicts with the body.
+
 ## 1. Summary and user value
 The plugin exposes the main stereo output plus up to 8 auxiliary stereo outputs ("Out 2" .. "Out 9"). Each chop (or each role) is routed to one output so the DAW can put a different compressor, reverb or sampler channel on kick, snare and hats. Hosts that only give the main bus keep working: everything folds into the main output exactly as today. Producers get a stem workflow without exporting files; it is the main reason to use ChopFractal inside a mixing session.
 
@@ -51,7 +57,7 @@ Effective bus of a chop = `chopBus[chop]` if present, else `roleBus[roleOf(chop)
 Serialization: a new extras block in the `composition` v2 payload defined by F01 (section 4.2 there: `u8 0xE2, u16 blockCount (<= 16)`, blocks `u8 tag, u32 length, bytes`). F11 claims **tag 9 (Routing)** (F01 uses 1-8; F12, F13, F14 claim none); the schema stays 2, no new bump. Payload of tag 9: `u8 mode; u32 nRole; nRole x (str role, u8 bus); u32 nChop; nChop x (u64 chopId, u8 bus)`. Limits: nRole <= 256, nChop <= limits::kMaxChops (256), bus <= 8, role string <= 64 bytes; any violation is `ErrorCode::Corrupt`, load is all-or-nothing as today. The block is written only when `mode != MainOnly || !roleBus.empty() || !chopBus.empty()`; a project that never used routing serializes byte-identically to before. Old projects (no block) load as `MainOnly`. A project saved with routing then opened in a v2 build without F11 skips tag 9 by its length (F01 rule for unknown tags). Route entries whose chop/role no longer exists are dropped at load with Info notice `"Some output routes were dropped because their chops changed."`.
 Pattern payload and `pattern::serialize` are untouched: golden hashes 2397844821793184813, 12084884237330071892, 13710596758976548913, 18237151833431327128 must not change.
 
-Host parameters: none added (routing is state, not automation). The parameter manifest stays at version 2 unless F07/F08 bump it.
+Host parameters: none added (routing is state, not automation). The parameter manifest stays at the shipped version 3 (F07 and the F16/E01/E02 specs append their own rows).
 
 ## 5. Public API
 **portable `modules/audio_renderer` (RT rules apply to process):**

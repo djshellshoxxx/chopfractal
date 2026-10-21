@@ -1,6 +1,9 @@
 # Component portability protocol
 
 **Status:** Required architecture for all ChopFractal components  
+
+**Implementation (audited 2026-10-20):** Enforced by `tools/check_modules.py`, `tools/check_includes.py`, `tools/gen_module_docs.py` and `tools/smoke_transfer.sh` in CI; all 16 modules comply. No change is needed by the audit.
+
 **Purpose:** Make project parts independently buildable, testable, understandable, and transferable to other projects with minimal changes.
 
 ## 1. What counts as a module

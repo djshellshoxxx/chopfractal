@@ -1,6 +1,6 @@
 # ChopFractal build status
 
-Last updated with the implementation pass that added all code (the repository previously held specifications only).
+Last audited 2026-10-20 against the code on `main` (after pass 3 and audit rounds 4 and 5); the specs in `docs/specs` carry a per-spec implementation status. Counts below were taken from the tree on that date.
 
 ## Where the build stands
 
@@ -13,41 +13,42 @@ Last updated with the implementation pass that added all code (the repository pr
 | 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
 | 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
 | 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
-| 7 Compatibility, optimization, beta | **Not started** | Needs real DAWs, macOS/Windows *plugin* builds (the portable modules already build there), performance thresholds, installers |
+| 7 Compatibility, optimization, beta | **Started (CI only)** | Linux, Windows (MSVC) and macOS (universal) plugin builds run in CI as unsigned alpha artifacts (VST3 + CLAP, plus a Windows Standalone); a Windows alpha is published as a pre-release. Still needs real DAWs, validator runs on macOS and Windows, performance thresholds, installers, signing |
 | 8 Release | **Not started** | |
 
 Modular plan: Stages A to D are complete; Stage E (portability and release) is complete for portability and not started for packaging.
 
 ## What exists
 
-Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
+Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 34 targets.
 
 | Module | Role | Test cases |
 |---|---|---|
 | `chop_contracts` | typed IDs, ticks, results, byte codec, RNG, nested events (with per-event effects) + `flatten`, policy interface | 10 |
-| `state_codec` | versioned project container, CRC, migrations | 5 |
-| `variation_history` | generic branch graph with protected pruning | 7 |
+| `state_codec` | versioned project container, CRC, migrations | 6 |
+| `variation_history` | generic branch graph with protected pruning | 8 |
 | `source_chop` | markers, undo, proposals, transient and grid analysis, `rescaled` for stretched sources | 17 |
-| `pattern_engine` | generate, mutate, locks, edits, effects, `setBarEvents`, flatten, state, session | 23 |
+| `pattern_engine` | generate, mutate, locks, edits, effects, `setBarEvents`, flatten, state, session | 25 |
 | `recursive_hit_zoom` | nested child patterns inside a hit's time and source bounds | 12 |
 | `chop_roles_grammar` | roles, serializable rules, explainable policy | 9 |
-| `wav_export` | deterministic WAV encode/decode, dither, normalize, atomic file write | 6 |
-| `midi_export` | deterministic Standard MIDI File encode/decode | 4 |
+| `wav_export` | deterministic WAV encode/decode, dither, normalize, atomic file write | 7 |
+| `midi_export` | deterministic Standard MIDI File encode/decode | 6 |
 | `evolve` | Evolve scheduler (cadence, seeds, ramp, failure stop) | 4 |
 | `fractal_rhythm` | self-similar motif groove as nested events | 8 |
 | `chop_insight` | chop features, role suggestions, loop/tempo suggestions | 4 |
-| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 23 |
+| `preset_store` | preset records, versioned checksummed file format, six factory presets, file-name sanitizing | 5 |
+| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 26 |
 | `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
-| `plugin_host_adapter` | parameter manifest (version 2), host-time validation, bus rules | 6 |
-| `plugin_ui_adapter` | headless view models including the Orbit View | 8 |
-| `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 18 |
-| `plugin/` (JUCE) | processor, editor, state glue | 11 |
+| `plugin_host_adapter` | parameter manifest (version 3: 15 parameters, `chaos` last), host-time validation, bus rules | 8 |
+| `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 9 |
+| `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 30 |
+| `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 28 |
 
 Features added in the second round (each has a spec in `docs/specs/`): **Fractal Rhythm** (unique), **Evolve** (fun), **Producer Kit + WAV export** (valuable), **Smart Setup** (usable), **Orbit View** (visual), and three effects (**Filter, Tape Glide, Crunch**).
 
 ## Verification that was actually run
 
-- Full tree builds and passes under **GCC 13** and **Clang 18** with warnings as errors (32 ctest targets).
+- Full tree builds and passes under **GCC 13** and **Clang 18** with warnings as errors (34 ctest targets as of the 2026-10-20 audit).
 - **AddressSanitizer + UBSan** over everything, including corruption and hostile-state sweeps. Clean.
 - **ThreadSanitizer** on the real-time renderer and its mailbox (threaded stress). Clean.
 - `process()` is proven allocation-free by replacing global `operator new` in the test.
@@ -117,4 +118,23 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 - Restoring a reference-only project decodes its audio file on the calling thread (the spec wants a worker thread). Embedded projects avoid file access.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
 - Export runs on the message thread (a few seconds for very long exports); direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
-- The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (no motif presets, no export progress bar, fixed Fractal accent decay).
+- The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (no export progress bar; the Fractal accent decay and mutation can only be changed through presets).
+
+## Roadmap status (audited 2026-10-20)
+
+Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built and which contradictions the audit settled.
+
+| ID | Feature | State |
+|---|---|---|
+| F00 | Editor decomposition | Not started (editor is 1404 lines, window 940 x 912) |
+| F01 | State v2 and persistence | Not started (session schema still 1) |
+| F02 | Direct editing | Partly built in pass 3: hit move, resize, duplicate, delete, mute, add; Shift+click markers; marker dragging, zoom, menus not built |
+| F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
+| F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |
+| F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
+| F06, F07 | Rule editor, performance pads | Not started |
+| F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
+| F09, F10, F11, F12, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
+| F13 | MIDI drag-out | Partly built in pass 3: Drag MIDI and Drag WAV of the current pattern; variations and kit not built |
+| F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
+| F16 to F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Arrangement Export, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |

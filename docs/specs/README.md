@@ -48,3 +48,23 @@ The [component portability protocol](component-portability-protocol.md) is norma
 - [Modular integration and transfer plan](modular-integration-and-transfer-plan.md)
 
 Each feature is specified as a portable component, with a separate plugin/UI adapter and explicit integration steps. The integration plan defines the order and contracts for assembling the modules.
+
+## Advanced and pass-3 specs
+
+- [Advanced section effects (families FX01 to FX14)](advanced-section-effects.md)
+- [Pass 3 features (shipped: Chaos, drag-out, presets, direct hit editing basics)](pass3/pass3-features.md)
+- [Build plan](build-plan.md) and [testing and acceptance](testing-and-acceptance.md)
+
+## Roadmap specs (roadmap/)
+
+Read [roadmap/README.md](roadmap/README.md) first (order, merge rules, file ownership, manifest policy, state tag registry), then [roadmap/_INDEX.md](roadmap/_INDEX.md). Each spec starts with a section 0 status block saying what is already built.
+
+| Wave | Specs |
+|---|---|
+| 0 Foundation | [F00 editor decomposition](roadmap/F00-editor-decomposition.md), [F01 state v2](roadmap/F01-state-v2-and-persistence.md) |
+| 1 Usable | [F02 direct editing](roadmap/F02-direct-editing.md), [F04 keyboard and layout](roadmap/F04-keyboard-and-layout.md), [F05 meters and feedback](roadmap/F05-meters-and-feedback.md), [F15 packaging](roadmap/F15-cross-platform-and-packaging.md) |
+| 2 | [F03 presets](roadmap/F03-presets-and-favorites.md), [F06 rule editor](roadmap/F06-rule-editor.md), [F10 A/B morph](roadmap/F10-ab-morph.md), [F13 MIDI drag-out](roadmap/F13-midi-drag-out.md) |
+| 3 Audio engine | [F07 performance pads](roadmap/F07-performance-pads.md), [F08 chaos and gestures](roadmap/F08-chaos-and-gestures.md), [F09 evolve scenes](roadmap/F09-evolve-scenes.md), [F11 multi-output stems](roadmap/F11-multi-output-stems.md), [F12 input capture](roadmap/F12-input-capture.md), [F14 tempo match](roadmap/F14-tempo-match-stretch.md) |
+| 4 New | [F16 level match and limiter](roadmap/F16-level-match-and-safety-limiter.md), [F17 groove lab](roadmap/F17-groove-lab.md), [E01 echo](roadmap/E01-echo.md), [E02 tremolo-pan](roadmap/E02-tremolo-pan.md), [F18 arrangement export](roadmap/F18-arrangement-export.md), [F19 command palette and quick start](roadmap/F19-command-palette-and-quick-start.md) |
+
+Template for new specs: [roadmap/_TEMPLATE.md](roadmap/_TEMPLATE.md).

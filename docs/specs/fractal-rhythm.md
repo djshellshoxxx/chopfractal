@@ -1,6 +1,9 @@
 # Fractal Rhythm
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested (`fractal_rhythm`): motif of x/a/. cells, depth 1 to 3, mutation and accent decay in the module settings, applied through `ProjectSession::applyFractal`. Editor: Motif field, Depth combo, Fractal button; mutation and accent decay are set only by presets. Motif and depth are not saved in the project (F01). Known limit: Fractal ignores repeat/required grammar rules.
+
 **Module ID:** `fractal_rhythm`  
 **Purpose:** The feature that earns the name. A short rhythmic motif is applied **at every scale**: the bar is divided by the motif, and each hit is itself divided by the same motif, down to a chosen depth. The result is a self-similar groove (a Cantor-like rhythm) that no ordinary step sequencer produces, and it is built from the same nested hits as Recursive Hit Zoom, so it can be zoomed, collapsed, locked and played by the existing engine.
 

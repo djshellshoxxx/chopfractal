@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** Built: container with CRC and migration registry, missing-source recovery with Locate, optional embedding (cap 128 MiB, off by default), 15 permanent parameter IDs (manifest version 3), WAV export (16/24-bit PCM, 32-bit float, deterministic, atomic) and, beyond this spec's first release, MIDI *file* export, Producer Kit and presets (six factory, user files). Not built: persistence of seed, motif, depth, role/detect combos, export settings and A/B snapshots (F01), export on a worker thread, preset undo and favorites (F03). The "Direct MIDI export is out of scope" paragraph below is superseded: live MIDI *output* from the plugin stays out of scope, MIDI *file* export is shipped (`export-wav-and-producer-kit.md`).
+
+
 ## Project state
 
 Save and restore:
@@ -53,7 +56,7 @@ First release should support reliable playback in the DAW and project-state reca
 - Provide a deterministic render option tied to source, state, seed, engine version, and render format.
 - Write to a temporary file and atomically rename after success; never overwrite without confirmation.
 
-Direct MIDI export is out of scope for the initial VST3 effect because MIDI-output behavior and host support vary. It can be reconsidered as a later feature with a separate routing and host-compatibility spec.
+Live MIDI *output* from the plugin is out of scope because host support varies. Exporting a MIDI *file* (Producer Kit, drag-out) is independent of host routing and is in scope; see `export-wav-and-producer-kit.md` and F13.
 
 ## Acceptance criteria
 

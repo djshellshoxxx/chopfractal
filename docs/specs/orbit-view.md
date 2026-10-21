@@ -1,6 +1,9 @@
 # Orbit View
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested (view model in `plugin_ui_adapter/orbit.hpp`, drawing in the editor): concentric rings per chop, arcs per hit, playhead, click to select a hit, nested hits as thinner arcs. Dragging arcs to edit is F02 (not built). The view is 106 x 106 px in the as-built layout.
+
 **Module:** extends `plugin_ui_adapter` (view model) and the plugin editor (drawing)  
 **Purpose:** The visual feature. The whole phrase is drawn as **concentric rings** with a sweeping playhead: every chop is a ring, every hit is an arc on its ring, zoomed (nested) hits appear as thinner arcs inside their parent, and hits **pulse** as the playhead crosses them. It makes the hierarchy and the fractal structure obvious at a glance and gives the plugin a signature look.
 

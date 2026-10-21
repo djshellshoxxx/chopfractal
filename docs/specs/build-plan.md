@@ -1,6 +1,9 @@
 # ChopFractal build plan
 
 **Status:** Draft for review  
+
+**Implementation (audited 2026-10-20):** Stages 0 to 6 are done (stage 3 lacks input capture; stage 5 lacks meters and the accessibility work), stage 7 has started in CI only (unsigned alpha builds on three OSes), stage 8 has not started. The sequencing of the remaining work is the roadmap (`roadmap/README.md`), whose waves replace the open-ended items in stages 3, 5 and 7. Deferred features below: MIDI output stays deferred; multi-output buses, time-stretching and expanded effects are now specified (F11, F14, E01/E02).
+
 **Scope:** Product-level delivery sequence, not a code task list
 
 ## Stage 0 — Repository and toolchain audit

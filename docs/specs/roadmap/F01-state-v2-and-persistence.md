@@ -2,6 +2,13 @@
 
 **Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F00 for the editor wiring (steps 1-5 are editor-free and can start now)  **Blocks:** F02, F03, F04 (they store prefs here), F05 (export progress UI), F09, F10
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started** (`kSessionSchemaVersion` is still 1; seed, motif, depth, role combo, detection mode, export combos, A/B snapshots and UI prefs are still not saved; export still runs on the message thread; restore of a reference-only project still decodes on the calling thread). Already persisted and unchanged: `manualBpm` and `embedSource` (APVTS XML properties), Evolve settings except `enabled`, markers, roles and rules, history and favorites. Decisions recorded by the audit:
+- **The "StateSection" API that F07, F09, F10, F11, F12 and the new F16 to F18 rely on did not exist in this spec.** Section 4.4 now defines it: the extras section already is the container; a feature section is one extras block with a tag from the registry in 4.4. Tags 1 to 8 belong to F01, tag 9 to F11 (as claimed there), tags 10 to 16 are assigned in 4.4, tags 17 to 31 are free, 32 and up are reserved. Unknown tags of 9 and above are **preserved and written back** (forward compatibility, as the roadmap README requires); unknown tags below 9 are skipped.
+- Extras limits were too small for the scenes feature (F09 stores up to 32 MiB): block count limit raised from 16 to 32 and the total limit from 4 MiB to 40 MiB, with per-tag caps in 4.4 (A/B 2 MiB, scenes 32 MiB, everything else 64 KiB). The codec ceiling (256 MiB) is unchanged.
+- Pass 3 added UI state that needs persisting: Fractal mutation and accent decay (set by presets) and the "Move / resize hits" toggle. They are added to the table in 4.1 and to tag 13 in 4.4. `chaos` stays an APVTS parameter (already persisted by the host); there is no `chaos` section.
+- The editor size default is 940 x 912 (as built), not 940 x 860.
+
 ## 1. Summary and user value
 Today a saved project loses the seed, the Fractal motif/depth, the role selector, export choices, A/B snapshots and every UI choice; restoring a reference-only project decodes its audio file on the host's calling thread; export blocks the message thread; and `MigrationRegistry` (modules/state_codec) has no registered step. F01 makes one coordinated version bump (project session schema 1 to 2, plugin wrapper 1 to 2), registers the first real migration, persists the missing items, restores audio on a worker thread, and runs exports on a worker with progress and cancel. Producers get projects that reopen exactly as left and a DAW that does not freeze on load or export.
 
@@ -35,7 +42,9 @@ No other visible change; restored values appear in the existing widgets (seed fi
 | Export UI | `exportUi.formatIndex/rateIndex/loopsIndex` | 0..2 / 0..3 / 0..4 | 1 / 1 / 1 |
 | View mode | `ui.viewMode` | 0 Simple, 1 Advanced (F04) | 1 |
 | UI scale | `ui.scalePercent` | 50..200 (F04) | 100 |
-| Editor size | `ui.width`, `ui.height` | 640..4096, 480..4096 (F04) | 940, 860 |
+| Editor size | `ui.width`, `ui.height` | 640..4096, 480..4096 (F04) | 940, 912 |
+| Fractal tuning | `fractalMutation`, `fractalAccentDecay` | f64 -1 (derive from Variation) or 0..1; f64 in (0, 1] | -1, 0.85 |
+| Hit editing | `ui.editHits` | bool, the "Move / resize hits" toggle | false |
 | Marker snap | `ui.markerSnap` | 0 Off, 1 Transient, 2 ZeroCrossing (F02) | 1 |
 | Grid snap | `ui.gridSnap`, `ui.snapDivision` | bool; 0 = pattern grid else {1,2,4,8,16,32} (F02) | true, 0 |
 | Tree filter | `ui.favoritesOnly`, `ui.search` | bool; <= 32 bytes (F03) | false, "" |
@@ -48,13 +57,13 @@ constexpr std::uint32_t kSessionSchemaV1 = 1;
 constexpr std::uint32_t kSessionSchemaVersion = 2;   // was 1
 struct ExportUiSettings { int formatIndex = 1; int rateIndex = 1; int loopsIndex = 1; };
 struct UiPrefs {
-  int viewMode = 1; int scalePercent = 100; int width = 940; int height = 860;
+  int viewMode = 1; int scalePercent = 100; int width = 940; int height = 912; bool editHits = false;
   int markerSnap = 1; bool gridSnap = true; int snapDivision = 0;
   bool favoritesOnly = false; std::string search;
 };
 struct ProjectExtras {
   std::uint64_t seed = 1; std::string motif = "x.xx"; int fractalDepth = 2; int roleIndex = 0; int detectMode = 0;
-  int gridDivision = 16; bool gridTriplet = false; ExportUiSettings exportUi; UiPrefs ui;
+  int gridDivision = 16; bool gridTriplet = false; double fractalMutation = -1.0; double fractalAccentDecay = 0.85; ExportUiSettings exportUi; UiPrefs ui;
 };
 bool operator==(const ProjectExtras&, const ProjectExtras&);
 Status validate(const ProjectExtras&);               // OutOfRange / InvalidArgument per field, message names the field
@@ -62,11 +71,36 @@ Status validate(const ProjectExtras&);               // OutOfRange / InvalidArgu
 ### 4.3 Wire format
 Container `codec::kContainerVersion` stays 1. Module `"composition"`:
 - **v1 payload (unchanged bytes):** `u8 embedded` then `u8 1` + `i32 everyLoops, f64 amount, f64 ramp, f64 rampCeiling, u64 startSeed` (38 bytes).
-- **v2 payload = the 38 v1 bytes followed by an optional extras section:** `u8 0xE2`, `u16 blockCount` (<= 16), then blocks `u8 tag, u32 length, bytes[length]`. Tags: 1 Seed `u64`; 2 Fractal `u8 depth, u8 len, chars`; 3 Role `u8`; 4 Export `u8 fmt, u8 rate, u8 loops`; 5 Detect `u8`; 6 Grid `u8 divisionCode (log2 of the division: 1->0 ... 32->5), u8 triplet`; 7 Ui `u8 viewMode, u16 scale, u16 w, u16 h, u8 markerSnap, u8 gridSnap, u8 snapDivisionCode, u8 favoritesOnly, u8 searchLen, chars`; 8 AB `u8 mask (bit0 A, bit1 B)` then per set bit `u32 len, pattern::serialize bytes`. Only blocks that differ from the default are written. Unknown tags are skipped by length; a duplicated tag, a length past the end, or total extras > 4 MiB makes the whole extras section invalid.
+- **v2 payload = the 38 v1 bytes followed by an optional extras section:** `u8 0xE2`, `u16 blockCount` (<= 32), then blocks `u8 tag, u32 length, bytes[length]`. Tags: 1 Seed `u64`; 2 Fractal `u8 depth, u8 len, chars`; 13 FractalTune (see 4.4); 3 Role `u8`; 4 Export `u8 fmt, u8 rate, u8 loops`; 5 Detect `u8`; 6 Grid `u8 divisionCode (log2 of the division: 1->0 ... 32->5), u8 triplet`; 7 Ui `u8 viewMode, u16 scale, u16 w, u16 h, u8 markerSnap, u8 gridSnap, u8 snapDivisionCode, u8 favoritesOnly, u8 searchLen, chars`; 8 AB `u8 mask (bit0 A, bit1 B)` then per set bit `u32 len, pattern::serialize bytes`. Only blocks that differ from the default are written. Unknown tags below 9 are skipped by length; unknown tags of 9 and above are kept verbatim and re-written (section 4.4). A duplicated tag, a length past the end, a block over its per-tag cap, or total extras > 40 MiB makes the whole extras section invalid.
 - **Lazy versioning (this is how "feature-free state serializes unchanged" holds):** `saveState` writes schema 2 only when extras differ from defaults or an A/B slot is occupied; otherwise it writes schema 1 and the exact old bytes. The plugin wrapper (`kStateMagic "CFPL"`, `PluginProcessor.cpp`) writes `kStateVersion` 2 under the same condition, else 1, and reads 1..2. The pattern, source, roles, history, audio module payloads and their schema versions (`pattern::kSchemaVersion`=1 etc.) do not change, so the four pattern_engine golden hashes 2397844821793184813, 12084884237330071892, 13710596758976548913, 18237151833431327128 are untouched.
 - **Migration wiring:** in `ProjectSession::ProjectSession()` register `migrations_.add("composition", 1, identity)` where `identity` returns its input (a v1 payload is a valid v2 payload with no extras). `loadState` already calls `take(kModSession, kSessionSchemaVersion, ...)`, which now targets 2 and runs the registered step for v1 files. Policy for every future bump: add the module's `kSchemaVersion`, register one step per version, add a fixture test.
 - **Failure policy:** a malformed extras section never fails the project load: extras fall back to defaults and a `Notice::Level::Warning` `Some editor settings could not be restored.` is queued. A/B slot that fails `pattern::deserialize` or `flatten` against the loaded chops is dropped individually with `Snapshot A could not be restored and was dropped.` (or `B`). Out-of-range individual values are clamped by `validate` fallback to the field default.
 - **Host parameters:** none added; manifest version stays 2.
+
+### 4.4 Feature sections (the StateSection API) and the tag registry
+A feature section is one block of the extras section. The API on `ProjectSession` (declared in `project_session.hpp`, implemented in `composition/src/state_sections.cpp`, both **HOT**):
+```cpp
+struct StateSection { std::uint8_t tag = 0; std::uint16_t schema = 1; std::vector<std::uint8_t> bytes; };   // bytes exclude the schema
+const StateSection* section(std::uint8_t tag) const;                 // nullptr when absent
+Status setSection(StateSection s);                                   // tag 9..31 only; bytes.empty() removes the section; size <= the per-tag cap or OutOfRange
+```
+On the wire the block payload is `u16 schema` followed by `bytes`. A section whose bytes are empty is never written, so a project that does not use the feature stays byte-identical (and stays schema 1 when nothing else is set). A feature owns its codec (validate everything, reject with `ErrorCode::Corrupt`, never trust counts) and registers a decoder in `ProjectSession` that runs after the main modules are loaded; a decoder failure drops only that section and queues the Warning `Some <feature> settings could not be restored.`. Unknown tags of 9 and above are kept in a `std::map<uint8_t, StateSection> foreignSections_` and written back unchanged.
+
+| Tag | Owner | Section | Per-tag cap |
+|---|---|---|---|
+| 1 to 8 | F01 | Seed, Fractal, Role, Export, Detect, Grid, Ui, AB | AB 2 MiB, others 4 KiB |
+| 9 | F11 | Routing (stems) | 64 KiB |
+| 10 | F07 | Pads | 64 KiB |
+| 11 | F09 | Scenes | 32 MiB |
+| 12 | F12 | Capture metadata | 64 KiB |
+| 13 | F01 | FractalTune: `f64 mutation, f64 accentDecay` | 64 bytes |
+| 14 | F17 | Groove | 64 KiB |
+| 15 | F16 | LevelMatch | 64 bytes |
+| 16 | F18 | Arrangement | 1 MiB |
+| 17 to 31 | free | claim here before use | 64 KiB |
+| 32 to 255 | reserved | | |
+
+F08 no longer has a project section (see F08 audit note). F10's morph is transient. F19 stores its checklist per user, not per project (see F19).
 
 ## 5. Public API
 `modules/pattern_engine/include/chopfractal/pattern_engine/session.hpp` (portable):
@@ -129,7 +163,7 @@ Integration (`composition/tests/test_state_v2.cpp`, new, globbed by CMake):
 - `v1_state_loads_through_the_registered_migration`: embed a v1 fixture (hex array captured in step 1) -> loads, pattern/markers/history equal, `extras()` equals defaults.
 - `extras_round_trip_and_force_schema_2`: set seed 987654321, motif "xa.x", depth 3, roleIndex 4, detectMode 3, grid 8/triplet, export 0/3/4, ui all non-default; save -> schema 2 payload; load into a fresh session -> `extras()==saved`; second save is byte-identical.
 - `ab_snapshots_round_trip_and_are_dropped_individually_when_invalid`: store A and B, save/load, `hasSnapshot(0/1)`, `recallSnapshot(0)` bytes equal the stored; then corrupt slot B's bytes (patch length inside a copy) -> slot A restored, B dropped, one Warning containing `Snapshot B`.
-- `malformed_extras_never_fail_the_load`: truncated section, duplicate tag, oversize length, unknown tag 200 (skipped, rest honoured), 5 MiB extras -> loads, extras default or partial as specified, one Warning, no crash (also run under ASan).
+- `malformed_extras_never_fail_the_load`: truncated section, duplicate tag, oversize length, unknown tag 200 (kept and re-written, rest honoured), 41 MiB extras -> loads, extras default or partial as specified, one Warning, no crash (also run under ASan).
 - `evolve_settings_manual_bpm_and_embed_flag_round_trip` (Evolve fields via session; `manualBpm`/`embedSource` in the plugin shell test below).
 - `export_job_output_equals_the_synchronous_export`: `planWav`+`run` file bytes == `exportWav` bytes; kit same file set; `cancel` pre-set returns `Cancelled` and leaves no file; cancel set from a callback during a kit leaves no partial files.
 - `deferred_source_resolve_keeps_a_usable_session_and_relink_restores_audio`.
@@ -143,7 +177,10 @@ GUI (xvfb, F00 helpers): `editor_restores_widgets_from_state`: set motif field t
 Real-time / sanitizer: ASan+UBSan job runs all of the above; `grep` check that `processBlock` does not reference `extras`, `ExportJob` or `restoreEpoch_`; allocation-counter test in audio_renderer (existing) still passes (renderOffline change is offline only).
 Manual QA: (1) Set seed 123, motif `xa.x`, Store A, mutate, Store B, save the DAW project, reopen: values and `Recall A/B` work. (2) Project with a 55 MB reference-only WAV: host stays responsive, status shows `Restoring audio...` then `Restored audio`. (3) Start a long Kit export, click `Cancel Export`: directory contains no new files. (4) Open a v1 project saved by the previous release: loads, no warnings.
 
+- Sections (`test_state_sections.cpp`): `section_roundtrip_and_absent_when_empty` (set tag 14 with 10 bytes, save, load into a fresh session, equal; set empty, save: bytes equal the pre-section save), `unknown_tag_12_is_preserved_by_a_build_that_does_not_know_it` (inject tag 20, load, save, tag 20 payload identical), `per_tag_cap_rejects_oversize_and_tags_below_9_are_refused`, `decoder_failure_drops_only_that_section_with_one_warning`, `extras_total_over_40_mib_is_rejected`.
+
 ## 8. Acceptance criteria
+- [ ] `setSection`/`section` exist as in 4.4, unknown tags of 9 and above survive a load/save cycle byte for byte, and a project with no sections is byte-identical to one saved without the API.
 - [ ] `default_session_state_bytes_are_unchanged_from_v1` passes with a constant captured before any production change.
 - [ ] A v1 project (fixture) loads; an extras-bearing project written by this build loads back equal; a malformed extras section loads with defaults and one warning.
 - [ ] `MigrationRegistry` has exactly one registered step (`composition` 1 to 2) and `state_schema_versions_have_migration_paths` asserts that for each module id in {composition, source_chop, pattern_engine, chop_roles_grammar, variation_history, source_audio} a payload at schema 1 migrates to that module's current constant (so bumping a constant without registering a step fails the test).
@@ -161,6 +198,7 @@ Manual QA: (1) Set seed 123, motif `xa.x`, Store A, mutate, Store B, save the DA
 | composition/src/project_session.cpp | Mod, **HOT** | migration registration, save/load of extras and A/B, deferred resolve |
 | composition/src/features.cpp | Mod | `exportWav/exportKit` delegate to `ExportJob` |
 | composition/include/.../export_job.hpp, composition/src/export_job.cpp | New | job planning/running (CMake globs `src/*.cpp`) |
+| composition/src/state_sections.cpp, composition/tests/test_state_sections.cpp | New | the StateSection API of 4.4 (set/get, preserved unknown tags, per-tag caps, hostile sweep) |
 | composition/tests/test_state_v2.cpp | New | section 7 |
 | modules/pattern_engine/include/.../session.hpp, src/serialize.cpp, tests/test_pattern_engine.cpp | Mod | slot accessors (no serialize change) |
 | modules/chop_contracts/include/.../result.hpp | Mod | `ErrorCode::Cancelled` appended |

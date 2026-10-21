@@ -1,6 +1,9 @@
 # Variation Family Tree
 
 **Status:** Creation spec for review  
+
+**Implementation (audited 2026-10-20):** Built and tested (`variation_history`, 64 snapshots, protected pruning, splice-out of the oldest node with a notice). Editor: tree view, click to recall (quantized to the loop boundary while playing), right-click menu for favorite, rename, compare and delete; hand edits create nodes. Known gaps: Undo/Redo do not move the tree highlight; the favorites filter and search box are F03.
+
 **Module ID:** `variation_history`  
 **Purpose:** Preserve generated and edited variations as a navigable family tree, so users can branch from any promising groove and return to earlier versions.
 

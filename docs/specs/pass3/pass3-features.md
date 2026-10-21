@@ -1,6 +1,6 @@
 # Pass 3 features: Chaos, Presets, Drag-out, Direct hit editing
 
-Status: implemented. Each feature has code, tests and a place in the editor. The shared rules are in `_BRIEF.md`.
+Status: implemented (audited 2026-10-20: matches the code except the drag-out folder note in P2; the Chaos mapping lives in `composition/src/chaos.cpp`, not in `pattern_engine`). Each feature has code, tests and a place in the editor. The shared rules are in `_BRIEF.md`.
 
 ## P1 Chaos macro (fun)
 - **What:** one automatable host parameter `chaos` (0..1, default 0; host manifest version 3, appended after `fx_intensity`). It pushes the *effective* generation settings toward more variation. A **Reroll** button picks a new seed and runs Generate.
@@ -10,8 +10,8 @@ Status: implemented. Each feature has code, tests and a place in the editor. The
 
 ## P2 MIDI / WAV drag-out (valuable)
 - **What:** drag the current pattern from the editor into a DAW track as a `.mid` or a rendered `.wav`.
-- **Code:** `ProjectSession::renderMidi` / `renderWavBytes` (the exact bytes `exportKit` and `exportWav` write, tested byte-identical); `plugin/src/DragOut.*` writes a unique temp file under `<temp>/ChopFractal/drag/`, deletes files older than 7 days when an editor opens, and `DragHandle` starts an OS file drag after 6 px of movement. With no pattern the handle reports the reason in the status line and drags nothing.
-- **Acceptance (tested):** the dragged files start with `MThd` / `RIFF`; the temp folder is isolated in tests.
+- **Code:** `ProjectSession::renderMidi` / `renderWavBytes` (the exact bytes `exportKit` and `exportWav` write, tested byte-identical); `plugin/src/DragOut.*` writes a unique file under the per-user folder `<userApplicationData>/ChopFractal/Dropped` (changed in audit round 4 from a temp folder with a 7-day sweep; round 5 removed the automatic deletion, so files stay until the user deletes them), and `DragHandle` starts an OS file drag after 6 px of movement. With no pattern the handle reports the reason in the status line and drags nothing.
+- **Acceptance (tested):** the dragged files start with `MThd` / `RIFF`; the drag folder is isolated in tests via `setFolderOverride`.
 
 ## P3 Presets (usable)
 - **What:** preset combo (six factory presets, then user presets), **Save Preset** (name prompt, asks before replacing), **Delete** (user presets only).
