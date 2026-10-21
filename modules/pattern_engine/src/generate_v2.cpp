@@ -107,8 +107,8 @@ breakeng::Avail availFrom(const Pools& pools) {
 // ---------------------------------------------------------------------------------------------
 class Chooser {
  public:
-  Chooser(const ChopSnapshot& chops, const Pools& pools, const Settings& s, const ICandidatePolicy* policy, std::uint64_t seed, GenerationReport* report)
-      : chops_(chops), pools_(pools), s_(s), policy_(policy), seed_(seed), report_(report) {
+  Chooser(const Pools& pools, const Settings& s, const ICandidatePolicy* policy, std::uint64_t seed, GenerationReport* report)
+      : pools_(pools), s_(s), policy_(policy), seed_(seed), report_(report) {
     for (int i = 0; i < kRoleSlots; ++i) last_[i] = -1;
   }
 
@@ -230,7 +230,6 @@ class Chooser {
     return q;
   }
 
-  const ChopSnapshot& chops_;
   const Pools& pools_;
   const Settings& s_;
   const ICandidatePolicy* policy_;
@@ -426,7 +425,7 @@ Result<Pattern> generateBreak(const ChopSnapshot& chops, const Settings& setting
   const Ticks barT = barTicks(settings);
   const Ticks beatT = beatTicksOf(settings);
   const int beats = settings.timeSignature.numerator;
-  Chooser chooser(chops, pools, settings, policy, settings.seed, report);
+  Chooser chooser(pools, settings, policy, settings.seed, report);
   for (int b = 0; b < settings.bars; ++b) {
     Bar bar;
     bar.id = ScopeId{p.nextId++};
@@ -487,7 +486,7 @@ Result<Pattern> mutateBreak(const Pattern& in, const ChopSnapshot& chops, const 
   const int beats = st.timeSignature.numerator;
   const breakeng::ProfileInfo& pi = breakeng::profileInfo(st.brk.profile);
   const bool anchorsMutable = st.brk.anchors == breakeng::AnchorMode::Free || (st.brk.anchors == breakeng::AnchorMode::Profile && pi.softAnchors);
-  Chooser chooser(chops, pools, st, policy, opt.seed, report);
+  Chooser chooser(pools, st, policy, opt.seed, report);
 
   auto note = [&](Note::Kind k, int bar, int beat) {
     if (report) report->notes.push_back({k, 0, bar, beat});
