@@ -1,4 +1,5 @@
 // Fractal Rhythm, Evolve, Smart Setup and export: the composition-level glue for the feature modules.
+#include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <chopfractal/midi_export/midi.hpp>
 
@@ -10,12 +11,6 @@
 
 namespace chopfractal::composition {
 namespace {
-
-std::string twoDigits(std::size_t n) {
-  char buf[16];
-  std::snprintf(buf, sizeof buf, "%02zu", n);
-  return buf;
-}
 
 }  // namespace
 
@@ -178,29 +173,10 @@ Result<SetupSuggestion> ProjectSession::smartSetup(double hostBpm) {
 // ---------------------------------------------------------------------------------------------
 
 Result<ExportReport> ProjectSession::exportWav(const std::string& path, const ExportWavOptions& o) const {
-  if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
-  if (!(o.tailSeconds >= 0.0 && o.tailSeconds <= 30.0)) return makeError(ErrorCode::OutOfRange, "tail must be 0 to 30 seconds");
-  if (!playback_ || playback_->passThrough || !playback_->source) return makeError(ErrorCode::InvalidArgument, "there is no pattern to render");
-  std::error_code existsEc;
-  if (!o.overwrite && std::filesystem::exists(std::filesystem::u8path(path), existsEc)) return makeError(ErrorCode::Conflict, "a file already exists at " + path);
-  render::OfflineSettings rs;
-  rs.sampleRate = o.wav.sampleRate;
-  rs.bpm = o.bpm;
-  rs.cycles = o.loops;
-  rs.tailSeconds = o.tailSeconds;
-  auto audio = render::renderOffline(playback_, rs);
-  if (!audio.ok()) return audio.error();
-  wav::EncodeReport rep;
-  auto bytes = wav::encode(audio.value(), o.wav, &rep);
-  if (!bytes.ok()) return bytes.error();
-  Status w = wav::writeFileAtomic(path, bytes.value(), o.overwrite);
-  if (!w.ok()) return w.error();
-  ExportReport out;
-  out.frames = audio.value()[0].size();
-  out.peak = rep.peak;
-  out.clipped = rep.clipped;
-  out.files.push_back(path);
-  return out;
+  auto job = ExportJob::planWav(*this, path, o);
+  if (!job.ok()) return job.error();
+  ExportProgress progress;  // synchronous callers do not watch or cancel
+  return job.value().run(progress);
 }
 
 Result<std::vector<std::uint8_t>> ProjectSession::renderMidi(const KitOptions& o) const {
@@ -248,89 +224,10 @@ Result<std::vector<std::uint8_t>> ProjectSession::renderWavBytes(const ExportWav
 }
 
 Result<ExportReport> ProjectSession::exportKit(const std::string& directory, const KitOptions& o) const {
-  namespace fs = std::filesystem;
-  if (!sourceData_ || !chops_ || chops_->chops.empty()) return makeError(ErrorCode::InvalidArgument, "load a source with chops first");
-  if (!patterns_.hasPattern() || !playback_ || playback_->passThrough) return makeError(ErrorCode::InvalidArgument, "generate a pattern first");
-  if (o.loops < 1 || o.loops > 16) return makeError(ErrorCode::OutOfRange, "loops must be 1 to 16");
-  const std::size_t n = chops_->chops.size();
-  if (n > 256) return makeError(ErrorCode::LimitExceeded, "too many chops for a kit", 256);
-  if (o.baseNote < 0 || o.baseNote > 128 - static_cast<int>(n))
-    return makeError(ErrorCode::OutOfRange, "the chops do not fit into MIDI notes 0 to 127 from this base note", 127 - static_cast<int>(n) + 1);
-  const std::string stem = wav::sanitizeFileName(o.name);
-
-  // Plan every file name first, then refuse (before writing anything) if any already exists.
-  std::vector<std::string> sliceNames;
-  for (std::size_t i = 0; i < n; ++i) {
-    std::string role = roles_.roleOf(chops_->chops[i].id);
-    sliceNames.push_back("slice_" + twoDigits(i + 1) + "_" + (role.empty() ? std::string("chop") : wav::sanitizeFileName(role)) + ".wav");
-  }
-  const fs::path dir = fs::u8path(directory);
-  std::vector<fs::path> targets;
-  for (const std::string& s : sliceNames) targets.push_back(dir / s);
-  targets.push_back(dir / (stem + ".mid"));
-  targets.push_back(dir / "kit.txt");
-  std::error_code ec;
-  if (!o.overwrite)
-    for (const fs::path& t : targets)
-      if (fs::exists(t, ec)) return makeError(ErrorCode::Conflict, "a file already exists at " + t.u8string());
-
-  // MIDI first (it can fail on limits) so that nothing is written for a request that cannot complete.
-  auto mid = renderMidi(o);
-  if (!mid.ok()) return mid.error();
-
-  std::vector<std::vector<std::uint8_t>> sliceBytes;
-  for (std::size_t i = 0; i < n; ++i) {
-    const ChopInfo& c = chops_->chops[i];
-    const std::int64_t len = c.range.length();
-    std::vector<std::vector<float>> audio(static_cast<std::size_t>(sourceData_->channels));
-    const std::int64_t fin = std::min<std::int64_t>(c.fadeInFrames ? c.fadeInFrames : 32, len / 2);
-    const std::int64_t fout = std::min<std::int64_t>(c.fadeOutFrames ? c.fadeOutFrames : 64, len / 2);
-    for (int ch = 0; ch < sourceData_->channels; ++ch) {
-      const float* src = sourceData_->channel(ch) + c.range.start;
-      auto& dst = audio[static_cast<std::size_t>(ch)];
-      dst.assign(src, src + len);
-      for (std::int64_t k = 0; k < fin; ++k) dst[static_cast<std::size_t>(k)] *= static_cast<float>(k) / static_cast<float>(fin);
-      for (std::int64_t k = 0; k < fout; ++k) dst[static_cast<std::size_t>(len - 1 - k)] *= static_cast<float>(k) / static_cast<float>(fout);
-    }
-    wav::Options wo;
-    wo.sampleRate = sourceData_->sampleRate;
-    wo.format = wav::Format::Pcm24;
-    wo.dither = false;
-    auto b = wav::encode(audio, wo);
-    if (!b.ok()) return b.error();
-    sliceBytes.push_back(std::move(b.value()));
-  }
-  std::string map = "ChopFractal Producer Kit\nnote\tfile\trole\tsource_frames\n";
-  for (std::size_t i = 0; i < n; ++i) {
-    const std::string role = roles_.roleOf(chops_->chops[i].id);
-    map += std::to_string(o.baseNote + static_cast<int>(i)) + "\t" + sliceNames[i] + "\t" + (role.empty() ? "-" : role) + "\t" +
-           std::to_string(chops_->chops[i].range.start) + "-" + std::to_string(chops_->chops[i].range.end) + "\n";
-  }
-
-  fs::create_directories(dir, ec);
-  if (ec) return makeError(ErrorCode::InvalidArgument, "cannot create " + directory);
-  ExportReport rep;
-  std::vector<fs::path> written;
-  auto fail = [&](const Error& e) -> Result<ExportReport> {
-    if (!o.overwrite)
-      for (const fs::path& w : written) fs::remove(w, ec);  // no partial kit (with overwrite the old files are already replaced)
-    return e;
-  };
-  for (std::size_t i = 0; i < n; ++i) {
-    Status w = wav::writeFileAtomic(targets[i].u8string(), sliceBytes[i], o.overwrite);
-    if (!w.ok()) return fail(w.error());
-    written.push_back(targets[i]);
-    rep.files.push_back(targets[i].u8string());
-  }
-  Status wm = wav::writeFileAtomic(targets[n].u8string(), mid.value(), o.overwrite);
-  if (!wm.ok()) return fail(wm.error());
-  written.push_back(targets[n]);
-  rep.files.push_back(targets[n].u8string());
-  Status wk = wav::writeFileAtomic(targets[n + 1].u8string(), std::vector<std::uint8_t>(map.begin(), map.end()), o.overwrite);
-  if (!wk.ok()) return fail(wk.error());
-  rep.files.push_back(targets[n + 1].u8string());
-  if (auto dec = midi::decode(mid.value().data(), mid.value().size()); dec.ok()) rep.notes = dec.value().notes.size();
-  return rep;
+  auto job = ExportJob::planKit(*this, directory, o);
+  if (!job.ok()) return job.error();
+  ExportProgress progress;
+  return job.value().run(progress);
 }
 
 }  // namespace chopfractal::composition

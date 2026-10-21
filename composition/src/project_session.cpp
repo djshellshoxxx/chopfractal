@@ -11,6 +11,22 @@ namespace {
 
 // The dependency-free modules (state_codec, variation_history) own private Error types with the same
 // shape; the composition root is where they are translated into the shared one.
+// convert() casts the private enums of state_codec and variation_history by value. They never produce
+// ErrorCode::Cancelled (appended last in the shared enum), but every value they do have must keep its meaning.
+#define CF_SAME_ERROR_CODE(name)                                                                                                         \
+  static_assert(static_cast<int>(codec::ErrorCode::name) == static_cast<int>(ErrorCode::name) &&                                       \
+                    static_cast<int>(history::ErrorCode::name) == static_cast<int>(ErrorCode::name),                                   \
+                "private error codes must match the shared ErrorCode")
+CF_SAME_ERROR_CODE(InvalidArgument);
+CF_SAME_ERROR_CODE(OutOfRange);
+CF_SAME_ERROR_CODE(LimitExceeded);
+CF_SAME_ERROR_CODE(NotFound);
+CF_SAME_ERROR_CODE(Conflict);
+CF_SAME_ERROR_CODE(Blocked);
+CF_SAME_ERROR_CODE(Corrupt);
+CF_SAME_ERROR_CODE(UnsupportedVersion);
+#undef CF_SAME_ERROR_CODE
+
 template <class E>
 Error convert(const E& e) {
   return Error{static_cast<ErrorCode>(static_cast<int>(e.code)), e.message, e.hint};
