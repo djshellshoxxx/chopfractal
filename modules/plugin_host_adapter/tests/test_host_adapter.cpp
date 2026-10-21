@@ -36,6 +36,19 @@ const Golden kGolden[] = {
     {"allow_crunch", ParamKind::Bool, 0.0, 1.0, 0.0, 2},
     {"fx_intensity", ParamKind::Float, 0.0, 1.0, 0.5, 2},
     {"chaos", ParamKind::Float, 0.0, 1.0, 0.0, 3},
+    {"engine_version", ParamKind::Choice, 0.0, 1.0, 1.0, 3},
+    {"break_profile", ParamKind::Choice, 0.0, 5.0, 1.0, 3},
+    {"break_backbeat", ParamKind::Choice, 0.0, 1.0, 0.0, 3},
+    {"break_anchors", ParamKind::Choice, 0.0, 2.0, 0.0, 3},
+    {"break_groove", ParamKind::Float, 0.0, 1.0, 0.5, 3},
+    {"break_humanize", ParamKind::Float, 0.0, 1.0, 0.5, 3},
+    {"break_fill", ParamKind::Float, 0.0, 1.0, 0.5, 3},
+    {"break_glitch", ParamKind::Float, 0.0, 1.0, 0.5, 3},
+    {"groove_enable", ParamKind::Bool, 0.0, 1.0, 0.0, 3},
+    {"groove_template", ParamKind::Choice, 0.0, 8.0, 0.0, 3},
+    {"groove_swing", ParamKind::Float, 50.0, 75.0, 50.0, 3},
+    {"groove_hum_time", ParamKind::Float, 0.0, 30.0, 0.0, 3},
+    {"groove_hum_vel", ParamKind::Float, 0.0, 25.0, 0.0, 3},
 };
 }  // namespace
 
@@ -59,6 +72,10 @@ CHOP_TEST(manifest_matches_the_golden_list_and_indices) {
   CHECK_EQ(std::string(m[kAllowRetrigger].id), "allow_retrigger");
   CHECK_EQ(std::string(m[kFxIntensity].id), "fx_intensity");
   CHECK_EQ(kManifestVersion, 3);
+  CHECK_EQ(std::string(m[kChaos].id), "chaos");  // the ENG and F17 rows are appended after the last shipped row
+  CHECK_EQ(std::string(m[kEngineVersion].id), "engine_version");
+  CHECK_EQ(std::string(m[kGrooveHumVel].id), "groove_hum_vel");
+  CHECK_EQ(kEngineVersion, kChaos + 1);
   CHECK(findParam("density") == &m[kDensity]);
   CHECK(findParam("seed") == nullptr);  // the seed is never an automatable parameter
   CHECK(findParam("nope") == nullptr);
@@ -216,4 +233,23 @@ CHOP_TEST(loop_position_reports_expected_crossings_and_playhead) {
   CHECK(computeLoopPosition(tb, 512, 48000.0, 0.0).playheadQuarters == -1.0);  // no pattern
   tb.positionValid = false;
   CHECK(!computeLoopPosition(tb, 512, 48000.0, 8.0).boundary);
+}
+
+CHOP_TEST(choice_label_counts_match_their_ranges) {
+  for (const ParamDef& d : parameterManifest()) {
+    if (d.kind != ParamKind::Choice) continue;
+    int labels = 1;
+    for (const char* c = d.choices; c && *c; ++c) labels += *c == '|';
+    CHECK_EQ(labels, static_cast<int>(d.maxValue) + 1);
+    CHECK_EQ(d.minValue, 0.0);
+  }
+  // The engine defaults: new projects use the break engine, Jungle profile, standard backbeat, profile anchors.
+  const ParamValues v = ParamValues::defaults();
+  CHECK_EQ(v.get(kEngineVersion), 1.0);
+  CHECK_EQ(v.get(kBreakProfile), 1.0);
+  CHECK_EQ(v.get(kBreakBackbeat), 0.0);
+  CHECK_EQ(v.get(kBreakAnchors), 0.0);
+  CHECK_EQ(v.get(kGrooveEnable), 0.0);
+  CHECK_NEAR(snapValue(*findParam("groove_swing"), 58.3), 58.5, 1e-9);
+  CHECK_NEAR(snapValue(*findParam("groove_hum_time"), 99.0), 30.0, 0.0);
 }

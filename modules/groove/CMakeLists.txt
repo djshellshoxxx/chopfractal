@@ -25,7 +25,7 @@ target_link_libraries(groove PUBLIC chopfractal::chop_contracts)
 if(MSVC)
   target_compile_options(groove PRIVATE /W4 $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:/WX>)
 else()
-  target_compile_options(groove PRIVATE -Wall -Wextra -Wpedantic $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:-Werror>)
+  target_compile_options(groove PRIVATE -ffp-contract=off -Wall -Wextra -Wpedantic $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:-Werror>)
 endif()
 
 if(CHOPFRACTAL_BUILD_TESTS)
