@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 
 using editor_theme::laneColour;
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_) {
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_), history_(model_, commands_) {
   model_.addListener(this);
   setSize(940, 912);
   setResizable(false, false);
@@ -40,6 +40,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   followHost_.onClick = [this] { commands_.followHost(); };
   addAndMakeVisible(status_);
   addAndMakeVisible(orbit_);
+  addAndMakeVisible(history_);
   load_.onClick = [this] { commands_.chooseFile(); };
   detect_.onClick = [this] { commands_.detectChops(static_cast<DetectChoice>(detectMode_.getSelectedId())); };
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
@@ -213,7 +214,7 @@ juce::String ChopFractalEditor::getTooltip() {
     return "Source waveform: click a chop to select and audition it; drag across sections to select several. Shift-click adds a marker; Alt-click removes the nearest marker. Drop a sample anywhere to load it.";
   if (patternArea_.contains(point))
     return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
-  if (historyArea_.contains(point))
+  if (history_.getBounds().contains(point))
     return "Variation family tree: click a node to recall it, at the next loop boundary during playback. Right-click for favorite, rename, compare and delete actions. Each Generate, Mutate, Zoom and completed edit adds a branch.";
   if (orbit_.getBounds().contains(point))
     return "Orbit view: concentric rings show chop lanes and their rhythmic positions. The moving line is the playhead. Click a hit to select it in the pattern.";
@@ -316,7 +317,7 @@ void ChopFractalEditor::resized() {
   status_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbit_.setBounds(bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2)));
-  historyArea_ = bottom.withTrimmedRight(6);
+  history_.setBounds(bottom.withTrimmedRight(6));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -475,31 +476,6 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
     g.drawText("Detect chops, then press Generate.", patternArea_, juce::Justification::centred);
   }
 
-  // Variation family tree.
-  g.saveState();
-  g.reduceClipRegion(historyArea_);
-  g.setColour(editor_theme::canvas());
-  g.fillRect(historyArea_);
-  for (const auto& n : model_.view().tree) {
-    const auto np = treePos(n);
-    const int x = np.x, y = np.y;
-    for (const auto& p : model_.view().tree)
-      if (p.id == n.parent) {
-        g.setColour(juce::Colours::grey);
-        const auto pp = treePos(p);
-        g.drawLine(static_cast<float>(pp.x), static_cast<float>(pp.y), static_cast<float>(x), static_cast<float>(y));
-      }
-    g.setColour(n.active ? editor_theme::accentGreen() : (n.favorite ? editor_theme::accentAmber() : editor_theme::neutralGrey()));
-    g.fillEllipse(static_cast<float>(x - 8), static_cast<float>(y - 8), 16.0f, 16.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.85f));
-    g.drawText(n.label.empty() ? juce::String(static_cast<juce::int64>(n.id)) : juce::String(n.label), x + 10, y - 7, 90, 14, juce::Justification::left);
-  }
-  if (model_.view().tree.empty()) {
-    g.setColour(juce::Colours::grey);
-    g.drawText("Each Generate, Mutate and Zoom is saved here as a branch you can return to.", historyArea_, juce::Justification::centred);
-  }
-  g.restoreState();
-
   // Ghost outline of the hit being dragged (the edit is applied on release).
   if (dragMode_ != DragMode::None)
     for (const auto& r : model_.view().pattern.rects)
@@ -579,20 +555,6 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
       });
     }
     repaint();
-  } else if (historyArea_.contains(pt)) {
-    for (const auto& n : model_.view().tree) {
-      const auto np = treePos(n);
-      const int x = np.x, y = np.y;
-      if (std::abs(pt.x - x) < 11 && std::abs(pt.y - y) < 11) {
-        const cf::history::NodeId id = n.id;
-        if (e.mods.isPopupMenu()) {
-          commands_.historyMenu(id, this);
-          break;
-        }
-        commands_.activateNode(id);
-        break;
-      }
-    }
   }
 }
 
@@ -714,12 +676,6 @@ void ChopFractalEditor::askSavePreset() {
                                    if (r == 1 && self) self->savePresetNamed(name, true);
                                  });
   }), true);
-}
-
-juce::Point<int> ChopFractalEditor::treePos(const cf::ui::TreeNodeView& n) const {
-  const int stepX = model_.view().treeCols > 0 ? std::min(64, std::max(6, (historyArea_.getWidth() - 60) / model_.view().treeCols)) : 64;
-  const int stepY = model_.view().treeRows > 0 ? std::min(30, std::max(6, (historyArea_.getHeight() - 40) / model_.view().treeRows)) : 30;
-  return {historyArea_.getX() + 24 + n.column * stepX, historyArea_.getY() + 22 + n.depth * stepY};
 }
 
 // Keyboard equivalent of the drag gestures: arrows nudge the selected hit by one grid cell, Shift+arrows resize it.

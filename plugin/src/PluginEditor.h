@@ -12,6 +12,7 @@
 #include "EditorCommands.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
+#include "HistoryPanel.h"
 #include "OrbitPanel.h"
 #include "PresetManager.h"
 #include "StatusBar.h"
@@ -67,7 +68,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void addSlider(ParamSlider& s, const char* paramId, const juce::String& title);
   void addToggle(ParamToggle& t, const char* paramId, const juce::String& title);
   void askSavePreset();
-  juce::Point<int> treePos(const chopfractal::ui::TreeNodeView& n) const;
   FractalUi fractalUi() const;
   EvolveUi evolveUi() const;
   ExportUi exportUi() const;
@@ -80,6 +80,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   EditorCommands commands_;
   StatusBar status_;
   OrbitPanel orbit_;
+  HistoryPanel history_;
   juce::ToggleButton editMode_{"Move / resize hits"};
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
@@ -128,7 +129,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
 
-  juce::Rectangle<int> waveArea_, patternArea_, historyArea_;
+  juce::Rectangle<int> waveArea_, patternArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };
