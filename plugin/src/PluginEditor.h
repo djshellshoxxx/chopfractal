@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 
+#include "ControlsPanel.h"
 #include "DragOut.h"
 #include "EditorCommands.h"
 #include "EditorModel.h"
@@ -50,21 +51,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
 
  private:
-  using Attachment = juce::AudioProcessorValueTreeState;
-  struct ParamSlider {
-    juce::Slider slider;
-    juce::Label label;
-    std::unique_ptr<Attachment::SliderAttachment> attachment;
-  };
-  struct ParamToggle {
-    juce::ToggleButton button;
-    std::unique_ptr<Attachment::ButtonAttachment> attachment;
-  };
-
   void timerCallback() override { refresh(false); }
   void refresh(bool force);
-  void addSlider(ParamSlider& s, const char* paramId, const juce::String& title);
-  void addToggle(ParamToggle& t, const char* paramId, const juce::String& title);
   void askSavePreset();
   FractalUi fractalUi() const;
   EvolveUi evolveUi() const;
@@ -75,26 +63,12 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   ChopFractalProcessor& proc_;
   EditorModel model_;
   EditorCommands commands_;
+  ControlsPanel controls_;
   StatusBar status_;
   OrbitPanel orbit_;
   HistoryPanel history_;
   PatternPanel pattern_;
   WavePanel wave_;
-  juce::ToggleButton editMode_{"Move / resize hits"};
-
-  juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
-  juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
-  juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"},
-      zoom_{"Zoom In"}, collapse_{"Collapse"}, lock_{"Lock Bar"}, dice_{"New Seed"};
-  juce::ToggleButton embed_{"Embed source in project"};
-  juce::Label seedLabel_{{}, "Seed"};
-  juce::TextEditor seed_;
-  ParamSlider density_, swing_, variation_, dry_, gain_;
-  juce::ComboBox bars_;
-  juce::Label barsLabel_{{}, "Length (bars)"};
-  std::unique_ptr<Attachment::ComboBoxAttachment> barsAttachment_;
-  ParamToggle enable_, reverse_, pitch_, retrigger_, filter_, glide_, crunch_;
-  ParamSlider fxIntensity_, chaos_;
   juce::TextButton reroll_{"Reroll"}, savePreset_{"Save Preset"}, deletePreset_{"Delete"};
   juce::ComboBox preset_;
   std::vector<PresetManager::Entry> presets_;

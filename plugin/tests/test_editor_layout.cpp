@@ -16,6 +16,7 @@ struct PanelBounds {
 };
 // The rows land with the panels, one extraction at a time.
 const PanelBounds kPanels[] = {
+    {"ControlsPanel", {10, 10, 920, 232}},
     {"StatusBar", {10, 830, 920, 70}},
     {"OrbitPanel", {824, 720, 106, 106}},
     {"WavePanel", {10, 358, 920, 120}},
