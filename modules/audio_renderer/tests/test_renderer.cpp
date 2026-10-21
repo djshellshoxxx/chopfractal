@@ -886,40 +886,51 @@ CHOP_TEST(eight_aux_buses_cost_at_most_a_modest_factor_over_one_bus) {
   auto plain = makePlayback(src, events, 1920);
   CHECK(routed.ok() && plain.ok());
   if (!routed.ok() || !plain.ok()) return;
-  auto time = [&](const std::shared_ptr<const Playback>& pb, int buses) {
+  struct Rig {
     Renderer r;
-    Config cfg;
-    cfg.auxBuses = buses;
-    r.prepare(cfg);
-    r.mailbox().publish(pb);
-    std::vector<float> x(512, 0.f), oL(512), oR(512);
-    std::vector<std::vector<float>> bus(2 * kMaxAuxBuses, std::vector<float>(512));
+    std::vector<float> x, oL, oR;
+    std::vector<std::vector<float>> bus;
     float* ap[kMaxAuxBuses][2];
     AuxOutputs aux;
-    aux.count = buses;
-    for (int b = 0; b < buses; ++b) {
-      ap[b][0] = bus[static_cast<std::size_t>(2 * b)].data();
-      ap[b][1] = bus[static_cast<std::size_t>(2 * b + 1)].data();
-      aux.bus[b] = ap[b];
+    int buses = 0;
+    Rig() : x(512, 0.f), oL(512), oR(512), bus(2 * kMaxAuxBuses, std::vector<float>(512)) {}
+    void init(const std::shared_ptr<const Playback>& pb, int n) {
+      buses = n;
+      Config cfg;
+      cfg.auxBuses = n;
+      r.prepare(cfg);
+      r.mailbox().publish(pb);
+      aux.count = n;
+      for (int b = 0; b < n; ++b) {
+        ap[b][0] = bus[static_cast<std::size_t>(2 * b)].data();
+        ap[b][1] = bus[static_cast<std::size_t>(2 * b + 1)].data();
+        aux.bus[b] = ap[b];
+      }
     }
-    const float* in[2] = {x.data(), x.data()};
-    float* out[2] = {oL.data(), oR.data()};
-    TransportBlock tb;
-    tb.playing = true;
-    tb.positionValid = true;
-    double best = 1e30;
-    for (int rep = 0; rep < 5; ++rep) {
+    double run() {
+      const float* in[2] = {x.data(), x.data()};
+      float* out[2] = {oL.data(), oR.data()};
+      TransportBlock tb;
+      tb.playing = true;
+      tb.positionValid = true;
       const auto t0 = std::chrono::steady_clock::now();
       for (int i = 0; i < 400; ++i) {
         tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
         r.process(tb, RenderParams{}, in, out, 2, 512, aux);
       }
-      best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+      return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     }
-    return best;
   };
-  const double one = time(plain.value(), 0);
-  const double eight = time(routed.value(), kMaxAuxBuses);
+  // Alternate the two renderers rep by rep and keep each one's best: a scheduler stall or a noisy CI neighbour then hits both
+  // sides alike instead of only whichever ran second.
+  Rig plainRig, routedRig;
+  plainRig.init(plain.value(), 0);
+  routedRig.init(routed.value(), kMaxAuxBuses);
+  double one = 1e30, eight = 1e30;
+  for (int rep = 0; rep < 9; ++rep) {
+    one = std::min(one, plainRig.run());
+    eight = std::min(eight, routedRig.run());
+  }
   // Optimized builds hold the 1.5x bound (about 1.2x measured); unoptimized or instrumented builds only guard against a blow-up.
 #if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__)
   const double bound = 1.5;

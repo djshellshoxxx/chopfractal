@@ -78,6 +78,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void deleteSelectedPreset() { features_.deleteSelectedPreset(); }
   void reloadPresets() { features_.reloadPresets(); }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
+  // Tests only: stop the 10 Hz refresh and run one tick on demand, so a replay does not depend on the wall clock.
+  void stopRefreshTimerForTesting() { stopTimer(); }
+  void refreshForTesting() { timerCallback(); }
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }

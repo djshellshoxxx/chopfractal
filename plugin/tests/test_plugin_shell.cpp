@@ -621,6 +621,14 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
                                         "allow_pitch", "allow_retrigger", "allow_filter", "allow_glide", "allow_crunch", "effect_enable"};
   FakePlayHead ph;
   p.setPlayHead(&ph);
+  // The 30 Hz processor poll and the 10 Hz editor refresh are driven by hand below: left on the wall clock, a slow runner
+  // lands the loop-boundary / scene / refresh work between different events from one replay to the next.
+  p.stopPollTimerForTesting();
+  ed->stopRefreshTimerForTesting();
+  auto tick = [&] {
+    p.pollAudioFlags();
+    ed->refreshForTesting();
+  };
   for (int i = 0; i < events; ++i) {
     ed->model().refresh(false, ed->waveformBounds().getWidth());  // the view must not depend on how many timer ticks the dispatch loop happened to run
     switch (pick(6)) {
@@ -661,6 +669,7 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
       ph.hasPpq = rng.uniform01() < 0.8;
       ph.hasBpm = rng.uniform01() < 0.9;
       const auto audio = run(p, ph, 4, 512, 0.1f);
+      tick();
       if (!(peak(audio) < 20.f)) {  // finite and sane
         *ok = false;
         std::fprintf(stderr, "  audio not finite/sane at event %d (peak %g)\n", i, static_cast<double>(peak(audio)));
@@ -678,6 +687,7 @@ FuzzResult fuzzEditor(std::uint64_t seed, int events, bool* ok) {
   }
   p.setPlayHead(nullptr);
   juce::MessageManager::getInstance()->runDispatchLoopUntil(250);
+  tick();
   out.pattern = patternBytes(p);
   p.withSession([&](cf::composition::ProjectSession& s) { out.historyNodes = s.history().size(); });
 
