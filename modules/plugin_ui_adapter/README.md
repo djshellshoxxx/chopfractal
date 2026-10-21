@@ -13,12 +13,14 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `layoutHistoryTree()`
 - `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
 - `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
+- `buildMidiOptionsView()`, `buildDragOutView()`, `dragFileName()`, `midiNoteText()` and the exact drag-out status strings (F13); session-feature view models for F10, F09 and F18 in `session_views.hpp`
 
 Public headers:
 
 - `include/chopfractal/plugin_ui_adapter/views.hpp`
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
+- `include/chopfractal/plugin_ui_adapter/session_views.hpp`
 
 ## Contract
 

@@ -88,7 +88,7 @@ CHOP_TEST(state_round_trip_restores_extras_ab_manual_bpm_and_embed_flag) {
   e.fractalDepth = 3;
   e.roleIndex = 2;
   e.detectMode = 2;
-  e.exportUi = {2, 3, 4};
+  e.exportUi = {2, 3, 4, {}};
   e.ui.editHits = true;
   e.ui.search = "kick";
   std::vector<std::uint8_t> bytesA, bytesB;

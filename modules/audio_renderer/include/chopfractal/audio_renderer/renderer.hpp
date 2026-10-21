@@ -91,6 +91,9 @@ struct Playback {
 Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks,
                                                       const PlaybackOptions& options = PlaybackOptions{});
 Result<std::shared_ptr<const Playback>> makePassThroughPlayback(SourcePtr source);
+// The retrigger sub-hits makePlayback prepares (n evenly spaced hits, level x0.8 per hit, a sub-hit past `lengthTicks` wraps;
+// 0 = no wrap), sorted by start, without needing a decoded source. Gesture-effect repeats are not included. Non-real-time.
+FlatEventList expandRetriggers(const FlatEventList& events, Ticks lengthTicks = 0);
 
 struct Config {
   double sampleRate = 48000.0;

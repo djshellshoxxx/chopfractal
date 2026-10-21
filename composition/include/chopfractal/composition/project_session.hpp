@@ -88,12 +88,45 @@ struct ExportReport {
   std::uint64_t clipped = 0;
   std::vector<std::string> files;
 };
+// MIDI velocity from the event level `l` (F13): Linear clamp(l*127), Soft 127*min(l,1)^2, Hard 127*sqrt(min(l,1)), Fixed.
+enum class VelocityCurve : std::uint8_t { Linear = 0, Soft = 1, Hard = 2, Fixed = 3 };
+struct MidiExportOptions {
+  int baseNote = 36;                      // 0..127; chop n (snapshot order) -> baseNote + n
+  double bpm = 120.0;                     // 20..999, written as the tempo event
+  int loops = 1;                          // 1..16 repeats of the pattern
+  VelocityCurve curve = VelocityCurve::Linear;
+  int fixedVelocity = 100;                // 1..127, used by Fixed
+  int channel = 0;                        // 0..15 (the UI shows 1..16)
+  std::string trackName = "chopfractal";  // at most 60 bytes
+};
 struct KitOptions {
   int baseNote = 36;            // chop n -> note baseNote + n
   double bpm = 120.0;
   int loops = 1;                // 1..16 repeats of the pattern in pattern.mid
   bool overwrite = false;
   std::string name = "chopfractal";
+  VelocityCurve curve = VelocityCurve::Linear;  // defaults reproduce the pre-F13 pattern.mid byte for byte
+  int fixedVelocity = 100;
+  int channel = 0;
+};
+// MIDI velocity 1..127 for an event level under a curve (`fixedVelocity` is used by Fixed only).
+int midiVelocity(float level, VelocityCurve curve, int fixedVelocity = 100);
+constexpr std::size_t kMaxDragFiles = 64;           // 63 slices + the MIDI file
+constexpr double kMaxDragAudioSeconds = 120.0;      // a dragged WAV longer than this is refused by the UI
+struct KitFile {
+  std::string name;
+  std::vector<std::uint8_t> bytes;
+};
+// The MIDI export preferences that are saved with the project (they ride in the Export block of the extras section).
+struct MidiExportSettings {
+  int baseNote = 36;  // 0..127
+  VelocityCurve curve = VelocityCurve::Linear;
+  int fixedVelocity = 100;  // 1..127
+  int loops = 1;            // 1..16
+  int channel = 0;          // 0..15
+  friend bool operator==(const MidiExportSettings& a, const MidiExportSettings& b) {
+    return a.baseNote == b.baseNote && a.curve == b.curve && a.fixedVelocity == b.fixedVelocity && a.loops == b.loops && a.channel == b.channel;
+  }
 };
 
 // ---- project extras (state v2, docs/specs/roadmap/F01-state-v2-and-persistence.md section 4) ----
@@ -102,8 +135,9 @@ struct ExportUiSettings {
   int formatIndex = 1;  // 16-bit, 24-bit, 32-bit float
   int rateIndex = 1;    // 44.1, 48, 88.2, 96 kHz
   int loopsIndex = 1;   // {1, 2, 4, 8, 16}
+  MidiExportSettings midi;  // F13; written after the three indexes only when it differs from the default
   friend bool operator==(const ExportUiSettings& a, const ExportUiSettings& b) {
-    return a.formatIndex == b.formatIndex && a.rateIndex == b.rateIndex && a.loopsIndex == b.loopsIndex;
+    return a.formatIndex == b.formatIndex && a.rateIndex == b.rateIndex && a.loopsIndex == b.loopsIndex && a.midi == b.midi;
   }
 };
 struct UiPrefs {
@@ -299,6 +333,21 @@ class ProjectSession {
   Result<std::vector<std::uint8_t>> renderWavBytes(const ExportWavOptions& options) const;
   // slice_NN_<role>.wav for every chop, pattern.mid replaying the pattern on those slices, and kit.txt.
   Result<ExportReport> exportKit(const std::string& directory, const KitOptions& options) const;
+
+  // ---- MIDI / audio drag-out and per-variation export (F13; composition/src/midi_drag.cpp) ----
+  // Nothing here touches the session, history or undo. The `Current` forms are renderMidi / renderWavBytes with the
+  // full option struct. A variation is read from its history node (the live pattern for the active node), repaired
+  // with sanitize() against today's chops, and rendered through the same playback path as the live pattern (groove
+  // baked per its setting); without decoded audio the MIDI still works from the chop map alone (retrigger sub-hits only).
+  Result<std::vector<std::uint8_t>> renderCurrentMidi(const MidiExportOptions& options) const;
+  Result<std::vector<std::uint8_t>> renderCurrentWav(const ExportWavOptions& options) const { return renderWavBytes(options); }
+  // `skippedEvents` receives how many events were dropped because their chop no longer exists.
+  Result<std::vector<std::uint8_t>> renderVariationMidi(history::NodeId node, const MidiExportOptions& options, int* skippedEvents = nullptr) const;
+  Result<std::vector<std::uint8_t>> renderVariationWav(history::NodeId node, const ExportWavOptions& options) const;
+  Result<ExportReport> exportVariationMidi(history::NodeId node, const std::string& path, const MidiExportOptions& options, bool overwrite) const;
+  Result<ExportReport> exportVariationWav(history::NodeId node, const std::string& path, const ExportWavOptions& options) const;
+  // Slice WAV bytes (same encode as exportKit: 24-bit, fades 32/64 frames) in chop order, then `<name>.mid`.
+  Result<std::vector<KitFile>> renderKitFiles(const KitOptions& options) const;
 
   // ---- project state ----
   const ProjectExtras& extras() const { return extras_; }

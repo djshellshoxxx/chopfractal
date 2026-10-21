@@ -16,6 +16,17 @@
 4. The persistent hint under the group reads `Dragged files are kept in <folder> until you delete them. Use Export for files you want to keep.`
 5. **Placement:** row D of FeaturePanel (852 px) already holds Drag MIDI and Drag WAV, so the third handle, Drag Kit (100 px), goes to FeaturePanel row E (roadmap README, "FeaturePanel row budget"), next to the F08 gesture buttons.
 
+### 0.1 Session-layer status (2026-10-21, branch feat/SESS-session-features)
+**Done and tested (portable/composition/plugin helper layer):** `expandRetriggers(events, lengthTicks)` in `audio_renderer` (the spec's one-argument form gained the loop length so sub-hits wrap exactly like `makePlayback`); `MidiExportOptions`, `VelocityCurve`, `midiVelocity()`, `KitOptions{curve, fixedVelocity, channel}`; `renderCurrentMidi/renderCurrentWav/renderVariationMidi/renderVariationWav/exportVariationMidi/exportVariationWav/renderKitFiles` (composition/src/midi_drag.cpp); the shared builder `composition/src/midi_build.hpp` used by `renderMidi`, `exportKit` and the drag paths (default `pattern.mid` bytes pinned: FNV-1a 7325608272239143083 for seed 77 / 128 BPM / 2 loops, 2872596221132922558 for base note 60); the MIDI settings persist in the Export block of the extras section (tag 4 grows from 3 to 8 bytes only when a MIDI setting is not the default, so projects that never touch them keep their bytes); `dragout::DragFileSet`, `dragout::cleanUpDraggedFiles()` and the multi-file `DragHandle::SetProvider`; the view model `plugin_ui_adapter/session_views.hpp` (texts, ranges, enable rules, exact messages). **Not built here (the GUI worker owns every panel):** the handles in the new FeaturePanel, the inline "MIDI options..." section, node dragging in the family tree, the context-menu items and the click-versus-drag change in the history panel. Section 12 lists what each control must call.
+
+*Decisions made while implementing (they override the body):*
+1. Note names follow the examples: note 36 is `C2` and 60 is `C4` (octave = note / 12 - 1). The body's "C3 = 60 convention" contradicts its own `C2 (36)` example; the example wins (`midiNoteText`).
+2. Velocity `Hard` at level 0.001 is 4 (127 * sqrt(0.001)), not 1; the formula in section 4 is the rule.
+3. Without decoded audio (`sourceMissing()`), `renderCurrentMidi` and `renderVariationMidi` still work from the chop map: they use `expandRetriggers` on the flattened pattern (gesture-effect repeats and the groove need the audio, so they are not in that file). With audio they use the playback path, so Echo/Stutter/Roll repeats and the baked groove appear exactly as in the Producer Kit file.
+4. For the active node, `renderVariationMidi/Wav` read the live pattern (so uncommitted edits are exported); other nodes are read from their stored snapshot and repaired with `sanitize` against today's chops.
+5. `renderKitFiles` refuses more than 63 chops (`kMaxDragFiles` 64 includes the MIDI file) with LimitExceeded and the spec's message; the 120 s audio cap is a UI rule (`dragWavSeconds`) so exports are not capped.
+6. `cleanupOlderThanDays` now also walks the per-drag sub-folders (and removes the ones it empties).
+
 ## 1. Summary and user value
 Drag the current groove, any variation from the family tree, or the whole Producer Kit out of the editor and drop it on a DAW track or sampler: a MIDI file that replays the pattern on the chop notes, a rendered WAV of the variation, or the kit files. Today a producer must use two file dialogs (`doExportWav`, `doExportKit`) and cannot export a variation other than the active one. Drag-out makes ChopFractal feel like a groove source that feeds the rest of the session in one gesture; MIDI settings (base note, velocity curve, loops, channel) make the file fit any drum rack.
 
@@ -111,13 +122,13 @@ Manual QA (REAPER, Ableton Live, FL Studio, Bitwig):
 
 ## 8. Acceptance criteria
 - [ ] Drag of MIDI/Audio/Kit/variation lands as a usable file in REAPER and Bitwig (Windows or macOS) and in Ableton Live and FL Studio where the host accepts file drops; outcomes recorded in the F15 test matrix.
-- [ ] Default-option `pattern.mid` from `exportKit` is byte-identical before and after the refactor (pinned hash).
-- [ ] `renderVariationMidi(N)` equals the MIDI of the activated node for every node in a 10-node tree.
-- [ ] Dragging never changes the session: `saveState` bytes identical before and after a drag (test).
+- [x] Default-option `pattern.mid` from `exportKit` is byte-identical before and after the refactor (pinned hash).
+- [x] `renderVariationMidi(N)` equals the MIDI of the activated node for every node in a 10-node tree.
+- [x] Dragging never changes the session: `saveState` bytes identical before and after a drag (test).
 - [ ] 4-bar x 4-loop WAV drag render completes in <= 400 ms; MIDI render <= 20 ms for 512 events x 16 loops.
 - [ ] Dragged files are never deleted automatically or by the drop callback; the explicit clean-up action removes only files older than 90 days in the Dropped folder.
-- [ ] No new host parameters; manifest version unchanged; golden hashes 2397844821793184813, 12084884237330071892, 13710596758976548913, 18237151833431327128 unchanged; old projects/state load unchanged.
-- [ ] `tools/check_modules.py` passes (no JUCE in `modules/` or `composition/`).
+- [x] No new host parameters; manifest version unchanged; golden hashes 2397844821793184813, 12084884237330071892, 13710596758976548913, 18237151833431327128 unchanged; old projects/state load unchanged.
+- [x] `tools/check_modules.py` passes (no JUCE in `modules/` or `composition/`).
 
 ## 9. Files touched
 | path | new/modified | change |
@@ -138,6 +149,22 @@ Manual QA (REAPER, Ableton Live, FL Studio, Bitwig):
 - Synchronous WAV render stalls the UI for long patterns: 120 s cap + 400 ms budget test; fall back to MIDI-only for longer.
 - Activation behavior change in HistoryPanel (mouseDown -> mouseUp) could break F02/F06 flows: covered by `history_click_activates_but_drag_does_not` and existing GUI test updates.
 - Wayland refusal: documented, not fixable in the plugin.
+
+## 12. Commands the GUI must call
+All calls run on the message thread under `proc.withSession(...)`; none of them changes the session, so no undo entry and no republish. Texts, ranges and enable rules come from `plugin_ui_adapter/session_views.hpp`.
+| Control | Call |
+|---|---|
+| MIDI options section (values) | read/write `session.extras().exportUi.midi` (`MidiExportSettings`) with `setExtras` (validates; saved with the project); build the section with `ui::buildMidiOptionsView({...})` (slider max `baseNoteMax`, text `baseNoteText`, tempo line from `activeBpm`/`usedFallbackTempo`) |
+| Handle enable state and tooltip | `ui::buildDragOutView({hasPattern, sourceMissing, chopCount, wavSeconds = ui::dragWavSeconds(...), baseNote})` |
+| Drag MIDI (current) | on drag start: `session.renderCurrentMidi(opts)`; write with `dragout::DragFileSet::add(ui::dragFileName(stem, "current", bpm, "mid"), bytes)`; `performExternalDragDropOfFiles` is done by `DragHandle` |
+| Drag WAV (current) | `session.renderCurrentWav(wavOpts)` (bpm = `activeBpm`, tail 0.5, no normalize, loops from the export combo); refuse when `dragWavSeconds > kMaxDragAudioSeconds` |
+| Drag Kit | `session.renderKitFiles(kitOpts)` then one `DragFileSet::add(file.name, file.bytes)` per `KitFile` |
+| Family-tree node drag (MIDI) | `session.renderVariationMidi(node, opts, &skipped)`; if `skipped > 0` show `ui::dragSkippedEventsMessage(skipped)` |
+| Alt/Option-drag of a node (audio) | `session.renderVariationWav(node, wavOpts)` |
+| Node menu "Export MIDI..." / "Export WAV..." | `session.exportVariationMidi(node, path, opts, overwrite)` / `session.exportVariationWav(node, path, wavOpts)` after the file chooser and overwrite confirmation |
+| "Delete dragged files older than 90 days" | `dragout::cleanUpDraggedFiles()` (returns the count to show) |
+| Status line | `ui::dragStartedMessage`, `dragClickMessage`, `dragRenderErrorMessage`, `dragTooLongMessage`, `dragTempFileErrorMessage`, hint line `dragHintText(dragout::folder())` |
+A history node must activate on mouse-up with less than `DragHandle::kDragThresholdPx` of movement, never on mouse-down.
 
 ## 11. Implementation steps
 1. Pin the current `pattern.mid` hash test (against unchanged code) and the byte-equality tests for `exportKit`; commit.

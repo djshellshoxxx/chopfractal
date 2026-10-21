@@ -73,7 +73,7 @@ ProjectExtras nonDefaultExtras() {
   e.detectMode = 3;
   e.gridDivision = 8;
   e.gridTriplet = true;
-  e.exportUi = {0, 3, 4};
+  e.exportUi = {0, 3, 4, {}};
   e.fractalMutation = 0.4;
   e.fractalAccentDecay = 0.6;
   e.ui.viewMode = 0;
