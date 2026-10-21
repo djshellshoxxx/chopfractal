@@ -27,6 +27,11 @@ ChopFractalProcessor::ChopFractalProcessor()
       apvts(*this, nullptr, "ChopFractal", createLayout()) {
   const auto& manifest = cf::host::parameterManifest();
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) paramPtrs_[i] = apvts.getRawParameterValue(manifest[i].id);
+  {
+    const cf::host::ParamValues d = cf::host::ParamValues::defaults();
+    lastGrooveParams_ = {d.get(cf::host::kGrooveEnable), d.get(cf::host::kGrooveTemplate), d.get(cf::host::kGrooveSwing), d.get(cf::host::kGrooveHumTime),
+                         d.get(cf::host::kGrooveHumVel)};
+  }
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
   startTimerHz(30);
@@ -149,6 +154,15 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
 }
 
 void ChopFractalProcessor::pollAudioFlags() {
+  {  // Groove Lab knobs: applied to the session (playback-time layer) only when one of them moved since the last poll
+    const cf::host::ParamValues pv = currentParams();
+    const std::array<double, 5> now = {pv.get(cf::host::kGrooveEnable), pv.get(cf::host::kGrooveTemplate), pv.get(cf::host::kGrooveSwing),
+                                       pv.get(cf::host::kGrooveHumTime), pv.get(cf::host::kGrooveHumVel)};
+    if (now != lastGrooveParams_) {
+      lastGrooveParams_ = now;
+      withSession([&pv](cf::composition::ProjectSession& s) { (void)s.setGroove(cf::composition::grooveFromParams(pv, s.groove())); });
+    }
+  }
   // A quantized switch can only complete when a pattern is playing; without one, apply it now.
   if (patternQuarters_.load(std::memory_order_relaxed) <= 0.0)
     withSession([](cf::composition::ProjectSession& s) {
@@ -305,6 +319,7 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::ValueTree stateCopy = apvts.copyState();  // never mutate the live tree: hosts may call this off the message thread
   stateCopy.setProperty("manualBpm", manualBpm.load(), nullptr);
   stateCopy.setProperty("embedSource", embedSource.load(), nullptr);
+  stateCopy.setProperty("engineParams", 1, nullptr);  // marks a project that knows the engine v2 parameters; absent = saved before they existed
   std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
 
   std::vector<std::uint8_t> blob;
@@ -348,6 +363,10 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
   if (auto xml = juce::parseXML(xmlText))
     if (xml->hasTagName(apvts.state.getType())) {
       apvts.replaceState(juce::ValueTree::fromXml(*xml));
+      if (!apvts.state.hasProperty("engineParams")) {  // a project saved before engine v2 keeps generating with the classic engine
+        if (auto* ev = apvts.getParameter(cf::host::parameterManifest()[cf::host::kEngineVersion].id)) ev->setValueNotifyingHost(0.0f);
+        if (auto* ge = apvts.getParameter(cf::host::parameterManifest()[cf::host::kGrooveEnable].id)) ge->setValueNotifyingHost(0.0f);
+      }
       manualBpm = juce::jlimit(20.0, 999.0, static_cast<double>(apvts.state.getProperty("manualBpm", 120.0)));
       embedSource = static_cast<bool>(apvts.state.getProperty("embedSource", false));
     }
