@@ -71,7 +71,11 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   auto* orbit = findById(*editor, "OrbitPanel");
   CHECK(orbit != nullptr);
   if (!orbit) return;
-  if (auto* tools = dynamic_cast<juce::Viewport*>(findById(*editor, "ToolsDrawer"))) tools->setViewPosition(400, 0);  // bring the orbit into view
+  if (auto* tools = dynamic_cast<juce::Viewport*>(findById(*editor, "ToolsDrawer"))) {
+    // Bring the whole orbit into view whatever width the drawer got (a fixed offset left it past the right edge on some layouts).
+    const auto inBody = orbit->getBounds();
+    tools->setViewPosition(std::max(0, inBody.getRight() - tools->getMaximumVisibleWidth()), std::max(0, inBody.getBottom() - tools->getMaximumVisibleHeight()));
+  }
   pump(30);
   const auto& view = probe.view().orbit;
   const double R = std::min(orbit->getWidth(), orbit->getHeight()) / 2.0 - 4.0;
