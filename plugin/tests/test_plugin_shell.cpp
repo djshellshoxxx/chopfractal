@@ -499,6 +499,12 @@ CHOP_TEST(pass3_chaos_presets_dragout_and_hit_editing_work_through_the_editor) {
   const cf::ui::EventRect* target = nullptr;
   for (const auto& r : ed->hitRects())
     if (r.depth == 0 && !r.locked && (r.x1 - r.x0) * ed->patternBounds().getWidth() > 24) {
+      // Skip hits that another rectangle of the same lane overlaps at the click point: the topmost one would be hit.
+      bool covered = false;
+      const double px = r.x0 + (r.x1 - r.x0) * 0.3;
+      for (const auto& o : ed->hitRects())
+        if (!(o.id == r.id) && o.chopIndex == r.chopIndex && o.x0 <= px + 0.002 && o.x1 >= px - 0.002) covered = true;
+      if (covered) continue;
       target = &r;
       break;
     }
@@ -1022,13 +1028,18 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     const auto rects = editor.hitRects();
     CHECK(!rects.empty());
     if (rects.empty()) return;
-    for (const auto& r : rects) {  // the first hit may be too short or covered to click: take the first one that selects
+    // Not every hit can be subdivided (short ones are refused with a status message): zoom the first one that can.
+    bool zoomed = false;
+    for (const auto& r : rects) {
       sim.click(hitPoint(editor, r, 0.5));
-      if (!editor.selectedHits().empty()) break;
+      if (editor.selectedHits().empty()) continue;
+      if (auto* button = findButton(editor, "Zoom In")) button->onClick();
+      if (patternBytes(p) != unchanged) {
+        zoomed = true;
+        break;
+      }
     }
-    CHECK(!editor.selectedHits().empty());
-    if (auto* button = findButton(editor, "Zoom In")) button->onClick();
-    CHECK(patternBytes(p) != unchanged);
+    CHECK(zoomed);
 
     // 4. Saving and restoring preserves the pattern and embedded audio.
     p.embedSource = true;

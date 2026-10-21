@@ -59,7 +59,7 @@ inline std::shared_ptr<const cf::render::SourceData> drumLoop() {
   cf::Rng rng(3);
   for (int k = 0; k < 8; ++k)
     for (int i = 0; i < 5000; ++i)
-      d->samples[static_cast<std::size_t>(k * 12000 + i)] = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * std::exp(-static_cast<float>(i) / 900.f) * 0.8f;
+      d->samples[static_cast<std::size_t>(k * 12000 + i)] = static_cast<float>(rng.uniform01() * 2.0 - 1.0) * static_cast<float>(std::exp(static_cast<double>(-static_cast<float>(i) / 900.f))) * 0.8f;  // double exp rounded once: expf differs per libm
   return d;
 }
 

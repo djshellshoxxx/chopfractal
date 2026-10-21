@@ -1,5 +1,6 @@
 // F01: project state v2. Pins the v1 bytes first (captured from the build before any production change), then
 // covers extras, A/B snapshots, sections, migration, deferred resolve and the export job.
+#include <cstdio>
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
 
