@@ -10,8 +10,10 @@
 class PresetManager {
  public:
   struct Entry {
-    juce::String label;  // "Factory: Tight Groove" or the user preset's name
+    juce::String label;  // "Factory: Amen Classic" or the user preset's name
+    juce::String key;    // "factory:<name>" or "user:<file stem>"
     bool factory = true;
+    bool loadable = true;  // false: the file was made by a newer ChopFractal; it is listed but cannot be applied
     chopfractal::presets::Preset preset;
     juce::File file;  // user presets only
   };
@@ -25,4 +27,11 @@ class PresetManager {
   // Writes <sanitized name>.cfpreset atomically; refuses to replace an existing file unless `overwrite`.
   static chopfractal::Status save(const chopfractal::presets::Preset& p, bool overwrite);
   static chopfractal::Status remove(const juce::File& file);  // only files inside userFolder() are deleted
+  // Renames a user preset: writes the new file first, then removes the old one. Conflict when the name is taken.
+  static chopfractal::Status rename(const juce::File& file, const juce::String& newName);
+
+  // Favorites live in favorites.txt next to the presets: UTF-8, one key per line, at most 200 lines.
+  static juce::StringArray favorites();
+  static bool isFavorite(const juce::String& key);
+  static chopfractal::Status setFavorite(const juce::String& key, bool on);
 };

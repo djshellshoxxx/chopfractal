@@ -96,7 +96,7 @@ Defects found and fixed during integration (each now has a test): derived child 
 
 Three independent read-only audits (core logic, audio/export/feature modules, plugin shell and GUI) plus a button-driving GUI test found and fixed: a failed marker edit that wedged the session (now transactional, and zoomed content stranded by a deleted chop is dropped); undo, redo and A/B recall restoring patterns that reference deleted chops; roles lost when a chop is disabled; per-event locks bypassed by bar replacement and bar duplication; signed overflow in event timing; grammar labels that saved but could not be loaded; duplicate marker IDs and a zero id counter in saved state; a history config that could write unreadable state; voice-pool exhaustion hard-cutting a sounding voice, and newest-voice stealing; MIDI decoder accepting invalid tempo, meter, running status and zero-length notes (and a shift-exponent bug); non-atomic WAV overwrite and false clip reports at 0 dB; stale waveform after loading a new source; embed flag, manual tempo not persisted; no Locate Source for a missing audio file; use-after-free risk in menu callbacks; Lock Bar acting on bar 0 with nothing selected; Evolve toggle out of sync with the session; repaint 10 times a second while idle. Each has a regression test.
 
-Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, no meters. (Seed field, motif, A/B snapshots and the export choices are saved since F01 state v2; export runs on a worker thread.)
+Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains. (Seed field, motif, A/B snapshots and the export choices are saved since F01 state v2; export runs on a worker thread.)
 
 ## Pass 3 (pre-beta)
 
@@ -143,8 +143,8 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F01 | State v2 and persistence | **Done**: session schema 2 with lazy versioning, StateSection API, migration registry wired, extras and A/B persisted, worker restore, export on a worker with progress and cancel (see "Project state v2" below) |
 | F02 | Direct editing | Partly built in pass 3: hit move, resize, duplicate, delete, mute, add; Shift+click markers; marker dragging, zoom, menus not built |
 | F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
-| F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |
-| F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
+| F04 | Keyboard and layout | Built in the G3 shell: key map, hit navigation, focus order and ring, accessibility names and announcements, resizing and Simple view; not built: `describeParam` tooltips, waveform zoom keys, marker undo |
+| F05 | Meters and feedback | Built in G3: output meter with latched CLIP chip, voice box, sync box, severity notice log, pending-activation ring, drag-and-drop with the replace confirmation (see gui-redesign.md section 24) |
 | F06 | Rule editor | Not started |
 | F11 | Multi-output stems | Renderer, host buses, session routing (state tag 9), processor and view model built and tested; the Outputs section is pending (command list in the F11 spec, section 12) |
 | F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |
@@ -155,7 +155,8 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F13 | MIDI drag-out | **Done** (logic and session API; GUI wiring pending): settings, per-variation export, Producer Kit |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
 | F18 | Arrangement export | **Done** (Arrangement drawer): `arrangement` model and tag 16, `ArrangementJob` worker, `wav_export` cue chunk, `midi_export` markers; commands in spec section 12 |
-| F16, F17, F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |
+| F16, F17, E01, E02 | Level Match and Safety Limiter, Groove Lab, Echo, Tremolo-Pan | Specified 2026-10-20, not started |
+| F19 | Command Palette and Quick Start | Built in the G3 shell (palette over actions, every parameter and presets; quick start card and per-user checklist); the matcher is in plugin_ui_adapter, not a `fuzzy_match` module |
 
 
 GUI wave two (G4): the Panels menu opens drawers for Capture, Tempo, Pads, Scenes (with the A/B morph row), Evolve (motif presets, depth, accent decay, Smart Setup suggestions), Outputs and Arrangement; the Orbit View has its own drawer. Panel tests live in plugin/tests/test_perform_*.cpp; CHOPFRACTAL_PERFORM_SNAPS=<folder> renders every drawer at 1100x720 and 880x560.

@@ -79,8 +79,6 @@ CHOP_TEST(history_drawer_details_favorite_rename_compare_and_ab_morph) {
 
   compare->triggerClick();
   pump(60);
-  auto* status = findTextEditor(*editor, "Status messages");
-  CHECK(status != nullptr);
 
   // A/B: slots start empty, so Go to / morph are disabled; keeping fills them.
   auto* keepA = findButton(*editor, "Keep as A");

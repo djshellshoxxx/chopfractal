@@ -34,6 +34,7 @@ class EvolvePanel : public DrawerPanel {
   void setEvolveEnabled(bool on);
   bool evolveEnabled() const { return evolve_.getToggleState(); }
   void showPreset(const chopfractal::presets::Preset&);  // motif, depth, cadence and amount, without firing the handlers
+  void setCadence(int everyIndex, double amount);        // the Every box (0..4) and the Amount slider, without firing the handlers
 
   // The motif choices of the preset box (name, motif).
   static const std::vector<std::pair<const char*, const char*>>& motifPresets();

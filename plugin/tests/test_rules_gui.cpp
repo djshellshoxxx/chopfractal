@@ -42,8 +42,7 @@ struct RulesFixture {
     return n;
   }
   juce::String status() {
-    auto* t = findTextEditor(*editor, "Status messages");
-    return t ? t->getText() : juce::String();
+    return ed->model().statusLine();  // the status bar shows the message on one elided line, so read the model
   }
 };
 }  // namespace

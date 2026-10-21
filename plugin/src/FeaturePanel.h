@@ -1,12 +1,11 @@
 #pragma once
-// Export, roles, detection mode, presets and drag-out (the Tools drawer). Smart Setup, Fractal and Evolve moved to the
-// EvolvePanel and the A/B snapshots to the ScenesPanel; presets read and write their widgets through attachEvolve().
+// Detection mode, source relink and roles (the Tools drawer). Smart Setup, Fractal and Evolve live in the EvolvePanel, the A/B
+// snapshots in the ScenesPanel, presets in the PresetBrowser and export in the ExportDrawer; this panel reads and writes the
+// Evolve widgets through attachEvolve() when a preset is applied.
 #include <vector>
 
-#include "DragOut.h"
-#include "EvolvePanel.h"
 #include "EditorPanels.h"
-#include "PresetManager.h"
+#include "EvolvePanel.h"
 
 class FeaturePanel : public EditorPanelBase {
  public:
@@ -20,29 +19,21 @@ class FeaturePanel : public EditorPanelBase {
   // The shell's Evolve button drives the same settings as the Evolve drawer (Every, Amount, Depth, Motif).
   void setEvolveEnabled(bool on) { if (evolve_) evolve_->setEvolveEnabled(on); }
   bool evolveEnabled() const { return evolve_ && evolve_->evolveEnabled(); }
-  juce::String presetName() const;  // the preset chosen in the list, empty after a manual change
-  void applyPreset(const chopfractal::presets::Preset&);
+  // Applies a preset through EditorCommands (parameters, seed, grid, motif, rules), stops a running Evolve first and shows
+  // the preset's Evolve cadence. The pattern is untouched unless `generateAfter`.
+  bool applyPreset(const chopfractal::presets::Preset&, bool generateAfter = false);
+  bool undoPreset();
   chopfractal::presets::Preset currentPreset(const juce::String& name) const;
-  void savePresetNamed(const juce::String& name, bool overwrite);
-  void deleteSelectedPreset();
-  void reloadPresets();
-  juce::File makeDragFile(bool wav) { return cmd_.makeDragFile(wav, exportUi()); }
+  juce::File makeDragFile(bool wav) { return cmd_.makeDragFile(wav, cmd_.exportUi()); }
 
  private:
   void modelChanged(Change) override;
-  void updateExportButtons();
-  void askSavePreset();
   FractalUi fractalUi() const { return evolve_ ? evolve_->fractalUi() : FractalUi{}; }
   EvolveUi evolveUi() const { return evolve_ ? evolve_->evolveUi() : EvolveUi{}; }
-  ExportUi exportUi() const;
 
-  juce::TextButton exportWav_{"Export WAV"}, exportKit_{"Export Kit"}, locate_{"Locate Source"}, setRole_{"Set Role"};
-  juce::TextButton savePreset_{"Save Preset"}, deletePreset_{"Delete"};
-  juce::ComboBox role_, preset_, detectMode_;
-  std::vector<PresetManager::Entry> presets_;
-  DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
-  DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
+  juce::TextButton locate_{"Locate Source"}, setRole_{"Set Role"};
+  juce::ComboBox role_, detectMode_;
   EvolvePanel* evolve_ = nullptr;
-  juce::Label fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
-  juce::ComboBox exportFormat_, exportRate_, exportLoops_;
+  int undoEvery_ = 2;  // the Evolve cadence before the last preset, for Undo preset
+  double undoAmount_ = 0.25;
 };

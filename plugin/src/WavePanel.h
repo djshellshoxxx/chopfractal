@@ -16,6 +16,7 @@ class WavePanel : public EditorPanelBase {
   void mouseUp(const juce::MouseEvent&) override;
   void mouseMove(const juce::MouseEvent&) override;
   void mouseDoubleClick(const juce::MouseEvent&) override;
+  bool isDropHighlighted() const { return model_.dropHover(); }
   void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
   // Menus are built here so tests can read the items; menuMarker is the marker under the pointer (invalid = none).

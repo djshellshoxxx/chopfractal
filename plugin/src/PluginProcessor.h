@@ -9,6 +9,7 @@
 #include <array>
 #include <vector>
 #include <atomic>
+#include <chopfractal/audio_renderer/meter.hpp>
 #include <chopfractal/audio_renderer/spsc_queue.hpp>
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
@@ -17,6 +18,8 @@
 #include <chopfractal/plugin_ui_adapter/capture_view.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
+
+#include "NoticeLog.h"
 
 // A project export that runs on a worker thread (F01 section 5).
 struct ExportRequest {
@@ -75,7 +78,11 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
   juce::String statusMessage() const;
-  void setStatusMessage(const juce::String& message);
+  void setStatusMessage(const juce::String& message, Severity severity = Severity::Info);  // also appends non-empty text to the notice log
+  void setProgressMessage(const juce::String& message);  // the status line only, not the log: progress ticks would flood it
+  Severity statusSeverity() const;
+  NoticeLog& noticeLog() { return noticeLog_; }
+  chopfractal::render::MeterReading takeMeter() { return renderer_.meter().take(); }  // UI thread: the maximum since the last call
 
   std::atomic<bool> embedSource{false};
   std::atomic<double> manualBpm{120.0};
@@ -161,6 +168,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
+  void applyUserAudioDefaults();
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);
@@ -249,6 +257,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   juce::String exportName_;
   mutable juce::CriticalSection exportLock_;
   juce::String status_;
+  Severity statusSeverity_ = Severity::Info;
+  NoticeLog noticeLog_;
   mutable juce::CriticalSection statusLock_;
 
   JUCE_DECLARE_WEAK_REFERENCEABLE(ChopFractalProcessor)

@@ -2,13 +2,14 @@
 
 > Generated from `module.json` by `tools/gen_module_docs.py`. Edit the manifest, not this file.
 
-Module `preset_store` 0.1.0 (API 0.1, state schema 1).
+Module `preset_store` 0.1.0 (API 0.1, state schema 2).
 
 ## 1. What to copy
 
 Exact folders, in dependency order (minimum versions in parentheses):
 
 - `modules/chop_contracts/` (^0.1)
+- `modules/chop_roles_grammar/` (^0.1)
 - `modules/preset_store/` (this module)
 
 ## 2. Copy
@@ -25,6 +26,7 @@ or copy the folders by hand, keeping any `LICENSE`/`NOTICE` files. Do not use a 
 
 ```cmake
 add_subdirectory(modules/chop_contracts)
+add_subdirectory(modules/chop_roles_grammar)
 add_subdirectory(modules/preset_store)
 target_link_libraries(your_target PRIVATE chopfractal::preset_store)
 ```
@@ -33,13 +35,13 @@ Each module's `CMakeLists.txt` also configures standalone and pulls in its decla
 
 ## 4. Map your types at one adapter boundary
 
-Presets never contain a seed or a pattern; applying one changes settings only.
+A preset may carry a starting seed but never a pattern; applying one changes settings only.
 
 Optional adapters: Your app maps a Preset onto its own parameters and UI fields; this module never touches a host or filesystem.
 
 ## 5. State import and export
 
-This module stores state under module ID `preset_store` at schema version 1. Keep the module ID and schema version when moving saved projects, and keep its migration tests. Newer-than-supported state is rejected safely rather than guessed at. Compose payloads with `state_codec` (or your own container keyed by module ID + schema version).
+This module stores state under module ID `preset_store` at schema version 2. Keep the module ID and schema version when moving saved projects, and keep its migration tests. Newer-than-supported state is rejected safely rather than guessed at. Compose payloads with `state_codec` (or your own container keyed by module ID + schema version).
 
 ## 6. Minimal compile and usage example
 

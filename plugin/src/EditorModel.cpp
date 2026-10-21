@@ -4,7 +4,18 @@
 #include <chopfractal/plugin_ui_adapter/session_views.hpp>
 #include <cmath>
 
+#include <chopfractal/plugin_ui_adapter/status_text.hpp>
+
 namespace cf = chopfractal;
+
+namespace {
+// The label of a history node, or "#<id>" while it has none.
+juce::String nodeLabel(const cf::composition::ProjectSession& s, cf::history::NodeId id) {
+  for (const auto& n : s.history().listAll())
+    if (n.id == id) return n.label.empty() ? "#" + juce::String(static_cast<juce::int64>(id)) : juce::String(n.label);
+  return "#" + juce::String(static_cast<juce::int64>(id));
+}
+}  // namespace
 
 EditorModel::EditorModel(ChopFractalProcessor& processor) : proc_(processor) {
   proc_.withSession([this](cf::composition::ProjectSession& s) { extras_ = s.extras(); });  // an editor opened on a restored project starts from its extras
@@ -17,12 +28,17 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
   bool rebuilt = false;
   bool selectionChanged = false;
   cf::composition::ProjectExtras sessionExtras;
+  cf::history::NodeId pendingNow = cf::history::kNoNode, activeNow = cf::history::kNoNode;
+  juce::String pendingLabelNow;
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     juce::String sig;
     sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<juce::int64>(waveStart_) << "-" << static_cast<juce::int64>(waveEnd_) << "|" << static_cast<int>(s.history().size()) << "|"
         << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1) << "|"
         << (s.morphActive() ? juce::String(s.morphAmount(), 4) : juce::String("-")) << "|" << (s.displayPattern() != s.pattern() ? "p" : "-");
     sourceMissing_ = s.sourceMissing();
+    pendingNow = s.pendingActivationNode();
+    activeNow = s.history().active();
+    if (pendingNow != pendingNode_ && pendingNow != cf::history::kNoNode) pendingLabelNow = nodeLabel(s, pendingNow);
     sessionExtras = s.extras();
     evolveRunning_ = s.evolveRunning();
     evolve_ = s.evolveSettings();
@@ -97,6 +113,14 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     selectionChanged = selectionChanged || hitsBefore != selectedHits_.size() || chopsBefore != selectedChops_.size();
   });
 
+  if (pendingNow != pendingNode_) {  // a queued variation switch appeared, was replaced or took effect
+    const auto previous = pendingNode_;
+    const juce::String previousLabel = pendingLabel_;
+    pendingNode_ = pendingNow;
+    if (pendingNow != cf::history::kNoNode) pendingLabel_ = pendingLabelNow;
+    if (pendingNow == cf::history::kNoNode && previous != cf::history::kNoNode && activeNow == previous) setStatus("Switched to \"" + previousLabel + "\".");
+    emit(Change::Flags);
+  }
   if (!extrasPublished_ || !(sessionExtras == publishedExtras_)) {
     // A project load (or anything else that replaced the session's extras behind the panels' backs) re-syncs the widgets.
     extrasPublished_ = true;
@@ -115,7 +139,7 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
   const ExportStatus exportNow = proc_.exportStatus();
   const bool exporting = exportNow.state == ExportStatus::State::Running;
   if (exporting)  // the worker reports a fraction; the tick turns it into the status text
-    proc_.setStatusMessage("Exporting " + proc_.exportDisplayName() + ": " + juce::String(static_cast<int>(exportNow.fraction * 100.f)) + "%");
+    proc_.setProgressMessage("Exporting " + proc_.exportDisplayName() + ": " + juce::String(static_cast<int>(exportNow.fraction * 100.f)) + "%");
   if (!flagsPublished_ || publishedSourceMissing_ != sourceMissing_ || publishedEmbed_ != embed || publishedExport_ != exporting) {
     flagsPublished_ = true;
     publishedSourceMissing_ = sourceMissing_;
@@ -135,6 +159,18 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
 void EditorModel::select(cf::EventId id) {
   if (selected_ == id) return;
   selected_ = id;
+  emit(Change::Selection);
+}
+
+void EditorModel::selectOnly(cf::EventId id) {
+  if (!id.valid()) {
+    clearSelection();
+    return;
+  }
+  if (selected_ == id && selectedHits_.size() == 1 && selectedChops_.empty()) return;
+  selected_ = id;
+  selectedHits_.assign(1, id);
+  selectedChops_.clear();
   emit(Change::Selection);
 }
 
@@ -288,14 +324,16 @@ void EditorModel::setEditMode(bool on) {
 }
 
 juce::String EditorModel::statusLine() const {
-  juce::String line = proc_.statusMessage();
-  if (usedFallbackTempo()) line << (line.isEmpty() ? "" : "\n") << "Using local tempo: " << juce::String(manualBpm(), 1) << " BPM";
-  if (usedFallbackMeter()) line << "   |   Assuming 4/4";
-  return line;
+  return proc_.statusMessage();  // the tempo and meter fallbacks have their own readout (the status bar's sync box)
 }
 
-void EditorModel::setStatus(const juce::String& text) {
-  proc_.setStatusMessage(text);
+void EditorModel::setProgress(const juce::String& text) {
+  proc_.setProgressMessage(text);
+  emit(Change::Status);
+}
+
+void EditorModel::setStatus(const juce::String& text, Severity severity) {
+  proc_.setStatusMessage(text, severity);
   emit(Change::Status);
 }
 
@@ -303,6 +341,17 @@ void EditorModel::announceSelection() {
   setStatus(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " + juce::String(static_cast<int>(selectedHits_.size())) +
             " pattern hits selected. Zoom In subdivides selected hits.");
   emit(Change::Selection);
+}
+
+void EditorModel::setDropHover(bool on) {
+  if (dropHover_ == on) return;
+  dropHover_ = on;
+  emit(Change::Flags);
+}
+
+juce::String EditorModel::syncText(bool compact) const {
+  return juce::String(cf::ui::describeSync(activeBpm(), proc_.hostBeatsPerBar.load(), std::max(1, proc_.hostBeatUnit.load()), usedFallbackTempo(), usedFallbackMeter(),
+                                           proc_.hostPlaying.load(), compact));
 }
 
 chopfractal::ui::InspectorView EditorModel::inspector() {

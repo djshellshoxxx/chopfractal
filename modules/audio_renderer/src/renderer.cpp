@@ -971,6 +971,19 @@ struct Renderer::Impl {
     }
   }
 
+  OutputMeter meter;
+
+  // The public entry points call this: the block, then one pass over the finished output for the meter.
+  void processMetered(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames,
+                      const LiveInput& live, const AuxOutputs& aux) {
+    process(tb, params, in, out, nch, frames, live, aux);
+    if (frames <= 0 || nch < 1 || nch > 2 || !out || !out[0] || (nch == 2 && !out[1])) return;
+    int n = 0;
+    for (const Voice& v : voices)
+      if (v.active) ++n;
+    meter.push(out, nch, frames, n);
+  }
+
   void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames, const LiveInput& live,
                const AuxOutputs& aux) {
     if (frames <= 0 || nch < 1 || nch > 2 || !out || !out[0] || (nch == 2 && !out[1])) return;
@@ -1036,22 +1049,22 @@ std::uint64_t Renderer::appliedSwitchToken() const { return impl_->arm.applied()
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames) {
-  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{}, AuxOutputs{});
+  impl_->processMetered(transport, params, in, out, numChannels, frames, LiveInput{}, AuxOutputs{});
 }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames, const LiveInput& live) {
-  impl_->process(transport, params, in, out, numChannels, frames, live, AuxOutputs{});
+  impl_->processMetered(transport, params, in, out, numChannels, frames, live, AuxOutputs{});
 }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames, const AuxOutputs& aux) {
-  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{}, aux);
+  impl_->processMetered(transport, params, in, out, numChannels, frames, LiveInput{}, aux);
 }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames, const LiveInput& live, const AuxOutputs& aux) {
-  impl_->process(transport, params, in, out, numChannels, frames, live, aux);
+  impl_->processMetered(transport, params, in, out, numChannels, frames, live, aux);
 }
 
 Mailbox<PadBank>& Renderer::padMailbox() { return impl_->padBank; }
@@ -1084,6 +1097,8 @@ int Renderer::activeVoices() const {
 
 int Renderer::latencyFrames() const { return impl_->latency.load(std::memory_order_relaxed); }
 void Renderer::primeLimiter() { impl_->limiter.prime(); }
+
+OutputMeter& Renderer::meter() { return impl_->meter; }
 
 LimiterTelemetry& Renderer::limiterTelemetry() { return impl_->limiter.telemetry(); }
 

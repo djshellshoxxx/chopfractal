@@ -21,6 +21,7 @@ constexpr float kScrollBarW = 8.0f;
 
 PatternPanel::PatternPanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "PatternPanel"), playhead_(model) {
   setOpaque(true);
+  setWantsKeyboardFocus(true);
   setTitle("Pattern grid");
   addAndMakeVisible(playhead_);
 }
@@ -31,11 +32,16 @@ void PatternPanel::resized() {
 }
 
 void PatternPanel::setPlaying(bool on) {
-  if (on && !vblank_) vblank_ = std::make_unique<juce::VBlankAttachment>(this, [this] { playhead_.repaint(); });
-  if (!on && vblank_) {
+  playing_ = on;
+  if (on && !vblank_ && !cdl::reducedMotion()) vblank_ = std::make_unique<juce::VBlankAttachment>(this, [this] { playhead_.repaint(); });
+  if ((!on || cdl::reducedMotion()) && vblank_) {
     vblank_.reset();
     playhead_.repaint();
   }
+}
+
+void PatternPanel::refreshPlayhead() {
+  if (playing_ && cdl::reducedMotion()) playhead_.repaint();  // reduced motion: the 10 Hz editor timer instead of every frame
 }
 
 void PatternPanel::PlayheadLayer::paint(juce::Graphics& g) {

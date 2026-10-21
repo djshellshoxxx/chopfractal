@@ -9,6 +9,7 @@ class HistoryPanel : public EditorPanelBase {
   HistoryPanel(EditorModel&, EditorCommands&);
   void paint(juce::Graphics&) override;
   void mouseDown(const juce::MouseEvent&) override;
+  chopfractal::history::NodeId pendingNode() const { return model_.pendingNode(); }
   std::function<void(chopfractal::history::NodeId)> onNode;  // the node under a click (the drawer shows its details)
 
  private:

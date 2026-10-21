@@ -17,11 +17,11 @@ constexpr int kScrollBarH = 6;
 WavePanel::WavePanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "WavePanel") {
   setOpaque(true);
   setTitle("Source waveform");
-  setWantsKeyboardFocus(false);
+  setWantsKeyboardFocus(true);
 }
 
 void WavePanel::modelChanged(Change c) {
-  if (c == Change::View || c == Change::Selection || c == Change::Detect) repaint();
+  if (c == Change::View || c == Change::Selection || c == Change::Detect || c == Change::Flags) repaint();  // Flags: the drop highlight
 }
 
 cf::ui::ViewWindow WavePanel::window() const {
@@ -192,6 +192,15 @@ void WavePanel::paint(juce::Graphics& g) {
     g.fillRect(rectangle);
     g.setColour(editor_theme::accentBlue());
     g.drawRect(rectangle, 1);
+  }
+  if (model_.dropHover()) {  // a droppable file is over the editor
+    const auto& p = cdl::pal();
+    g.setColour(p.ok.withAlpha(0.14f));
+    g.fillRect(area);
+    g.setColour(p.ok);
+    g.drawRect(area, 2);
+    g.setFont(cdl::font(cdl::FontRole::Body, cdl::uiScale()));
+    g.drawText("Drop a WAV or AIFF to load it", area, juce::Justification::centred);
   }
   if (const auto thumb = scrollThumb(); !thumb.isEmpty()) {
     g.setColour(p.edge);

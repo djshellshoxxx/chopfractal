@@ -1,5 +1,9 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+// The JUCE checkout used for local builds deprecates AudioFormat::createWriterFor; the tests only write small fixtures with it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <algorithm>
 #include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
@@ -20,6 +24,7 @@
 
 #include "CdlTheme.h"
 #include "PluginEditor.h"
+#include "QuickStartTracker.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
 #include "shell_test_support.hpp"
@@ -810,6 +815,9 @@ CHOP_TEST(version_stamp_matches_VERSION_file) {
 int main() {
   // The editor remembers theme and size per user; keep the tests away from the real profile.
   cdl::setSettingsFileOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_ui.json"));
+  const auto quickStartFile = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_quickstart.json");
+  quickStartFile.deleteFile();  // every run starts with a fresh first-run checklist
+  QuickStartTracker::setFileOverride(quickStartFile);
   const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
@@ -817,6 +825,21 @@ int main() {
   if (const char* only = std::getenv("CHOP_TEST_FILTER")) {  // run just the cases whose name contains the text
     auto& cases = chop_test::registry();
     cases.erase(std::remove_if(cases.begin(), cases.end(), [only](const chop_test::Case& c) { return std::string(c.name).find(only) == std::string::npos; }), cases.end());
+  }
+  if (const char* skip = std::getenv("CHOP_TEST_SKIP")) {  // drop the cases whose name contains any of the comma separated texts (bisecting order-dependent failures)
+    auto& cases = chop_test::registry();
+    const std::string list(skip);
+    cases.erase(std::remove_if(cases.begin(), cases.end(), [&list](const chop_test::Case& c) {
+      std::size_t from = 0;
+      while (from <= list.size()) {
+        const auto comma = list.find(',', from);
+        const std::string part = list.substr(from, comma == std::string::npos ? std::string::npos : comma - from);
+        if (!part.empty() && std::string(c.name).find(part) != std::string::npos) return true;
+        if (comma == std::string::npos) break;
+        from = comma + 1;
+      }
+      return false;
+    }), cases.end());
   }
   const int rc = chop_test::runAll();
   gui.reset();
@@ -899,20 +922,20 @@ CHOP_TEST(editor_has_visible_play_and_stop_controls_in_the_header) {
   CHECK(!p.hostPlaying.load());
 }
 
-CHOP_TEST(status_area_preserves_long_messages_in_a_scrollable_text_control) {
+CHOP_TEST(status_bar_keeps_long_messages_on_one_elided_line_and_the_log_keeps_them_whole) {
   if (!haveDisplay()) return;
   ChopFractalProcessor p;
   const juce::String message = juce::String::repeatedString("A long status message. ", 200);
   p.setStatusMessage(message);
   ChopFractalEditor editor(p);
-  juce::TextEditor* status = findTextEditor(editor, "Status messages");
+  auto* status = findButton(editor, "Status messages");
   CHECK(status != nullptr);
   if (!status) return;
-  CHECK(status->isReadOnly());
-  CHECK(status->isMultiLine());
-  CHECK(status->getText().startsWith(message));
-  CHECK(status->getHeight() >= 20);
+  CHECK(status->getHeight() >= 16);
   CHECK(editor.getLocalBounds().contains(editor.getLocalArea(status, status->getLocalBounds())));
+  CHECK(editor.statusBar().displayedText().startsWith("A long status message."));
+  LogEntry last;
+  CHECK(p.noticeLog().latest(last) && last.text == message);
 }
 
 CHOP_TEST(drag_selection_selects_multiple_hits_without_changing_the_pattern_and_zoom_works) {

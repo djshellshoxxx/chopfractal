@@ -167,6 +167,13 @@ void EvolvePanel::showPreset(const cf::presets::Preset& p) {
   updating_ = false;
 }
 
+void EvolvePanel::setCadence(int everyIndex, double amount) {
+  updating_ = true;
+  every_.setSelectedId(std::max(0, std::min(4, everyIndex)) + 1, juce::dontSendNotification);
+  evolveAmount_.setValue(amount, juce::dontSendNotification);
+  updating_ = false;
+}
+
 void EvolvePanel::refreshSuggestions() {
   std::vector<juce::String> loops, roles;
   juce::String empty = model_.view().hasSource ? "Press Smart Setup to hear what the loop suggests." : "Load a loop first.";

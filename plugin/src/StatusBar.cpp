@@ -1,38 +1,117 @@
 #include "StatusBar.h"
 
+#include <chopfractal/plugin_ui_adapter/status_text.hpp>
+
 #include "BuildInfo.h"
 #include "CdlLookAndFeel.h"
 
-StatusBar::StatusBar(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "StatusBar") {
-  messages_.setTitle("Status messages");
-  messages_.setMultiLine(true, true);
-  messages_.setReadOnly(true);
-  messages_.setScrollbarsShown(true);
-  messages_.setCaretVisible(false);
-  messages_.setPopupMenuEnabled(true);
-  messages_.setBorder({2, 6, 2, 6});
-  messages_.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
-  messages_.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
-  messages_.setIndents(0, 0);
-  lookAndFeelChanged();
-  messages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");
-  addAndMakeVisible(messages_);
+namespace cf = chopfractal;
+
+void StatusBar::MessageButton::paintButton(juce::Graphics& g, bool over, bool) {
+  const auto& p = cdl::pal();
+  auto r = getLocalBounds();
+  if (over || hasKeyboardFocus(false)) {
+    g.setColour(p.sprayWash);
+    g.fillRect(r);
+  }
+  g.setColour(colour);
+  g.setFont(cdl::font(cdl::FontRole::Body, scale));
+  g.drawText(text, r.reduced(static_cast<int>(8 * scale), 0), juce::Justification::centredLeft, true);
+}
+
+StatusBar::StatusBar(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "StatusBar"), meter_(model) {
+  message_.setTitle("Status messages");
+  message_.setTooltip("Latest message, click to open the notice log with every warning and error of this session");
+  message_.onClick = [this] { showLog(); };
+  addAndMakeVisible(message_);
+  addAndMakeVisible(meter_);
+  voices_.setTooltip("Active voices, sounding or fading");
+  sync_.setTooltip("Following the host tempo and time signature");
+  addAndMakeVisible(voices_);
+  addAndMakeVisible(sync_);
+  palette_.setTitle("Command palette");
+  palette_.setTooltip("Search every action and parameter (Ctrl+K)");
+  palette_.onClick = [this] {
+    if (onPalette) onPalette();
+  };
+  addAndMakeVisible(palette_);
+  quickStart_.setTitle("Show quick start");
+  quickStart_.setTooltip("Show the first-run checklist");
+  quickStart_.onClick = [this] {
+    if (onQuickStart) onQuickStart();
+  };
+  addChildComponent(quickStart_);
   cancelExport_.setTitle("Cancel Export");
   cancelExport_.onClick = [this] { cmd_.cancelExport(); };
   addChildComponent(cancelExport_);
+  lookAndFeelChanged();
+  refreshReadouts();
+  updateMessage();
 }
 
-void StatusBar::lookAndFeelChanged() {
-  messages_.setColour(juce::TextEditor::backgroundColourId, cdl::pal().bg);
-  messages_.setColour(juce::TextEditor::textColourId, cdl::pal().ink);
-  messages_.applyFontToAllText(cdl::font(cdl::FontRole::Body, scale_));
+StatusBar::~StatusBar() {
+  if (box_ != nullptr) box_->dismiss();  // the popup is a child of the editor and must not outlive the panels it reads
+}
+
+void StatusBar::setScale(float s) {
+  scale_ = s;
+  message_.scale = s;
+  meter_.setScale(s);
+  voices_.setScale(s);
+  sync_.setScale(s);
+  resized();
+  repaint();
+}
+
+void StatusBar::lookAndFeelChanged() { updateMessage(); }
+
+void StatusBar::updateMessage() {
+  const juce::String line = model_.statusLine();
+  const int sev = static_cast<int>(model_.statusSeverity());
+  const juce::String prefix = juce::String(cf::ui::severityPrefix(sev));
+  const juce::String firstLine = line.upToFirstOccurrenceOf("\n", false, false);
+  const juce::String text = line.isEmpty() ? juce::String() : prefix + firstLine;
+  const auto& p = cdl::pal();
+  const juce::Colour colour = sev == 2 ? p.clip : sev == 1 ? p.warn : p.ink.withAlpha(0.8f);
+  if (text == shown_ && colour == message_.colour) return;
+  shown_ = text;
+  message_.text = text;
+  message_.colour = colour;
+  message_.setDescription(line);
+  message_.repaint();
 }
 
 void StatusBar::refreshReadouts() {
-  const juce::String now = juce::String(static_cast<juce::int64>(model_.seed())) + "|" + juce::String(model_.activeBpm(), 1) + "|" + (model_.usedFallbackTempo() ? "L" : "H");
-  if (now == lastReadout_) return;
-  lastReadout_ = now;
-  repaint(infoArea_);
+  const bool compact = getWidth() < 900;
+  if (compact != compact_) {
+    compact_ = compact;
+    resized();
+  }
+  sync_.setText(model_.syncText(compact_));
+  sync_.setTooltip(juce::String(cf::ui::syncTooltip(model_.activeBpm(), model_.usedFallbackTempo(), model_.usedFallbackMeter())));
+  voices_.setText(juce::String(cf::ui::voiceText(meter_.voices(), EditorModel::kMaxVoices)));
+  voices_.setTooltip("Active voices: " + juce::String(meter_.voices()) + " of " + juce::String(EditorModel::kMaxVoices) + ", sounding or fading");
+  const juce::String seed = juce::String(static_cast<juce::int64>(model_.seed()));
+  if (seed != lastSeed_) {
+    lastSeed_ = seed;
+    repaint(seedArea_);
+  }
+  updateMessage();
+}
+
+NoticeLogPanel* StatusBar::showLog() {
+  if (log_ != nullptr) {
+    log_->refresh();
+    return log_.getComponent();
+  }
+  auto content = std::make_unique<NoticeLogPanel>(cmd_.noticeLog());
+  log_ = content.get();
+  if (auto* parent = getParentComponent()) {
+    box_ = &juce::CallOutBox::launchAsynchronously(std::move(content), parent->getLocalArea(this, message_.getBounds()), parent);
+  } else {
+    return nullptr;
+  }
+  return log_.getComponent();
 }
 
 void StatusBar::paint(juce::Graphics& g) {
@@ -41,29 +120,22 @@ void StatusBar::paint(juce::Graphics& g) {
   g.fillRect(getLocalBounds());
   g.setColour(p.edge);
   g.fillRect(0, 0, getWidth(), 1);
-  if (infoArea_.isEmpty()) return;
-  auto r = infoArea_;
-  auto draw = [&](const juce::String& label, const juce::String& value, int width) {
-    auto cell = r.removeFromLeft(width);
+  if (!seedArea_.isEmpty()) {
     const auto lf = cdl::font(cdl::FontRole::Hint, scale_);
     const auto vf = cdl::font(cdl::FontRole::Value, scale_);
-    const int lw = juce::GlyphArrangement::getStringWidthInt(lf, label) + 4;
+    const int lw = juce::GlyphArrangement::getStringWidthInt(lf, "Seed") + 4;
     g.setFont(lf);
     g.setColour(p.inkMuted);
-    g.drawText(label, cell.withWidth(lw), juce::Justification::centredLeft, false);
+    g.drawText("Seed", seedArea_.withWidth(lw), juce::Justification::centredLeft, false);
     g.setFont(vf);
     g.setColour(p.ink);
-    g.drawText(value, cell.withTrimmedLeft(lw), juce::Justification::centredLeft, false);
-  };
-  draw("Seed", juce::String(static_cast<juce::int64>(model_.seed())), static_cast<int>(130 * scale_));
-  draw(model_.usedFallbackTempo() ? "Local" : "Host", juce::String(model_.activeBpm(), 1) + " BPM", static_cast<int>(130 * scale_));
-  // version string sits 1 px above the baseline; the sprayed tag is tilted 4 degrees
+    g.drawText(lastSeed_, seedArea_.withTrimmedLeft(lw), juce::Justification::centredLeft, true);
+  }
   g.setFont(cdl::font(cdl::FontRole::MonoXs, scale_));
   g.setColour(p.inkMuted);
-  const auto ver = juce::String("v") + cfbuild::kVersionNum;
-  g.drawText(ver, r.removeFromRight(static_cast<int>(60 * scale_)).translated(0, -1), juce::Justification::centredRight, false);
+  g.drawText(juce::String("v") + cfbuild::kVersionNum, versionArea_.withTrimmedRight(static_cast<int>(40 * scale_)), juce::Justification::centredRight, false);
   g.saveState();
-  const auto tagArea = r.removeFromRight(static_cast<int>(36 * scale_));
+  const auto tagArea = versionArea_.removeFromRight(static_cast<int>(36 * scale_));
   g.addTransform(juce::AffineTransform::rotation(-4.0f * juce::MathConstants<float>::pi / 180.0f, static_cast<float>(tagArea.getCentreX()), static_cast<float>(tagArea.getCentreY())));
   g.setFont(cdl::font(cdl::FontRole::Tag, scale_));
   g.setColour(p.spray);
@@ -72,10 +144,35 @@ void StatusBar::paint(juce::Graphics& g) {
 }
 
 void StatusBar::resized() {
-  auto area = getLocalBounds();
-  infoArea_ = area.removeFromRight(static_cast<int>(std::min(area.getWidth() / 2, static_cast<int>(420 * scale_))));
-  if (cancelExport_.isVisible()) cancelExport_.setBounds(area.removeFromRight(110).removeFromTop(20).reduced(2));
-  messages_.setBounds(area.withTrimmedTop(1));
+  auto area = getLocalBounds().withTrimmedTop(1);
+  auto w = [this](float v) { return static_cast<int>(v * scale_); };
+  versionArea_ = area.removeFromRight(w(96));
+  seedArea_ = area.removeFromRight(w(compact_ ? 84 : 104));
+  area.removeFromRight(w(6));
+  sync_.setBounds(area.removeFromRight(w(compact_ ? 158 : 292)));
+  area.removeFromRight(w(6));
+  voices_.setBounds(area.removeFromRight(w(46)));
+  area.removeFromRight(w(6));
+  meter_.setBounds(area.removeFromRight(w(128)).reduced(0, w(3)));
+  area.removeFromRight(w(6));
+  if (cancelExport_.isVisible()) {
+    auto b = area.removeFromRight(w(110));
+    cancelExport_.setBounds(b.withSizeKeepingCentre(b.getWidth(), std::min(b.getHeight(), w(20))));
+    area.removeFromRight(w(6));
+  }
+  palette_.setBounds(area.removeFromRight(w(24)).reduced(0, w(3)));
+  area.removeFromRight(w(6));
+  if (quickStart_.isVisible()) {
+    quickStart_.setBounds(area.removeFromRight(juce::GlyphArrangement::getStringWidthInt(cdl::font(cdl::FontRole::Button, scale_), quickStart_.getButtonText()) + w(26)).reduced(0, w(3)));
+    area.removeFromRight(w(6));
+  }
+  message_.setBounds(area);
+}
+
+void StatusBar::setQuickStartVisible(bool on) {
+  if (quickStart_.isVisible() == on) return;
+  quickStart_.setVisible(on);
+  resized();
 }
 
 void StatusBar::modelChanged(Change c) {
@@ -87,11 +184,5 @@ void StatusBar::modelChanged(Change c) {
     return;
   }
   if (c == Change::Seed) refreshReadouts();
-  if (c != Change::Status) return;
-  // Messages arrive from other threads' work too (file loading, Evolve, restore): show the line when it changes.
-  const juce::String line = model_.statusLine();
-  if (line == lastLine_) return;
-  lastLine_ = line;
-  messages_.setText(line, false);
-  messages_.moveCaretToTop(false);
+  if (c == Change::Status) updateMessage();
 }

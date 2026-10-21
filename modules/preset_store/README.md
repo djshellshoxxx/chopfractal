@@ -1,15 +1,15 @@
 # `preset_store` — Preset store
 
-Version 0.1.0 · API 0.1 · state schema 1 · C++17
+Version 0.1.0 · API 0.1 · state schema 2 · C++17
 
 > Generated from `module.json` by `tools/gen_module_docs.py`. Edit the manifest, not this file.
 
-Versioned preset records for generation settings, Fractal Rhythm motif and Evolve cadence: validation, bounded binary (de)serialization with a checksum, six factory presets, and safe file-name derivation. Pure data: files and folders are handled by the plugin shell.
+Versioned preset records for generation settings, Fractal Rhythm motif and Evolve cadence: validation, bounded binary (de)serialization with a checksum, seventeen break-style factory presets (engine v2 profiles, stutter edit styles), and safe file-name derivation. Pure data: files and folders are handled by the plugin shell.
 
 ## Public API
 
 - `validate(Preset)`, `serialize(Preset)`, `deserialize(bytes)`
-- `factoryPresets()` (6 validated presets)
+- `factoryPresets()` (17 validated break-style presets), `factoryCategories()`
 - `fileNameFor(name)` -> sanitized `.cfpreset` name
 
 Public headers:
@@ -24,11 +24,12 @@ Public headers:
 ## Limits
 
 - Name 1..48 characters; motif 2..8 cells of x, a, .
-- Files are small (under 512 bytes); deserialize rejects truncation, trailing bytes, bad magic or checksum, unknown versions
+- Files are small (a few KiB, at most 64 KiB); deserialize rejects truncation, trailing bytes, bad magic or checksum, unknown versions
 
 ## Dependencies
 
 - `chop_contracts` ^0.1 — byte codec, Result/Status
+- `chop_roles_grammar` ^0.1 — rule templates carried by a preset
 
 ## Build and test
 

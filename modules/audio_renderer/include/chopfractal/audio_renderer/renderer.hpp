@@ -15,6 +15,7 @@
 // non-RT producer thread.
 #include <chopfractal/audio_renderer/limiter.hpp>
 #include <chopfractal/audio_renderer/mailbox.hpp>
+#include <chopfractal/audio_renderer/meter.hpp>
 #include <chopfractal/audio_renderer/pads.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/result.hpp>
@@ -202,6 +203,8 @@ class Renderer {
   int latencyFrames() const;
   void primeLimiter();  // non-RT: start the limiter as if it had been running on silence (offline renders)
   LimiterTelemetry& limiterTelemetry();
+  // Peak, clip count and voices of the output process() produced (the finished buffer, after the limiter), for the UI.
+  OutputMeter& meter();
   std::uint64_t droppedTriggers() const;
 
  private:

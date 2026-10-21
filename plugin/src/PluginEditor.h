@@ -9,9 +9,12 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "CdlLookAndFeel.h"
+#include "CommandPalette.h"
+#include "CommandRegistry.h"
 #include "ControlsPanel.h"
 #include "DrawerHost.h"
 #include "EditorCommands.h"
+#include "EditorKeys.h"
 #include "EditorModel.h"
 #include "EditorTheme.h"
 #include "FeaturePanel.h"
@@ -22,9 +25,13 @@
 #include "InspectorPanel.h"
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
+#include "ExportDrawer.h"
+#include "PresetBrowser.h"
 #include "PerformDrawers.h"
 #include "RulesPanel.h"
 #include "PluginProcessor.h"
+#include "QuickStartCard.h"
+#include "QuickStartTracker.h"
 #include "SettingsDrawer.h"
 #include "ShellChrome.h"
 #include "ShellLayout.h"
@@ -40,6 +47,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::String getTooltip() override;
   bool isInterestedInFileDrag(const juce::StringArray& files) override;
   void filesDropped(const juce::StringArray& files, int x, int y) override;
+  void fileDragEnter(const juce::StringArray& files, int x, int y) override;
+  void fileDragExit(const juce::StringArray& files) override;
   void paint(juce::Graphics& g) override;
   void resized() override;
   bool keyPressed(const juce::KeyPress&) override;
@@ -65,19 +74,39 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   cdl::ThemeId theme() const { return cdl::currentTheme(); }
   void setAdvanced(bool);
   bool advanced() const { return advanced_; }
+  void setUiScalePercent(int percent);  // 90, 100, 110 or 125: scales the whole shell, capped so the window still fits it
+  int uiScalePercent() const { return uiScalePercent_; }
+  void setReducedMotion(bool on);
+  SettingsDrawer& settingsDrawer() { return settings_; }
   const shell::ShellRects& shellRects() const { return rects_; }
 
   // Public so tests can drive them without modal dialogs.
   void doReroll() { features_.reroll(); }
-  void applyPreset(const chopfractal::presets::Preset& p) {
-    features_.applyPreset(p);
+  bool applyPreset(const chopfractal::presets::Preset& p, bool generateAfter = false) {
+    const bool ok = features_.applyPreset(p, generateAfter);
     macro_.resetDriftTicks();
+    return ok;
   }
   chopfractal::presets::Preset currentPreset(const juce::String& name) const { return features_.currentPreset(name); }
-  void savePresetNamed(const juce::String& name, bool overwrite) { features_.savePresetNamed(name, overwrite); }
-  void deleteSelectedPreset() { features_.deleteSelectedPreset(); }
-  void reloadPresets() { features_.reloadPresets(); }
+  bool savePresetNamed(const juce::String& name, bool overwrite) { return presets_.saveCurrent(name, overwrite); }
+  bool deleteSelectedPreset() { return presets_.deleteSelected(); }
+  void reloadPresets() { presets_.reload(); }
+  PresetBrowser& presetBrowser() { return presets_; }
+  ExportDrawer& exportDrawer() { return export_; }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
+  // ---- F19 / F04 ----
+  void openPalette() { palette_.open(); }
+  CommandPalette& palette() { return palette_; }
+  CommandRegistry& registry() { return registry_; }
+  QuickStartTracker& quickStart() { return quickStartTracker_; }
+  QuickStartCard& quickStartCard() { return quickCard_; }
+  void showQuickStart() { quickCard_.showNow(); }
+  void resetQuickStart();
+  void showShortcuts();
+  void auditionSelected();   // Enter: the chop of the selected hit
+  void toggleEvolve();
+  void observeQuickStart();  // the 10 Hz tick: marks steps that really happened
+  void refreshAccessibility();
   // Tests only: stop the 10 Hz refresh and run one tick on demand, so a replay does not depend on the wall clock.
   void stopRefreshTimerForTesting() { stopTimer(); }
   void refreshForTesting() { timerCallback(); }
@@ -85,6 +114,12 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
   const MacroStrip& macroStrip() const { return macro_; }
+  StatusBar& statusBar() { return status_; }
+  WavePanel& wavePanel() { return wave_; }
+  PatternPanel& patternPanel() { return pattern_; }
+  OrbitPanel& orbitPanel() { return orbit_; }
+  TopBar& topBar() { return topBar_; }
+  HistoryPanel& historyPanel() { return history_; }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
   chopfractal::ui::LaneGeometry laneGeometry() const { return model_.lanes(); }
   bool waveZoomed() const { return model_.waveZoomed(); }
@@ -119,6 +154,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   HistoryPanel history_;
   HistoryDrawer historyDrawer_;
   OrbitPanel orbit_;
+  PresetBrowser presets_;
+  ExportDrawer export_;
   juce::Viewport legacyView_;
   InspectorPanel inspector_;
   FxRackPanel fxRack_;
@@ -126,9 +163,20 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   SettingsDrawer settings_;
   DrawerHost drawer_;
   PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model
+  QuickStartTracker quickStartTracker_;
+  CommandRegistry registry_;
+  QuickStartCard quickCard_;
+  CommandPalette palette_;
+  juce::Component::SafePointer<juce::CallOutBox> shortcutsBox_;
+  bool spaceHintShown_ = false;
+  bool exportSeenDone_ = false;
+  std::uint64_t announcedRevision_ = 0;
+  chopfractal::EventId announcedHit_;
+  bool announceSelection_ = false;
 
   shell::ShellRects rects_;
   bool advanced_ = false;
+  int uiScalePercent_ = 100;
   bool lastPlaying_ = false;
   int stableSizeTicks_ = 0;
   juce::Point<int> savedSize_;

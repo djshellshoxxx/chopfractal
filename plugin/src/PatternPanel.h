@@ -24,6 +24,8 @@ class PatternPanel : public EditorPanelBase {
   void resized() override;
   // Starts / stops the per-frame playhead refresh (VBlank); no repaint source exists while the transport is stopped.
   void setPlaying(bool on);
+  void refreshPlayhead();  // called by the editor timer; repaints only in reduced-motion mode
+  bool playing() const { return playing_; }
 
   // Set by the editor: a double-click on a hit and the menu's "Edit hit..." open the inspector for it.
   std::function<void(chopfractal::EventId)> onEditHit;
@@ -48,6 +50,7 @@ class PatternPanel : public EditorPanelBase {
   };
   PlayheadLayer playhead_;
   std::unique_ptr<juce::VBlankAttachment> vblank_;
+  bool playing_ = false;
 
   enum class DragMode { None, Move, Resize };
 

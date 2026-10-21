@@ -23,6 +23,8 @@ juce::Font font(FontRole role, float scale = 1.0f);
 bool brandFontsLoaded();
 // The shell scale (window size over the 1100 x 720 design size). Widgets that the look and feel sizes by itself (buttons, combo
 // boxes, menus, tooltips) use it; panels that paint their own text pass their scale to font() instead.
+bool reducedMotion();
+void setReducedMotion(bool);
 float uiScale();
 void setUiScale(float);
 
@@ -31,6 +33,12 @@ struct UserSettings {
   ThemeId theme = ThemeId::Night;
   int width = 1100, height = 720;
   bool advanced = false;
+  int uiScalePercent = 100;       // interface scale on top of the window-driven scale: 90, 100, 110 or 125
+  bool reducedMotion = false;     // no per-frame playhead or meter animation
+  bool audioDefaultsCustom = false;  // false: new instances start with the factory limiter and level-match settings
+  bool defaultLimiter = false;       // used by a new instance when audioDefaultsCustom is true
+  bool defaultLevelMatch = false;
+  float defaultCeilingDb = -1.0f;
 };
 UserSettings loadUserSettings();
 void saveUserSettings(const UserSettings&);

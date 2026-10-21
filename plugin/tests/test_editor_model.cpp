@@ -163,20 +163,25 @@ CHOP_TEST(model_clears_the_smart_setup_suggestion_when_the_views_are_rebuilt) {
   CHECK(!m.haveSetup());
 }
 
-CHOP_TEST(model_status_line_adds_the_host_fallback_hints) {
+CHOP_TEST(model_status_line_is_the_message_and_the_sync_text_carries_the_fallbacks) {
   ChopFractalProcessor p;
   EditorModel m(p);
   p.setStatusMessage("Loaded.");
   p.usedFallbackTempo = true;
   p.usedFallbackMeter = true;
-  p.manualBpm = 97.0;
-  CHECK(m.statusLine() == "Loaded.\nUsing local tempo: 97.0 BPM   |   Assuming 4/4");
+  p.activeBpm = 97.0;
+  p.hostBeatsPerBar = 4;
+  p.hostBeatUnit = 4;
+  CHECK(m.statusLine() == "Loaded.");  // the tempo and meter hints moved to the sync box
+  CHECK(m.syncText(false) == "97.0 BPM (manual)  4/4 (assumed)  Stopped");
+  CHECK(m.syncText(true) == "97.0 | 4/4 | Stopped");
   p.usedFallbackTempo = false;
   p.usedFallbackMeter = false;
-  CHECK(m.statusLine() == "Loaded.");
+  p.hostBeatsPerBar = 3;
+  p.hostPlaying = true;
+  CHECK(m.syncText(false) == "97.0 BPM  3/4  Playing");
   p.setStatusMessage("");
-  p.usedFallbackTempo = true;
-  CHECK(m.statusLine() == "Using local tempo: 97.0 BPM");
+  CHECK(m.statusLine().isEmpty());
 }
 
 CHOP_TEST(commands_report_refusals_with_the_existing_strings) {
