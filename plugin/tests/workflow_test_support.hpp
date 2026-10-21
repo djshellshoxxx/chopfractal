@@ -9,6 +9,19 @@
 #include "shell_test_support.hpp"
 
 namespace shelltest {
+inline juce::Slider* findSlider(juce::Component& root, const juce::String& title) {
+  juce::Slider* found = nullptr;
+  int matches = 0;
+  forEachControl(root, [&](juce::Component& c) {
+    if (auto* b = dynamic_cast<juce::Slider*>(&c))
+      if (b->getTitle() == title) {
+        found = b;
+        ++matches;
+      }
+  });
+  CHECK(matches <= 1);
+  return found;
+}
 // Points every per-user file at a fresh temp folder for the life of the object.
 struct IsolatedUser {
   juce::File root;

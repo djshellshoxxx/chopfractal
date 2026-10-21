@@ -34,6 +34,7 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
   CHECK(editor != nullptr);
   if (!editor) return;
+  editor->setSize(1100, 720);  // the saved size is per user; the click coordinates below need the drawer fully in view
   editor->setVisible(true);
   pump(300);
   auto* ed = dynamic_cast<ChopFractalEditor*>(editor.get());

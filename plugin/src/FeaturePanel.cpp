@@ -6,7 +6,7 @@
 namespace cf = chopfractal;
 
 FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "FeaturePanel") {
-  for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_, &acceptRoles_, &useTempo_, &fractal_, &keep_, &exportWav_, &exportKit_}) {
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_, &acceptRoles_, &useTempo_, &fractal_, &keep_}) {
     addAndMakeVisible(*b);
     b->setTitle(b->getButtonText());
   }
@@ -17,8 +17,6 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   useTempo_.onClick = [this] { cmd_.useTempo(); };
   fractal_.onClick = [this] { cmd_.applyFractal(fractalUi()); };
   keep_.onClick = [this] { cmd_.keepEvolved(); };
-  exportWav_.onClick = [this] { cmd_.exportWav(exportUi()); };
-  exportKit_.onClick = [this] { cmd_.exportKit(); };
 
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
   detectMode_.setSelectedId(model_.detectMode(), juce::dontSendNotification);
@@ -82,29 +80,6 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   };
   addAndMakeVisible(evolveAmount_);
 
-  fmtLabel_.setJustificationType(juce::Justification::centredRight);
-  loopsLabel_.setJustificationType(juce::Justification::centredRight);
-  addAndMakeVisible(fmtLabel_);
-  addAndMakeVisible(loopsLabel_);
-  exportFormat_.addItemList({"16-bit", "24-bit", "32-bit float"}, 1);
-  exportFormat_.setSelectedId(model_.extras().exportUi.formatIndex + 1, juce::dontSendNotification);
-  exportFormat_.setTitle("Export format");
-  exportRate_.addItemList({"44.1 kHz", "48 kHz", "88.2 kHz", "96 kHz"}, 1);
-  exportRate_.setSelectedId(model_.extras().exportUi.rateIndex + 1, juce::dontSendNotification);
-  exportRate_.setTitle("Export sample rate");
-  exportLoops_.addItemList({"1", "2", "4", "8", "16"}, 1);
-  exportLoops_.setSelectedId(model_.extras().exportUi.loopsIndex + 1, juce::dontSendNotification);
-  exportLoops_.setTitle("Export loops");
-  for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_})
-    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi.formatIndex = exportFormat_.getSelectedId() - 1;
-      e.exportUi.rateIndex = exportRate_.getSelectedId() - 1;
-      e.exportUi.loopsIndex = exportLoops_.getSelectedId() - 1; }); };
-  for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
-
-  dragMidi_.setTooltip("Drag the current pattern into your DAW as a MIDI file");
-  dragWav_.setTooltip("Drag the current pattern into your DAW as a WAV file");
-  addAndMakeVisible(dragMidi_);
-  addAndMakeVisible(dragWav_);
   // Dropped files are not auto-deleted: DAWs commonly link them in place, so removing them would break projects.
 }
 
@@ -118,8 +93,6 @@ FractalUi FeaturePanel::fractalUi() const {
 }
 
 EvolveUi FeaturePanel::evolveUi() const { return {evolve_.getToggleState(), every_.getSelectedId() - 1, evolveAmount_.getValue()}; }
-
-ExportUi FeaturePanel::exportUi() const { return {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }
 
 void FeaturePanel::setEvolveEnabled(bool on) {
   evolve_.setToggleState(on, juce::dontSendNotification);
@@ -151,7 +124,6 @@ void FeaturePanel::modelChanged(Change c) {
       const auto& v = model_.view();
       for (juce::Button* b : std::initializer_list<juce::Button*>{&smart_}) b->setEnabled(v.hasSource);
       fractal_.setEnabled(v.hasPattern);
-      updateExportButtons();
       break;
     }
     case Change::Extras: {  // a project was restored: show its saved choices without firing the widgets' own handlers
@@ -160,9 +132,6 @@ void FeaturePanel::modelChanged(Change c) {
       if (depth_.getSelectedId() != e.fractalDepth) depth_.setSelectedId(e.fractalDepth, juce::dontSendNotification);
       if (role_.getSelectedId() != e.roleIndex + 1) role_.setSelectedId(e.roleIndex + 1, juce::dontSendNotification);
       if (detectMode_.getSelectedId() != e.detectMode + 1) detectMode_.setSelectedId(e.detectMode + 1, juce::dontSendNotification);
-      if (exportFormat_.getSelectedId() != e.exportUi.formatIndex + 1) exportFormat_.setSelectedId(e.exportUi.formatIndex + 1, juce::dontSendNotification);
-      if (exportRate_.getSelectedId() != e.exportUi.rateIndex + 1) exportRate_.setSelectedId(e.exportUi.rateIndex + 1, juce::dontSendNotification);
-      if (exportLoops_.getSelectedId() != e.exportUi.loopsIndex + 1) exportLoops_.setSelectedId(e.exportUi.loopsIndex + 1, juce::dontSendNotification);
       break;
     }
     case Change::Setup:
@@ -171,19 +140,10 @@ void FeaturePanel::modelChanged(Change c) {
       break;
     case Change::Flags:
       locate_.setEnabled(model_.sourceMissing());
-      updateExportButtons();
       break;
     default:
       break;
   }
-}
-
-void FeaturePanel::updateExportButtons() {
-  const auto& v = model_.view();
-  const bool canExport = v.hasPattern && !model_.sourceMissing();  // exports render the source audio
-  for (juce::Button* b : std::initializer_list<juce::Button*>{&exportWav_, &exportKit_}) b->setEnabled(canExport && !model_.exportRunning());  // one export at a time
-  dragMidi_.setEnabled(canExport);
-  dragWav_.setEnabled(canExport);
 }
 
 void FeaturePanel::resized() {
@@ -201,15 +161,7 @@ void FeaturePanel::resized() {
   every_.setBounds(featB.removeFromLeft(90).reduced(2));
   evolveAmount_.setBounds(featB.removeFromLeft(190));
   keep_.setBounds(featB.removeFromLeft(80).reduced(2));
-  featB.removeFromLeft(20);
-  fmtLabel_.setBounds(featB.removeFromLeft(50));
-  exportFormat_.setBounds(featB.removeFromLeft(110).reduced(2));
-  exportRate_.setBounds(featB.removeFromLeft(90).reduced(2));
-  loopsLabel_.setBounds(featB.removeFromLeft(50));
-  exportLoops_.setBounds(featB.removeFromLeft(56).reduced(2));
   auto featC = area.removeFromTop(26);
-  exportWav_.setBounds(featC.removeFromLeft(110).reduced(2));
-  exportKit_.setBounds(featC.removeFromLeft(110).reduced(2));
   locate_.setBounds(featC.removeFromLeft(110).reduced(2));
   detectMode_.setBounds(featC.removeFromLeft(190).reduced(2));
   featC.removeFromLeft(16);
@@ -217,9 +169,6 @@ void FeaturePanel::resized() {
   auto featD = area.removeFromTop(26);
   role_.setBounds(featD.removeFromLeft(110).reduced(2));
   setRole_.setBounds(featD.removeFromLeft(80).reduced(2));
-  featD.removeFromLeft(16);
-  dragMidi_.setBounds(featD.removeFromLeft(100).reduced(2));
-  dragWav_.setBounds(featD.removeFromLeft(100).reduced(2));
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -27,7 +27,8 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       features_(model_, commands_),
       history_(model_, commands_),
       orbit_(model_, commands_),
-      presets_(model_, commands_) {
+      presets_(model_, commands_),
+      export_(model_, commands_) {
   const auto saved = cdl::loadUserSettings();
   cdl::setCurrentTheme(saved.theme);
   advanced_ = saved.advanced;
@@ -62,6 +63,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   };
   presets_.onCapture = [this](const juce::String& name) { return features_.currentPreset(name); };
   presets_.onApplied = [this](const juce::String& name) { topBar_.setPresetName(name); };
+  registerDrawer("export", "Export", export_, 400);
   registerDrawer("tools", "Tools", legacyView_, 420);
   registerDrawer("settings", "Settings", settings_, 300, false);
   settings_.showTheme(cdl::currentTheme());
@@ -150,6 +152,7 @@ void ChopFractalEditor::timerCallback() {
   lastPlaying_ = playing;
   topBar_.syncTransport();
   status_.refreshReadouts();
+  export_.tick();
   // A resize is saved once the size has been stable for a moment, not on every drag step.
   const juce::Point<int> size(getWidth(), getHeight());
   if (size != savedSize_) {

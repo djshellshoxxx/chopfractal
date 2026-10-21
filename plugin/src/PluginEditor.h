@@ -19,6 +19,7 @@
 #include "MacroStrip.h"
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
+#include "ExportDrawer.h"
 #include "PresetBrowser.h"
 #include "PluginProcessor.h"
 #include "SettingsDrawer.h"
@@ -69,6 +70,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   bool deleteSelectedPreset() { return presets_.deleteSelected(); }
   void reloadPresets() { presets_.reload(); }
   PresetBrowser& presetBrowser() { return presets_; }
+  ExportDrawer& exportDrawer() { return export_; }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
@@ -104,6 +106,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   HistoryPanel history_;
   OrbitPanel orbit_;
   PresetBrowser presets_;
+  ExportDrawer export_;
   juce::Viewport legacyView_;
   SettingsDrawer settings_;
   DrawerHost drawer_;

@@ -5,6 +5,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <chopfractal/composition/project_session.hpp>
+#include <chopfractal/plugin_ui_adapter/session_views.hpp>
 #include <chopfractal/preset_store/presets.hpp>
 #include <cstdint>
 #include <functional>
@@ -12,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "DragOut.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
 
@@ -30,6 +32,16 @@ struct ExportUi {
   int formatIndex = 1;      // 16-bit, 24-bit, 32-bit float
   int rateIndex = 1;        // 44.1, 48, 88.2, 96 kHz
   int loopsIndex = 1;       // {1, 2, 4, 8, 16}
+  bool normalize = false;   // scale the render so its peak sits at -1 dB (not saved with the project)
+};
+// What the arrangement part of the export drawer shows, read under the session lock.
+struct ArrangementState {
+  chopfractal::composition::Arrangement arrangement;
+  std::vector<chopfractal::composition::ArrangementRow> rows;
+  std::vector<std::pair<std::uint32_t, std::string>> scenes;  // id and "Scene 3 Verse" in list order
+  bool hasSource = false, running = false;
+  int jobSection = 0, jobSections = 0;
+  double jobFraction = 0.0;
 };
 enum class DetectChoice { TransientsReplace = 1, TransientsKeepMine = 2, Grid8 = 3, Grid16 = 4 };  // the combo box ids
 
@@ -78,6 +90,24 @@ class EditorCommands {
   void keepEvolved();
   void exportWav(const ExportUi&);
   void exportKit();
+  // The export drawer's settings live in the project (extras.exportUi): format, rate, loops and the MIDI options.
+  ExportUi exportUi() const;
+  void setExportUi(const ExportUi&);
+  void setMidiSettings(const chopfractal::composition::MidiExportSettings&);
+  chopfractal::composition::KitOptions kitOptions() const;               // MIDI settings, tempo and the loop count for the kit
+  chopfractal::composition::MidiExportOptions midiOptions() const;      // the same for a dragged MIDI file
+  chopfractal::composition::ExportWavOptions wavOptions(const ExportUi&) const;
+  std::unique_ptr<dragout::DragFileSet> makeKitDragSet();               // slice WAVs plus the MIDI file, for Drag Kit
+
+  // ---- arrangement export (F18) ----
+  ArrangementState arrangementState();
+  bool editArrangement(const std::function<void(chopfractal::composition::Arrangement&)>& edit);  // false (and a status line) when refused
+  void arrangementFromChain();
+  void autoFillArrangement();
+  void exportArrangement();                                  // folder chooser, then startArrangementExport
+  chopfractal::Status startArrangementExport(const std::string& folder);
+  void cancelArrangement();
+  bool pollArrangement();                                    // 10 Hz: reports a finished job once; true while one runs
   chopfractal::Status startExport(const ExportRequest&);  // the FileChooser flows end here (public so tests can skip the dialog)
   void cancelExport();
   juce::File makeDragFile(bool wav, const ExportUi&);
@@ -119,4 +149,5 @@ class EditorCommands {
     chopfractal::roles::RuleSet rules;
   } presetUndo_;
   void setParamPlain(const std::string& id, double plain);
+  bool normalizeExport_ = false;
 };
