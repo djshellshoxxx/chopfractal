@@ -48,6 +48,7 @@ class MigrationRegistry {
   void add(const std::string& moduleId, std::uint32_t fromVersion, MigrationStep step);
   // Newer-than-target payloads are rejected (UnsupportedVersion); a missing step is NotFound.
   Result<ModulePayload> migrate(const std::string& moduleId, ModulePayload payload, std::uint32_t targetVersion) const;
+  std::size_t size() const { return steps_.size(); }  // number of registered steps
 
  private:
   std::map<std::pair<std::string, std::uint32_t>, MigrationStep> steps_;

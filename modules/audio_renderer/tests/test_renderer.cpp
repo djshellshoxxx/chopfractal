@@ -576,6 +576,34 @@ CHOP_TEST(offline_render_is_deterministic_and_validates_settings) {
   CHECK(!renderOffline(nullptr, OfflineSettings{}).ok());
 }
 
+CHOP_TEST(render_offline_reports_progress_and_can_be_cancelled) {
+  auto pb = playback(makeSource(1, 48000, 24000, ramp), {ev(1, 24000, 0, 960), ev(2, 12000, 1000, 480)});
+  OfflineSettings st;
+  st.cycles = 8;
+  st.blockSize = 64;  // many blocks, so the 64-block callback fires several times
+  std::vector<double> seen;
+  auto with = renderOffline(pb, st, [&](double f) {
+    seen.push_back(f);
+    return true;
+  });
+  CHECK(with.ok());
+  CHECK(seen.size() >= 3);
+  CHECK(std::is_sorted(seen.begin(), seen.end()));
+  CHECK(!seen.empty() && seen.back() == 1.0);
+  for (double f : seen) CHECK(f >= 0.0 && f <= 1.0);
+  // The callback never changes the output.
+  auto without = renderOffline(pb, st);
+  CHECK(without.ok() && with.value() == without.value());
+  // Returning false at the second call aborts with Cancelled.
+  int calls = 0;
+  auto cancelled = renderOffline(pb, st, [&](double) { return ++calls < 2; });
+  CHECK(!cancelled.ok() && cancelled.error().code == ErrorCode::Cancelled);
+  CHECK_EQ(calls, 2);
+  // Returning false from the final call also cancels (the caller asked to stop).
+  auto last = renderOffline(pb, OfflineSettings{}, [](double f) { return f < 1.0; });
+  CHECK(!last.ok() && last.error().code == ErrorCode::Cancelled);
+}
+
 // ---- event effects: filter, tape glide, crunch ----
 namespace {
 double rms(const std::vector<float>& v, std::size_t a, std::size_t b) {

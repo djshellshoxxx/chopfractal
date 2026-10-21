@@ -662,6 +662,38 @@ CHOP_TEST(session_undo_redo_restores_exact_pattern_and_seed) {
   CHECK(!session.hasPattern() && !session.hasSnapshot(0));
 }
 
+CHOP_TEST(pattern_session_slots_can_be_read_and_restored) {
+  const ChopSnapshot c = makeChops();
+  PatternSession session;
+  CHECK(session.slot(0) == nullptr && session.slot(1) == nullptr && session.slot(2) == nullptr);
+  Settings s = baseSettings();
+  s.seed = 10;
+  CHECK(session.commit(generate(c, s)).ok());
+  CHECK(session.storeSnapshot(0).ok());
+  CHECK(session.slot(0) != nullptr && session.slot(1) == nullptr);
+  CHECK(serialize(*session.slot(0)) == serialize(session.current()));
+  auto slotA = session.slot(0);
+  MutateOptions o;
+  o.seed = 20;
+  o.amount = 1.0;
+  CHECK(session.commit(mutate(session.current(), c, o)).ok());
+  CHECK(session.storeSnapshot(1).ok());
+  auto slotB = session.slot(1);
+  const auto bBytes = serialize(*slotB);
+  // restore() clears the slots; restoreSlots() puts them back without touching the pattern or undo history.
+  session.restore(Pattern(session.current()));
+  CHECK(!session.hasSnapshot(0) && !session.hasSnapshot(1));
+  const auto currentBefore = serialize(session.current());
+  session.restoreSlots({slotA, slotB});
+  CHECK(session.hasSnapshot(0) && session.hasSnapshot(1));
+  CHECK(serialize(session.current()) == currentBefore);
+  CHECK(!session.canUndo());
+  CHECK(session.recallSnapshot(1).ok());
+  CHECK(serialize(session.current()) == bBytes);
+  session.restoreSlots({nullptr, slotB});
+  CHECK(!session.hasSnapshot(0) && session.hasSnapshot(1));
+}
+
 CHOP_TEST(state_roundtrip_and_corruption_never_crash_or_slip_through) {
   const ChopSnapshot c = makeChops();
   Settings s = baseSettings();

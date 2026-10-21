@@ -17,6 +17,7 @@
 #include <chopfractal/chop_contracts/time.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -102,7 +103,12 @@ struct OfflineSettings {
   double tailSeconds = 0.5; // ring-out after the last cycle, without starting new events
   RenderParams params;
 };
-// Renders through the same Renderer::process path as live playback. Output is planar stereo.
-Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& settings);
+// Progress callback: receives the fraction done in [0, 1], non-decreasing. Returning false aborts the render.
+using ProgressFn = std::function<bool(double)>;
+// Renders through the same Renderer::process path as live playback. Output is planar stereo. `progress` (optional) is
+// called after every 64th block and once at the end with 1.0; returning false aborts with ErrorCode::Cancelled. The
+// callback never changes the rendered samples.
+Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& settings,
+                                                      const ProgressFn& progress = {});
 
 }  // namespace chopfractal::render

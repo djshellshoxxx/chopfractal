@@ -575,7 +575,7 @@ int Renderer::activeVoices() const {
 
 std::uint64_t Renderer::droppedTriggers() const { return impl_->dropped; }
 
-Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& s) {
+Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& s, const ProgressFn& progress) {
   if (!playback || !playback->source) return makeError(ErrorCode::InvalidArgument, "no playback to render");
   if (!(s.sampleRate >= 8000.0 && s.sampleRate <= 384000.0)) return makeError(ErrorCode::OutOfRange, "invalid sample rate");
   if (!(s.bpm >= kMinBpm && s.bpm <= kMaxBpm)) return makeError(ErrorCode::OutOfRange, "invalid tempo");
@@ -599,8 +599,11 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   std::vector<float> silence(static_cast<std::size_t>(s.blockSize), 0.f);
   // Two phases so that no block ever straddles the end of the pattern: the output must not depend on the
   // block size. Phase 1 schedules events; phase 2 lets sounding voices ring out without starting new ones.
+  const std::int64_t totalBlocks = (mainFrames + s.blockSize - 1) / s.blockSize + (tailFrames + s.blockSize - 1) / s.blockSize;
+  std::int64_t blocksDone = 0;
+  bool aborted = false;
   auto renderRange = [&](std::int64_t from, std::int64_t to, bool schedule) {
-    for (std::int64_t pos = from; pos < to; pos += s.blockSize) {
+    for (std::int64_t pos = from; pos < to && !aborted; pos += s.blockSize) {
       const int n = static_cast<int>(std::min<std::int64_t>(s.blockSize, to - pos));
       TransportBlock tb;
       tb.playing = true;
@@ -611,10 +614,14 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
       const float* in[2] = {silence.data(), silence.data()};
       float* o[2] = {out[0].data() + pos, out[1].data() + pos};
       r.process(tb, s.params, in, o, 2, n);
+      if (progress && ++blocksDone % 64 == 0 && !progress(std::min(0.999, static_cast<double>(blocksDone) / static_cast<double>(std::max<std::int64_t>(1, totalBlocks)))))
+        aborted = true;
     }
   };
   renderRange(0, mainFrames, true);
   renderRange(mainFrames, total, false);
+  if (!aborted && progress && !progress(1.0)) aborted = true;
+  if (aborted) return makeError(ErrorCode::Cancelled, "export cancelled");
   return out;
 }
 
