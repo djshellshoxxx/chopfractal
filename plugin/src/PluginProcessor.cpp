@@ -12,7 +12,10 @@ namespace cf = chopfractal;
 
 namespace {
 constexpr char kStateMagic[4] = {'C', 'F', 'P', 'L'};
-constexpr int kStateVersion = 1;
+// Wrapper version: 2 only when the project session wrote schema 2 (lazy versioning, see project_session.hpp); a
+// project that uses nothing new keeps writing 1 and stays readable by older builds. Both are read.
+constexpr int kStateVersionV1 = 1;
+constexpr int kStateVersionV2 = 2;
 constexpr double kMaxSourceSeconds = 60.0;
 constexpr juce::int64 kMaxDecodedBytes = 100ll * 1024 * 1024;
 }  // namespace
@@ -31,7 +34,10 @@ ChopFractalProcessor::ChopFractalProcessor()
 
 ChopFractalProcessor::~ChopFractalProcessor() {
   stopTimer();
+  exportProgress_.cancel.store(true);  // the worker polls this about every 0.7 s of rendered audio
+  exportWorker_.reset();               // joins (at most 5 s)
   loadPool_.removeAllJobs(true, 15000);  // a decode in flight must not outlive the plugin's code
+  restorePool_.removeAllJobs(true, 15000);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ChopFractalProcessor::createLayout() {
@@ -221,7 +227,13 @@ void ChopFractalProcessor::setStatusMessage(const juce::String& message) {
 // source decoding
 // ---------------------------------------------------------------------------------------------
 
+namespace {
+thread_local int tDecodeCalls = 0;
+}
+int ChopFractalProcessor::decodeCallsOnThisThread() { return tDecodeCalls; }
+
 std::shared_ptr<const cf::render::SourceData> ChopFractalProcessor::decodeFile(const juce::File& file, juce::String& error) {
+  ++tDecodeCalls;
   juce::AudioFormatManager formats;
   formats.registerBasicFormats();
   std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
@@ -290,35 +302,40 @@ void ChopFractalProcessor::loadFileAsync(const juce::File& file, bool relink) {
 // ---------------------------------------------------------------------------------------------
 
 void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
-  juce::MemoryOutputStream out(destData, false);
-  out.write(kStateMagic, 4);
-  out.writeInt(kStateVersion);
   juce::ValueTree stateCopy = apvts.copyState();  // never mutate the live tree: hosts may call this off the message thread
   stateCopy.setProperty("manualBpm", manualBpm.load(), nullptr);
   stateCopy.setProperty("embedSource", embedSource.load(), nullptr);
   std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
-  out.writeString(xml ? xml->toString() : juce::String());
 
   std::vector<std::uint8_t> blob;
+  bool v2 = false;
   {
-    const juce::ScopedLock lock(sessionLock_);
+    const juce::ScopedLock lock(sessionLock_);  // extras and A/B are captured in the same critical section as the rest: no torn state
     auto saved = session_.saveState(embedSource.load());
     if (!saved.ok() && embedSource.load()) {
       setStatusMessage("The audio is too large to embed (" + juce::String(static_cast<int>(session_.embeddedSourceBytes() / (1024 * 1024))) + " MB); the project references the file instead.");
       saved = session_.saveState(false);  // reference it instead
     }
-    if (saved.ok()) blob = std::move(saved.value());
+    if (saved.ok()) {
+      blob = std::move(saved.value());
+      v2 = session_.stateUsesSchemaV2();
+    }
   }
+  juce::MemoryOutputStream out(destData, false);
+  out.write(kStateMagic, 4);
+  out.writeInt(v2 ? kStateVersionV2 : kStateVersionV1);
+  out.writeString(xml ? xml->toString() : juce::String());
   out.writeInt(static_cast<int>(blob.size()));
   if (!blob.empty()) out.write(blob.data(), blob.size());
 }
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
-  ++loadTicket_;  // a file load still in flight must not replace the project being restored
+  const std::uint64_t ticket = ++loadTicket_;  // a file load or audio restore still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};
   if (in.read(magic, 4) != 4 || std::memcmp(magic, kStateMagic, 4) != 0) return;  // not ours: ignore safely
-  if (in.readInt() != kStateVersion) {
+  const int version = in.readInt();
+  if (version != kStateVersionV1 && version != kStateVersionV2) {
     setStatusMessage("This project was saved by a different version of ChopFractal and could not be loaded.");
     return;
   }
@@ -337,22 +354,161 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
 
   if (blob.empty()) return;
   cf::Status status;
+  bool needAudio = false;
+  std::string path;
+  cf::SourceId sourceId{};
   {
     const juce::ScopedLock lock(sessionLock_);
-    // Reference-only projects re-decode their file here, on the calling thread; embedded audio needs no file access.
-    status = session_.loadState(blob.data(), blob.size(), [](const cf::source::SourceInfo& info) -> std::shared_ptr<const cf::render::SourceData> {
-      if (info.path.empty()) return nullptr;
-      if (info.path.rfind("\\\\", 0) == 0 || info.path.rfind("//", 0) == 0) return nullptr;  // never fetch a project's network path unprompted (Locate Source relinks)
-      juce::File f(juce::String::fromUTF8(info.path.c_str()));
-      if (!f.existsAsFile()) return nullptr;
-      juce::String ignored;
-      return decodeFile(f, ignored);
-    });
+    // Never decode here: a reference-only project restores its audio on a worker (below), so the host stays responsive.
+    cf::composition::LoadOptions options;
+    options.deferSourceResolve = true;
+    status = session_.loadState(blob.data(), blob.size(), {}, options);
     syncAudioInfo();
     if (status.ok() && session_.wasEmbedded()) embedSource = true;  // a re-save keeps the audio inside the project
+    if (status.ok() && session_.sourceMissing()) {
+      needAudio = true;
+      path = session_.chopMap()->info().path;
+      sourceId = session_.chopMap()->info().id;
+    }
   }
   // On failure the session is left exactly as it was (pass-through in a fresh instance); say why.
   setStatusMessage(status.ok() ? juce::String() : juce::String("Could not restore the project: ") + status.error().message);
+  if (needAudio) restoreAudio(path, sourceId, ticket);
+}
+
+// Re-attaches the audio of a reference-only project. The session is already usable (markers, pattern, the missing-source
+// state); the result is applied only when no newer load, Locate Source or project replacement happened meanwhile.
+void ChopFractalProcessor::restoreAudio(const std::string& path, cf::SourceId id, std::uint64_t ticket) {
+  const bool network = path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;  // never fetch a project's network path unprompted (Locate Source relinks)
+  const juce::File file = path.empty() || network ? juce::File() : juce::File(juce::String::fromUTF8(path.c_str()));
+  if (file == juce::File()) {
+    juce::String text;
+    withSession([&](cf::composition::ProjectSession& s) {
+      s.reportSourceUnavailable(false);
+      if (!s.notices().empty()) text = juce::String::fromUTF8(s.notices().back().text.c_str());
+    });
+    setStatusMessage(text);
+    return;
+  }
+  setStatusMessage("Restoring audio from " + file.getFileName() + "...");
+  ++restoresRunning_;
+  juce::WeakReference<ChopFractalProcessor> self(this);
+  restorePool_.addJob([self, file, id, ticket] {
+    juce::String ignored;
+    std::shared_ptr<const cf::render::SourceData> data;
+    if (file.existsAsFile()) data = decodeFile(file, ignored);
+    juce::MessageManager::callAsync([self, file, id, ticket, data] {
+      if (self == nullptr) return;
+      self->restoresRunning_--;
+      if (ticket != self->loadTicket_.load()) return;  // superseded: a newer project, file load or Locate Source owns the session now
+      juce::String text;
+      self->withSession([&](cf::composition::ProjectSession& s) {
+        if (!s.chopMap() || s.chopMap()->info().id != id || !s.sourceMissing()) return;  // a different project: drop the result
+        auto note = [&](bool wrongAudio) {
+          s.reportSourceUnavailable(wrongAudio);
+          if (!s.notices().empty()) text = juce::String::fromUTF8(s.notices().back().text.c_str());
+        };
+        if (!data) {
+          note(false);
+        } else if (auto st = s.relinkSource(data); st.ok()) {
+          text = "Restored audio: " + file.getFileName();
+        } else if (st.error().code == cf::ErrorCode::Conflict) {
+          note(true);
+        } else {
+          text = juce::String(st.error().message);
+        }
+      });
+      if (text.isNotEmpty()) self->setStatusMessage(text);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// export on a worker thread
+// ---------------------------------------------------------------------------------------------
+
+class ChopFractalProcessor::ExportWorker : public juce::Thread {
+ public:
+  ExportWorker(cf::composition::ExportJob job, cf::composition::ExportProgress& progress, juce::WeakReference<ChopFractalProcessor> owner)
+      : juce::Thread("ChopFractal export"), job_(std::move(job)), progress_(progress), owner_(std::move(owner)) {}
+  ~ExportWorker() override { stopThread(5000); }
+
+  void run() override {
+    cf::Result<cf::composition::ExportReport> result = job_.run(progress_);
+    juce::WeakReference<ChopFractalProcessor> owner = owner_;
+    juce::MessageManager::callAsync([owner, result] {
+      if (owner != nullptr) owner->finishExport(result);
+    });
+  }
+
+ private:
+  cf::composition::ExportJob job_;
+  cf::composition::ExportProgress& progress_;
+  juce::WeakReference<ChopFractalProcessor> owner_;
+};
+
+cf::Status ChopFractalProcessor::startExport(const ExportRequest& request) {
+  if (exportState_.load() == static_cast<int>(ExportStatus::State::Running)) return cf::makeError(cf::ErrorCode::Conflict, "An export is already running.");
+  exportWorker_.reset();  // a finished worker from the previous export (joins immediately)
+  cf::Result<cf::composition::ExportJob> job = cf::makeError(cf::ErrorCode::InvalidArgument, "no export");
+  {
+    const juce::ScopedLock lock(sessionLock_);  // plan under the lock; the job only holds immutable snapshots afterwards
+    job = request.kind == ExportRequest::Kind::Wav ? cf::composition::ExportJob::planWav(session_, request.path, request.wav)
+                                                   : cf::composition::ExportJob::planKit(session_, request.path, request.kit);
+  }
+  if (!job.ok()) return job.error();
+  exportProgress_.fraction.store(0.f);
+  exportProgress_.cancel.store(false);
+  {
+    const juce::ScopedLock lock(exportLock_);
+    exportName_ = juce::String::fromUTF8(job.value().displayName().c_str());
+    exportKind_ = request.kind;
+  }
+  exportState_.store(static_cast<int>(ExportStatus::State::Running));
+  setStatusMessage("Exporting " + exportDisplayName() + "...");
+  exportWorker_ = std::make_unique<ExportWorker>(std::move(job.value()), exportProgress_, juce::WeakReference<ChopFractalProcessor>(this));
+  exportWorker_->startThread();
+  return {};
+}
+
+void ChopFractalProcessor::cancelExport() { exportProgress_.cancel.store(true); }
+
+ExportStatus ChopFractalProcessor::exportStatus() const {
+  ExportStatus st;
+  st.state = static_cast<ExportStatus::State>(exportState_.load());
+  st.fraction = exportProgress_.fraction.load();
+  return st;
+}
+
+juce::String ChopFractalProcessor::exportDisplayName() const {
+  const juce::ScopedLock lock(exportLock_);
+  return exportName_;
+}
+
+void ChopFractalProcessor::finishExport(const cf::Result<cf::composition::ExportReport>& result) {
+  ExportRequest::Kind kind;
+  {
+    const juce::ScopedLock lock(exportLock_);
+    kind = exportKind_;
+  }
+  const juce::String name = exportDisplayName();
+  ExportStatus::State state;
+  juce::String text;
+  if (result.ok()) {
+    state = ExportStatus::State::Done;
+    const auto& rep = result.value();
+    text = kind == ExportRequest::Kind::Kit
+               ? "Producer Kit written to " + name + " (" + juce::String(static_cast<int>(rep.files.size())) + " files)"
+               : "Exported " + name + (rep.clipped ? " (" + juce::String(static_cast<juce::int64>(rep.clipped)) + " samples clipped; lower the output gain)" : juce::String());
+  } else if (result.error().code == cf::ErrorCode::Cancelled) {
+    state = ExportStatus::State::Cancelled;
+    text = "Export cancelled.";
+  } else {
+    state = ExportStatus::State::Failed;
+    text = juce::String::fromUTF8(result.error().message.c_str());
+  }
+  setStatusMessage(text);
+  exportState_.store(static_cast<int>(state));
 }
 
 juce::AudioProcessorEditor* ChopFractalProcessor::createEditor() { return new ChopFractalEditor(*this); }

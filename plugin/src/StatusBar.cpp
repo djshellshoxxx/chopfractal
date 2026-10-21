@@ -11,11 +11,25 @@ StatusBar::StatusBar(EditorModel& model, EditorCommands& commands) : EditorPanel
   messages_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
   messages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");
   addAndMakeVisible(messages_);
+  cancelExport_.setTitle("Cancel Export");
+  cancelExport_.onClick = [this] { cmd_.cancelExport(); };
+  addChildComponent(cancelExport_);
 }
 
-void StatusBar::resized() { messages_.setBounds(getLocalBounds()); }
+void StatusBar::resized() {
+  auto area = getLocalBounds();
+  if (cancelExport_.isVisible()) cancelExport_.setBounds(area.removeFromRight(110).removeFromTop(20).reduced(2));
+  messages_.setBounds(area);
+}
 
 void StatusBar::modelChanged(Change c) {
+  if (c == Change::Flags) {
+    if (cancelExport_.isVisible() != model_.exportRunning()) {
+      cancelExport_.setVisible(model_.exportRunning());
+      resized();
+    }
+    return;
+  }
   if (c != Change::Status) return;
   // Messages arrive from other threads' work too (file loading, Evolve, restore): show the line when it changes.
   const juce::String line = model_.statusLine();

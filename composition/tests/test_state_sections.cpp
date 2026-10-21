@@ -1,6 +1,7 @@
 // F01: the StateSection API (set/get, preserved unknown tags, per-tag caps, decoder failures, hostile sweeps).
 #include <chopfractal/composition/project_session.hpp>
 
+#include <iterator>
 #include <vector>
 
 #include "chop_test.hpp"

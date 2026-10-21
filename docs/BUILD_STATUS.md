@@ -95,7 +95,7 @@ Defects found and fixed during integration (each now has a test): derived child 
 
 Three independent read-only audits (core logic, audio/export/feature modules, plugin shell and GUI) plus a button-driving GUI test found and fixed: a failed marker edit that wedged the session (now transactional, and zoomed content stranded by a deleted chop is dropped); undo, redo and A/B recall restoring patterns that reference deleted chops; roles lost when a chop is disabled; per-event locks bypassed by bar replacement and bar duplication; signed overflow in event timing; grammar labels that saved but could not be loaded; duplicate marker IDs and a zero id counter in saved state; a history config that could write unreadable state; voice-pool exhaustion hard-cutting a sounding voice, and newest-voice stealing; MIDI decoder accepting invalid tempo, meter, running status and zero-length notes (and a shift-exponent bug); non-atomic WAV overwrite and false clip reports at 0 dB; stale waveform after loading a new source; embed flag, manual tempo not persisted; no Locate Source for a missing audio file; use-after-free risk in menu callbacks; Lock Bar acting on bar 0 with nothing selected; Evolve toggle out of sync with the session; repaint 10 times a second while idle. Each has a regression test.
 
-Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, seed field and motif not persisted, A/B snapshots not saved with the project, export runs on the message thread, no meters.
+Not fixed (documented): marker trim validation for disabled markers, history tree layout recursion on very long chains, no meters. (Seed field, motif, A/B snapshots and the export choices are saved since F01 state v2; export runs on a worker thread.)
 
 ## Pass 3 (pre-beta)
 
@@ -107,7 +107,7 @@ Builds: Linux VST3 (validator-checked) and **CLAP** (via clap-juce-extensions, p
 
 Fixed (each with a test or CI check where practical): Evolve now applies the live Chaos value (and records each step's own seed); the history tree kept 64 snapshots then silently stopped recording a straight chain, now it splices out the oldest node and tells the user; a queued variation switch could overwrite a newer edit; quantized switches and Evolve never fired for hosts without a play position (a local clock now drives them); a use-after-free window in the renderer after a pattern switch; detached file-decode threads outliving the plugin, out-of-order loads, and a state-restore from a UNC path; dragged WAV/MIDI files lived in a purged temp folder (now `<user data>/ChopFractal/Dropped`, 90 days), and the WAV used default export options; non-ASCII Windows export paths; Windows reserved and non-Latin preset names; macOS preset folder; dither draw order and hash-set iteration order (compiler-dependent output); FMA contraction (`-ffp-contract=off`); NaN/Inf and silence handling in WAV code; roles of disabled chops lost on load; stale Smart Setup suggestions; narrow hits that could only be resized; history tree clipping; keyboard focus in hosts; arrow-key nudge/resize; repaint cost while playing; CRC speed; a changed FX intensity lost on save; plugin sources now compile with `-Wall -Wextra` / `/W4`; JUCE commit check; macOS plugin CI job; versioned, checksummed artifacts with notices.
 
-Open (not fixed, by design or cost): the event cap counts top-level hits while flatten counts children (a near-full zoomed pattern can fail to mutate); policy-driven generation is O(events x chops x events) and slow with large rule sets; Fractal Rhythm ignores repeat/required grammar rules; child-pattern locks can only come from a loaded file and are not honored by every edit; mailbox retention grows if a track is bypassed while the UI keeps editing; per-sample DSP micro-optimizations; no accessibility handler for the custom-drawn views; export runs on the message thread; recall of A/B snapshots can fail after chops change; WAV import of WAVE_FORMAT_EXTENSIBLE (the plugin imports through JUCE, so only the tool path is affected).
+Open (not fixed, by design or cost): the event cap counts top-level hits while flatten counts children (a near-full zoomed pattern can fail to mutate); policy-driven generation is O(events x chops x events) and slow with large rule sets; Fractal Rhythm ignores repeat/required grammar rules; child-pattern locks can only come from a loaded file and are not honored by every edit; mailbox retention grows if a track is bypassed while the UI keeps editing; per-sample DSP micro-optimizations; no accessibility handler for the custom-drawn views; recall of A/B snapshots can fail after chops change; WAV import of WAVE_FORMAT_EXTENSIBLE (the plugin imports through JUCE, so only the tool path is affected).
 
 ## Audit round 5
 
@@ -119,10 +119,17 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 - **Input capture** is not implemented (the spec's explicit Arm/Capture/Stop/Keep flow); only file import exists.
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
-- Restoring a reference-only project decodes its audio file on the calling thread (the spec wants a worker thread). Embedded projects avoid file access.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
-- Export runs on the message thread (a few seconds for very long exports); direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
-- The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (no export progress bar; the Fractal accent decay and mutation can only be changed through presets).
+- Direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
+- The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (export progress is shown as a percentage in the status line with a Cancel Export button; the Fractal accent decay and mutation can only be changed through presets, and are saved with the project).
+
+## Project state v2 (F01)
+
+- **Lazy versioning.** The `composition` module schema is 2 and the plugin wrapper (`CFPL`) version is 2 *only* when something new is stored (non-default extras, an occupied A/B slot, a feature section); otherwise the exact old schema 1 bytes are written, so a project that uses nothing new still opens in older builds. `kV1FixtureHash` pins this in `composition/tests/v1_fixture.hpp`.
+- **Older builds** reject a v2 project with their existing message (`This project was saved by a different version of ChopFractal and could not be loaded.` at the wrapper, or `Could not restore the project: ...`). Downgrade compatibility is not provided.
+- **Extras** (seed, motif, depth, role, detect mode, generation grid, export combos, Fractal tuning, view/size prefs, Move/resize toggle) and **A/B snapshots** are blocks 1 to 8 and 13 of the extras section; **feature sections** (tags 9 to 31) use `ProjectSession::setSection`. Unknown tags of 9 and above are preserved and written back. A malformed extras section never fails the load: defaults and one warning.
+- **Restore** of a reference-only project no longer decodes on the calling thread: the session is usable at once and the audio arrives from a worker (`Restoring audio from <file>...`, then `Restored audio: <file>`).
+- **Export** (WAV and Producer Kit) runs on a worker thread with a percentage in the status line and a Cancel Export button; a cancelled export leaves no new files.
 
 ## Roadmap status (audited 2026-10-20)
 
@@ -131,7 +138,7 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | ID | Feature | State |
 |---|---|---|
 | F00 | Editor decomposition | Not started (editor is 1404 lines, window 940 x 912) |
-| F01 | State v2 and persistence | Not started (session schema still 1) |
+| F01 | State v2 and persistence | **Done**: session schema 2 with lazy versioning, StateSection API, migration registry wired, extras and A/B persisted, worker restore, export on a worker with progress and cancel (see "Project state v2" below) |
 | F02 | Direct editing | Partly built in pass 3: hit move, resize, duplicate, delete, mute, add; Shift+click markers; marker dragging, zoom, menus not built |
 | F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
 | F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |

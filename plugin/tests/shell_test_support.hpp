@@ -92,6 +92,25 @@ inline std::vector<std::uint8_t> patternBytes(ChopFractalProcessor& p) {
 
 inline void pump(int ms = 60) { juce::MessageManager::getInstance()->runDispatchLoopUntil(ms); }
 
+// Pumps the message loop until `pred` holds (a worker result arrives through callAsync) or the timeout passes.
+template <class Pred>
+bool waitFor(Pred&& pred, int timeoutMs = 5000) {
+  const double end = juce::Time::getMillisecondCounterHiRes() + timeoutMs;
+  while (!pred()) {
+    if (juce::Time::getMillisecondCounterHiRes() > end) return false;
+    pump(20);
+  }
+  return true;
+}
+
+// setStateInformation returns before the audio of a reference-only project is decoded; tests that need the final
+// state wait for the restore to finish.
+inline bool waitForRestore(ChopFractalProcessor& p) {
+  const bool ok = waitFor([&] { return !p.restoreInFlight(); });
+  CHECK(ok);
+  return ok;
+}
+
 // ---- recursive widget lookup (the editor is a tree of panels, not a flat list of children) ----
 
 // True for the leaf widgets: the walk never descends into their internal sub-components (text boxes, viewports).
