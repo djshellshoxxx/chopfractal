@@ -93,6 +93,20 @@ void PatternPanel::paint(juce::Graphics& g) {
     g.drawText("Detect chops, then press Generate.", area, juce::Justification::centred);
   }
 
+  // A preview (the A/B morph, a playing scene) is not the pattern in the project: say so on the grid.
+  if (v.previewLabel.isNotEmpty()) {
+    const auto text = v.previewLabel;
+    g.setFont(cdl::font(cdl::FontRole::Tag, cdl::uiScale()));
+    const int tw = juce::GlyphArrangement::getStringWidthInt(g.getCurrentFont(), text) + 16;
+    const auto badge = juce::Rectangle<int>(area.getRight() - tw - 6, area.getY() + 6, tw, static_cast<int>(18 * cdl::uiScale()));
+    g.setColour(cdl::pal().sprayWash);
+    g.fillRoundedRectangle(badge.toFloat(), 3.0f);
+    g.setColour(cdl::pal().spray);
+    g.drawRoundedRectangle(badge.toFloat().reduced(0.5f), 3.0f, 1.0f);
+    g.setColour(cdl::pal().ink);
+    g.drawText(text, badge, juce::Justification::centred, false);
+  }
+
   // Ghost outline of the hit being dragged (the edit is applied on release).
   if (dragMode_ != DragMode::None)
     for (const auto& r : pattern.rects)

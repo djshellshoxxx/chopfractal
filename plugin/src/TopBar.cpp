@@ -1,5 +1,7 @@
 #include "TopBar.h"
 
+#include <algorithm>
+
 #include "CdlLookAndFeel.h"
 
 TopBar::TopBar(EditorModel& model, EditorCommands& commands) : EditorPanelBase(model, commands, "TopBar") {
@@ -76,7 +78,29 @@ void TopBar::addDrawerButton(const juce::String& id, const juce::String& label, 
   resized();
 }
 
+void TopBar::addMenuEntry(const juce::String& id, const juce::String& title) {
+  if (menuEntries_.empty()) {
+    panels_.setTitle("Panels");
+    panels_.setTooltip("Open Capture, Tempo, Pads, Scenes, Evolve, Outputs, Arrange and Orbit");
+    panels_.onClick = [this] { showPanelsMenu(); };
+    addAndMakeVisible(panels_);
+  }
+  menuEntries_.emplace_back(id, title);
+  resized();
+}
+
+void TopBar::showPanelsMenu() {
+  juce::PopupMenu menu;
+  int index = 1;
+  for (const auto& e : menuEntries_) menu.addItem(index++, e.second, true, e.first == openId_);
+  menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&panels_), [this](int result) {
+    if (result > 0 && result <= static_cast<int>(menuEntries_.size()) && onMenuChoice) onMenuChoice(menuEntries_[static_cast<std::size_t>(result - 1)].first);
+  });
+}
+
 void TopBar::setDrawerButtonOn(const juce::String& openId) {
+  openId_ = openId;
+  panels_.setToggleState(std::any_of(menuEntries_.begin(), menuEntries_.end(), [&](const auto& e) { return e.first == openId; }), juce::dontSendNotification);
   for (auto& d : drawerButtons_) d.button->setToggleState(d.id == openId, juce::dontSendNotification);
 }
 
@@ -109,6 +133,10 @@ void TopBar::resized() {
   area.removeFromRight(gap);
   theme_.setBounds(area.removeFromRight(px(84)));
   area.removeFromRight(gap);
+  if (!menuEntries_.empty()) {
+    panels_.setBounds(area.removeFromRight(px(72)));
+    area.removeFromRight(gap);
+  }
   for (auto it = drawerButtons_.rbegin(); it != drawerButtons_.rend(); ++it) {
     it->button->setBounds(area.removeFromRight(px(64)));
     area.removeFromRight(gap);
