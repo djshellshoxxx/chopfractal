@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 
+#include "EditorCommands.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
 #include "shell_test_support.hpp"
@@ -176,4 +177,91 @@ CHOP_TEST(model_status_line_adds_the_host_fallback_hints) {
   p.setStatusMessage("");
   p.usedFallbackTempo = true;
   CHECK(m.statusLine() == "Using local tempo: 97.0 BPM");
+}
+
+CHOP_TEST(commands_report_refusals_with_the_existing_strings) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.loadSource(drumLoop(), "loop", "").ok()); });
+  EditorModel m(p);
+  EditorCommands c(p, m);
+  m.refresh(true, 920);
+  m.setSeed(5);
+
+  c.mutate();  // no pattern yet
+  CHECK(p.statusMessage() == "Generate a pattern first.");
+  c.zoomInSelected();
+  CHECK(p.statusMessage() == "Select a pattern hit or waveform section first, then press Zoom In.");
+  CHECK(m.seed() == 5);  // a refused Zoom In does not consume a seed
+  c.collapseSelected();
+  CHECK(p.statusMessage() == "Select a hit in the pattern first.");
+  c.toggleLockSelectedBar();
+  CHECK(p.statusMessage() == "Select a hit first; Lock Bar locks the bar that hit is in.");
+  c.setRoleOfSelected("kick");
+  CHECK(p.statusMessage().startsWith("Select a hit first; its chop gets the role"));
+  c.undo();
+  CHECK(p.statusMessage() == "Nothing to undo.");
+  c.redo();
+  CHECK(p.statusMessage() == "Nothing to redo.");
+  CHECK(patternBytes(p).empty());
+
+  const auto st = c.run([](cf::composition::ProjectSession&) { return cf::Status{}; });
+  CHECK(st.ok());
+  CHECK(p.statusMessage().isEmpty());  // success without a notice clears the line
+}
+
+CHOP_TEST(commands_mutate_advances_the_seed_only_when_a_pattern_exists) {
+  ChopFractalProcessor p;
+  prepare(p);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.loadSource(drumLoop(), "loop", "").ok());
+    cf::composition::DetectOptions d;
+    d.analysis.sensitivity = 0.8;
+    CHECK(s.applyChops(d).ok());
+  });
+  EditorModel m(p);
+  EditorCommands c(p, m);
+  m.refresh(true, 920);
+  CHECK(m.seed() == 1);
+  c.mutate();
+  CHECK(m.seed() == 1);  // refused: a refused Mutate does not consume a seed
+  c.generate();
+  CHECK(!patternBytes(p).empty());
+  CHECK(m.seed() == 1);  // Generate uses the seed as it is
+  const auto generated = patternBytes(p);
+  c.mutate();
+  CHECK(m.seed() == 2);
+  CHECK(patternBytes(p) != generated);
+  c.undo();
+  CHECK(patternBytes(p) == generated);
+  c.newSeed();
+  CHECK(m.seed() <= 0x7fffffffULL);
+}
+
+CHOP_TEST(commands_zoom_and_edits_act_on_the_selection_and_undo_as_one_step) {
+  ChopFractalProcessor p;
+  prepare(p);
+  makeSession(p);
+  EditorModel m(p);
+  EditorCommands c(p, m);
+  m.refresh(true, 920);
+  const auto generated = patternBytes(p);
+  const auto first = m.view().pattern.rects.front();
+  m.select(first.id);
+
+  c.toggleMuteSelected();
+  const auto muted = patternBytes(p);
+  CHECK(muted != generated);
+  c.undo();
+  CHECK(patternBytes(p) == generated);
+
+  m.setSeed(10);
+  c.zoomInSelected();
+  CHECK(m.seed() == 11);
+  CHECK(patternBytes(p) != generated);
+  CHECK(p.statusMessage().startsWith("Zoomed 1 selected hits"));
+  CHECK(std::any_of(m.view().pattern.rects.begin(), m.view().pattern.rects.end(), [](const auto& r) { return r.depth > 0; }));
+
+  c.toggleLockSelectedBar();  // the selected hit survives the zoom: its bar is locked
+  CHECK(std::any_of(m.view().pattern.barLocked.begin(), m.view().pattern.barLocked.end(), [](bool b) { return b; }));
 }

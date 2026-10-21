@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "DragOut.h"
+#include "EditorCommands.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
@@ -61,29 +62,20 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
 
   void timerCallback() override { refresh(false); }
   void refresh(bool force);
-  void run(const std::function<chopfractal::Status(chopfractal::composition::ProjectSession&)>& action);
   void addSlider(ParamSlider& s, const char* paramId, const juce::String& title);
   void addToggle(ParamToggle& t, const char* paramId, const juce::String& title);
-  void chooseFile();
-  std::uint64_t currentSeed() const;
-  void setSeed(std::uint64_t seed);
-  void doGenerate();
-  void doMutate();
-  void doToggleLock();
-  void doSmartSetup();
-  void doFractal();
-  void doEvolve();
-  void doExportWav();
-  void doExportKit();
   void askSavePreset();
   juce::Point<int> treePos(const chopfractal::ui::TreeNodeView& n) const;
-  void nudgeSelected(int cells, bool resize);
-  void editSelected(const std::function<chopfractal::Result<chopfractal::pattern::Pattern>(const chopfractal::pattern::Pattern&, const chopfractal::ChopSnapshot&)>& fn);
+  FractalUi fractalUi() const;
+  EvolveUi evolveUi() const;
+  ExportUi exportUi() const;
+  void pushEvolve();
 
   void updateSectionSelection(juce::Point<int> point);
   void modelChanged(EditorModel::Change) override;
   ChopFractalProcessor& proc_;
   EditorModel model_;
+  EditorCommands commands_;
   juce::ToggleButton editMode_{"Move / resize hits"};
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
@@ -124,7 +116,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
       exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
   juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
   juce::ComboBox role_;
-  void historyMenu(chopfractal::history::NodeId id);
   juce::ToggleButton evolve_{"Evolve"};
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;
@@ -133,7 +124,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   chopfractal::evolve::Settings pushedEvolve_;  // the settings the editor last sent; a different session value (a restored project) is shown
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
-  std::unique_ptr<juce::FileChooser> chooser_;
 
   juce::String lastStatusLine_;
   juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_;
