@@ -257,6 +257,66 @@ CHOP_TEST(marker_edits_reconcile_the_pattern_and_stay_valid) {
   CHECK(!s.setRules(bad).ok());
 }
 
+CHOP_TEST(undo_and_redo_move_the_family_tree_highlight) {
+  ProjectSession s;
+  CHECK(ready(s));
+  CHECK(s.generate(settings(5, 2)).ok());
+  const history::NodeId first = s.history().active();
+  pattern::MutateOptions mo;
+  mo.seed = 6;
+  mo.amount = 1.0;
+  CHECK(s.mutate(mo).ok());
+  const history::NodeId second = s.history().active();
+  CHECK(first != second && second != history::kNoNode);
+  CHECK(s.undo());
+  CHECK(s.history().active() == first);   // the highlight followed Undo
+  CHECK(s.redo());
+  CHECK(s.history().active() == second);  // and Redo
+  CHECK(s.undo());
+  mo.seed = 7;
+  CHECK(s.mutate(mo).ok());               // a new branch grows from where Undo left us, not from the old tip
+  const history::NodeId branch = s.history().active();
+  history::NodeId parent = history::kNoNode;
+  for (const auto& n : s.history().listAll())
+    if (n.id == branch) parent = n.parent;
+  CHECK(parent == first);
+}
+
+CHOP_TEST(mutate_keeps_hard_grammar_rules_when_it_inserts_before_retained_events) {
+  // "At most 2 hat-role events per bar" and "no adjacent repeats" must hold after every Mutate, including when
+  // regenerated beats sit next to events that stay (locked or not selected for change).
+  for (std::uint64_t seed = 1; seed <= 12; ++seed) {
+    ProjectSession s;
+    CHECK(ready(s));
+    for (std::size_t i = 0; i < 4; ++i) CHECK(s.assignRole(s.chops()->chops[i].id, "hat").ok());
+    roles::Rule maxHats;
+    maxHats.id = 1;
+    maxHats.action.kind = roles::ActionKind::MaxCount;
+    maxHats.action.count = 2;
+    maxHats.scope = roles::RuleScope::Bar;
+    maxHats.when.role = "hat";
+    roles::RuleSet rules;
+    rules.rules = {maxHats, roles::templates::avoidAdjacentRepeats(2)};
+    CHECK(s.setRules(rules).ok());
+    CHECK(s.generate(settings(seed, 2)).ok());
+    for (std::uint64_t step = 1; step <= 10; ++step) {
+      pattern::MutateOptions mo;
+      mo.seed = seed * 100 + step;
+      mo.amount = 0.5;
+      CHECK(s.mutate(mo).ok());
+      for (const auto& bar : s.pattern()->bars) {
+        int hats = 0;
+        for (const auto& bt : bar.beats)
+          for (const Event& e : bt.events)
+            if (s.roleMap().roleOf(e.chop) == "hat") ++hats;
+        CHECK(hats <= 2);
+      }
+      const auto flat = pattern::flatten(*s.pattern(), *s.chops()).value();
+      for (std::size_t i = 1; i < flat.size(); ++i) CHECK(flat[i].chop != flat[i - 1].chop);
+    }
+  }
+}
+
 CHOP_TEST(history_cap_keeps_recording_by_dropping_the_oldest_nodes_with_a_visible_notice) {
   ProjectSession s;
   CHECK(ready(s));

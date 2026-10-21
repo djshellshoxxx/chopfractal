@@ -37,6 +37,7 @@ struct Context {
   Ticks barTicks = 3840;
   int beatsPerBar = 4;
   const ICandidatePolicy* policy = nullptr;
+  std::vector<ChopId> recentBefore;  // chops of the hits before this bar, in time order (nearest last): lets repeat rules see across bars
   std::size_t eventBudget = limits::kMaxEventsPerPattern;  // maximum sounding hits this bar may add
 };
 

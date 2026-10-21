@@ -56,6 +56,9 @@ struct Builder {
       q.scope.beat = static_cast<int>(std::min<Ticks>(ctx.beatsPerBar - 1, startInBar / (ctx.barTicks / ctx.beatsPerBar)));
       q.firstInBar = placed.empty();
       q.barSoFar = placed;
+      q.recent = ctx.recentBefore;
+      q.recent.insert(q.recent.end(), placed.begin(), placed.end());
+      if (q.recent.size() > 16) q.recent.erase(q.recent.begin(), q.recent.end() - 16);
       if (ctx.policy->evaluate(q).allowed) return c.id;
     }
     return ChopId{};

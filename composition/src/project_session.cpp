@@ -417,6 +417,32 @@ bool ProjectSession::settleRestoredPattern() {
   return false;  // the caller cancels the move; the family tree (activate) repairs older versions when they are chosen
 }
 
+void ProjectSession::syncActiveNodeToPattern() {
+  if (!patterns_.hasPattern()) return;
+  const std::vector<std::uint8_t> bytes = pattern::serialize(patterns_.current());
+  auto holdsPattern = [&](history::NodeId id) {
+    auto snap = history_.getSnapshot(id);
+    return snap.ok() && snap.value().payload && *snap.value().payload == bytes;
+  };
+  const history::NodeId active = history_.active();
+  if (active != history::kNoNode && holdsPattern(active)) return;
+  history::NodeId activeParent = history::kNoNode;
+  for (const auto& n : history_.listAll())
+    if (n.id == active) activeParent = n.parent;
+  history::NodeId best = history::kNoNode;
+  std::uint64_t bestRank = 0;
+  for (const auto& n : history_.listAll()) {
+    if (!holdsPattern(n.id)) continue;
+    // Neighbours of the highlighted node win (that is where Undo/Redo moves); otherwise the newest match.
+    const std::uint64_t rank = ((n.id == activeParent || n.parent == active) ? (1ull << 62) : 0) + n.order;
+    if (best == history::kNoNode || rank > bestRank) {
+      best = n.id;
+      bestRank = rank;
+    }
+  }
+  if (best != history::kNoNode) history_.setActive(best);  // evolved or never-recorded states have no node: leave the highlight
+}
+
 bool ProjectSession::undo() {
   if (!patterns_.undo()) return false;
   if (!settleRestoredPattern()) {
@@ -425,6 +451,7 @@ bool ProjectSession::undo() {
     return false;
   }
   pendingActivation_ = history::kNoNode;
+  syncActiveNodeToPattern();
   return true;
 }
 
@@ -436,6 +463,7 @@ bool ProjectSession::redo() {
     return false;
   }
   pendingActivation_ = history::kNoNode;
+  syncActiveNodeToPattern();
   return true;
 }
 
@@ -447,6 +475,7 @@ Status ProjectSession::recallSnapshot(std::size_t slot) {
     return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
   }
   pendingActivation_ = history::kNoNode;
+  syncActiveNodeToPattern();
   return {};
 }
 

@@ -123,6 +123,15 @@ bool GrammarPolicy::inRange(const Condition& c, const ScopeContext& s) const {
   return true;
 }
 
+bool GrammarPolicy::firstOfKind(const Condition& c, const CandidateQuery& q) const {
+  if (c.chop.valid() || !c.role.empty()) {
+    for (ChopId earlier : q.barSoFar)
+      if (matchesChop(c, earlier)) return false;
+    return true;
+  }
+  return q.firstInBar;
+}
+
 bool GrammarPolicy::matchesPosition(const Condition& c, const ScopeContext& s, bool firstInBar) const {
   switch (c.position) {
     case Position::Any: return true;
@@ -150,7 +159,7 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
   bool anyRequire = false;
   for (const Rule* r : rules)
     if (r->action.kind == ActionKind::Require && matchesChop(r->when, q.chop) && inRange(r->when, q.scope) &&
-        matchesPosition(r->when, q.scope, q.firstInBar)) {
+        matchesPosition(r->when, q.scope, firstOfKind(r->when, q))) {
       anyRequire = true;
       maxRequirePriority = std::max(maxRequirePriority, r->priority);
     }
@@ -170,15 +179,22 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
     if (!inRange(r.when, q.scope)) continue;
     switch (r.action.kind) {
       case ActionKind::Forbid:
-        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, q.firstInBar)) reject(r);
+        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, firstOfKind(r.when, q))) reject(r);
         break;
       case ActionKind::MaxConsecutiveRepeats: {
         if (!matchesChop(r.when, q.chop)) break;
+        auto sameAs = [&](ChopId other) {
+          return r.action.repeatBy == RepeatBy::SameChop ? other == q.chop
+                                                         : (!roles_.roleOf(q.chop).empty() && roles_.roleOf(other) == roles_.roleOf(q.chop));
+        };
+        // Placing the candidate joins the run before it with the run after it (events that will stay later).
         int run = 0;
         for (auto it = q.recent.rbegin(); it != q.recent.rend(); ++it) {
-          const bool same = r.action.repeatBy == RepeatBy::SameChop ? *it == q.chop
-                                                                    : (!roles_.roleOf(q.chop).empty() && roles_.roleOf(*it) == roles_.roleOf(q.chop));
-          if (!same) break;
+          if (!sameAs(*it)) break;
+          ++run;
+        }
+        for (ChopId next : q.following) {
+          if (!sameAs(next)) break;
           ++run;
         }
         if (run >= r.action.count) reject(r);
@@ -189,11 +205,13 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
         int n = 0;
         for (ChopId c : q.barSoFar)
           if (matchesChop(r.when, c)) ++n;
+        for (ChopId c : q.barAfter)  // events that stay later in the bar count too
+          if (matchesChop(r.when, c)) ++n;
         if (n >= r.action.count) reject(r);
         break;
       }
       case ActionKind::Prefer:
-        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, q.firstInBar)) {
+        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, firstOfKind(r.when, q))) {
           d.weight *= r.weight;
           d.trace.push_back({r.id, TraceEntry::Effect::Weighted});
         }
@@ -209,7 +227,7 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
 bool GrammarPolicy::isPreserved(const CandidateQuery& q) const {
   for (const Rule& r : rules_.rules)
     if (r.enabled && r.action.kind == ActionKind::Preserve && matchesChop(r.when, q.chop) && inRange(r.when, q.scope) &&
-        matchesPosition(r.when, q.scope, q.firstInBar))
+        matchesPosition(r.when, q.scope, firstOfKind(r.when, q)))
       return true;
   return false;
 }

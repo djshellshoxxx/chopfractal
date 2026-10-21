@@ -173,6 +173,22 @@ CHOP_TEST(adjacent_repeat_and_count_limits) {
   q.barSoFar = {ChopId{3}, ChopId{4}};
   CHECK(!counted.evaluate(q).allowed);
   CHECK(counted.evaluate(query(1)).allowed);
+
+  // Events that stay later in the bar count against the limit too (Mutate inserting before a retained event).
+  q = query(3);
+  q.barSoFar = {ChopId{3}};
+  q.barAfter = {ChopId{4}};
+  CHECK(!counted.evaluate(q).allowed);   // one before + one after = 2 already
+  q.barAfter = {ChopId{1}};
+  CHECK(counted.evaluate(q).allowed);
+
+  // A candidate placed between two runs joins them: before + after must stay below the limit.
+  q = query(3);
+  q.recent = {ChopId{3}};
+  q.following = {ChopId{3}};
+  CHECK(!limit2.evaluate(q).allowed);    // 1 + 1 >= 2
+  q.following = {ChopId{1}, ChopId{3}};  // the run after is broken by a kick
+  CHECK(limit2.evaluate(q).allowed);
 }
 
 CHOP_TEST(soft_preferences_multiply_deterministically_and_never_override_hard_rules) {
@@ -248,7 +264,12 @@ CHOP_TEST(requirements_resolve_to_a_chop_only_when_unsatisfied_and_in_scope) {
 CHOP_TEST(preserve_rules_keep_matching_events) {
   GrammarPolicy p = policyOf({templates::preserveFirst(1, "kick")});
   CHECK(p.isPreserved(query(1, 0, 0, /*firstInBar=*/true)));
-  CHECK(!p.isPreserved(query(1, 0, 1, /*firstInBar=*/false)));
+  CandidateQuery second = query(1, 0, 1, /*firstInBar=*/false);
+  second.barSoFar = {ChopId{1}};                           // a kick was already placed in this bar
+  CHECK(!p.isPreserved(second));
+  CandidateQuery afterHat = query(1, 0, 1, /*firstInBar=*/false);
+  afterHat.barSoFar = {ChopId{3}};                         // only a hat so far: this is the first KICK, so it is kept
+  CHECK(p.isPreserved(afterHat));
   CHECK(!p.isPreserved(query(2, 0, 0, /*firstInBar=*/true)));
   Rule disabled = templates::preserveFirst(2, "snare");
   disabled.enabled = false;

@@ -3,6 +3,7 @@
 #include <chopfractal/midi_export/midi.hpp>
 
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -61,9 +62,25 @@ Status ProjectSession::applyFractal(const fractal::Settings& fs, const std::vect
   ctx.beatsPerBar = p.settings.timeSignature.numerator;
   ctx.policy = policy.get();
   ctx.eventBudget = budget;
+  if (policy) {
+    for (const roles::Rule& r : rules_.rules)
+      if (r.enabled && r.action.kind == roles::ActionKind::Require) {
+        notice(Notice::Level::Info, "Fractal Rhythm does not enforce Require rules (Generate does); forbid and repeat rules are honored.");
+        break;
+      }
+  }
   pattern::Pattern next = p;
   for (int b : targets) {
     ctx.bar = b;
+    ctx.recentBefore.clear();  // the last chops before this bar, so repeat rules see across the bar line
+    for (int pb = 0; pb < b; ++pb) {
+      std::vector<std::pair<Ticks, ChopId>> hits;
+      for (const pattern::Beat& bt : next.bars[static_cast<std::size_t>(pb)].beats)
+        for (const Event& e : bt.events) hits.push_back({e.start, e.chop});
+      std::stable_sort(hits.begin(), hits.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+      for (const auto& h : hits) ctx.recentBefore.push_back(h.second);
+    }
+    if (ctx.recentBefore.size() > 16) ctx.recentBefore.erase(ctx.recentBefore.begin(), ctx.recentBefore.end() - 16);
     auto events = fractal::generateBar(ctx, fs);
     if (!events.ok()) return events.error();
     auto q = pattern::setBarEvents(next, b, std::move(events.value()), *chops_);

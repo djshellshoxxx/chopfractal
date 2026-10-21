@@ -21,7 +21,7 @@ inline juce::String forName(const juce::String& name) {
     {"Detection mode", "Choose transient detection or an even 1/8 or 1/16 grid. Select keep my markers to preserve manual markers, then press Detect Chops."},
     {"Generate", "Create a new pattern from enabled chops using Seed, Length, Density, Variation and allowed effects. Locked sections are preserved."},
     {"Mutate", "Vary the current pattern using the next seed and current controls. Locked sections stay unchanged. Undo returns to the previous edit."},
-    {"Undo", "Undo the last pattern or marker edit. The family-tree highlight is not currently moved by Undo."},
+    {"Undo", "Undo the last pattern or marker edit. The family-tree highlight moves back with it."},
     {"Redo", "Reapply the last undone edit."},
     {"Zoom In", "Subdivide selected pattern hits into nested rhythms. Click or drag to select first. Waveform selection targets corresponding pattern hits. Locks, depth and event limits may prevent subdivision."},
     {"Collapse", "Replace the primary selected nested hit with its parent hit. Select a zoomed hit first. Locked children prevent collapse."},

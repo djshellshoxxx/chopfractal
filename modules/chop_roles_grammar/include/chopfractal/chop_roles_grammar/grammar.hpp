@@ -116,6 +116,8 @@ class GrammarPolicy : public ICandidatePolicy {
  private:
   bool matchesChop(const Condition& c, ChopId chop) const;
   bool matchesPosition(const Condition& c, const ScopeContext& s, bool firstInBar) const;
+  // "First in the bar" for a rule that names a chop or role means the first event of THAT chop or role, not the first event of any kind.
+  bool firstOfKind(const Condition& c, const CandidateQuery& q) const;
   bool inRange(const Condition& c, const ScopeContext& s) const;
   std::vector<const Rule*> ordered() const;
 

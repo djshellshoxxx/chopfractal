@@ -28,6 +28,8 @@ struct CandidateQuery {
   bool firstInBar = false;                // no earlier event exists in this bar
   std::vector<ChopId> recent;             // preceding chops in time order across the phrase (nearest last)
   std::vector<ChopId> barSoFar;           // chops already placed earlier in this bar
+  std::vector<ChopId> barAfter;           // chops that stay later in this bar (retained events while mutating)
+  std::vector<ChopId> following;          // the chops that follow in time across the phrase (nearest first, at most 16)
 };
 
 struct TraceEntry {

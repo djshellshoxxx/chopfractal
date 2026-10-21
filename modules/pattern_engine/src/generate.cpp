@@ -96,22 +96,27 @@ class Gen {
     if (report_) report_->notes.push_back({k, rule, bar, beat});
   }
 
-  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop) const {
+  // `skipLater` lists events that may still change (fresh ones): they are not treated as fixed context after the candidate.
+  CandidateQuery query(const Pattern& p, int bar, Ticks startInBar, ChopId chop, const std::unordered_set<std::uint64_t>* skipLater = nullptr) const {
     struct E {
       int bar;
       Ticks start;
       std::uint64_t id;
       ChopId chop;
     };
-    std::vector<E> before;
-    for (int b = 0; b <= bar && b < static_cast<int>(p.bars.size()); ++b)
+    std::vector<E> before, after;
+    for (int b = 0; b < static_cast<int>(p.bars.size()); ++b)
       for (const Beat& bt : p.bars[static_cast<std::size_t>(b)].beats)
-        for (const Event& e : bt.events)
-          if (b < bar || e.start < startInBar) before.push_back({b, e.start, e.id.value, e.chop});
-    std::sort(before.begin(), before.end(), [](const E& a, const E& b) {
+        for (const Event& e : bt.events) {
+          if (b < bar || (b == bar && e.start < startInBar)) before.push_back({b, e.start, e.id.value, e.chop});
+          else if ((b > bar || e.start > startInBar) && !(skipLater && skipLater->count(e.id.value))) after.push_back({b, e.start, e.id.value, e.chop});
+        }
+    auto byTime = [](const E& a, const E& b) {
       if (a.bar != b.bar) return a.bar < b.bar;
       return a.start != b.start ? a.start < b.start : a.id < b.id;
-    });
+    };
+    std::sort(before.begin(), before.end(), byTime);
+    std::sort(after.begin(), after.end(), byTime);
     CandidateQuery q;
     q.chop = chop;
     q.startInBar = startInBar;
@@ -125,6 +130,10 @@ class Gen {
     }
     const std::size_t from = before.size() > 16 ? before.size() - 16 : 0;
     for (std::size_t i = from; i < before.size(); ++i) q.recent.push_back(before[i].chop);
+    for (const E& e : after) {
+      if (e.bar == bar) q.barAfter.push_back(e.chop);
+      if (q.following.size() < 16) q.following.push_back(e.chop);
+    }
     q.firstInBar = q.barSoFar.empty();
     return q;
   }
@@ -328,7 +337,7 @@ class Gen {
         note(Note::Kind::BlockedByRule, rq.rule, bar, beat);
         continue;
       }
-      const Decision d = policy_->evaluate(query(p, bar, target->start, rq.chop));
+      const Decision d = policy_->evaluate(query(p, bar, target->start, rq.chop, &fresh));
       if (!d.allowed) {
         note(Note::Kind::BlockedByRule, d.blockedBy ? d.blockedBy : rq.rule, bar, beat);
         continue;
@@ -360,12 +369,12 @@ class Gen {
           }
       if (!holder) continue;
       Event& e = holder->events[index];
-      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop));
+      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop, &fresh));
       if (d.allowed) continue;
       std::vector<ChopId> allowed;
       std::vector<double> weights;
       for (const ChopInfo& c : chops_.chops) {
-        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id));
+        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id, &fresh));
         if (dc.allowed) {
           allowed.push_back(c.id);
           weights.push_back(dc.weight);
