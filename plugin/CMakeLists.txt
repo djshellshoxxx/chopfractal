@@ -80,9 +80,13 @@ endif()
 
 # The plugin's own sources, shared by the plugin and the shell tests. A new panel or editor class (src/*Panel.cpp,
 # src/Editor*.cpp) and a new test (tests/test_*.cpp) is picked up on the next configure without editing this file.
-file(GLOB CHOPFRACTAL_PLUGIN_SOURCES CONFIGURE_DEPENDS
-  src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp
-  src/Editor*.cpp src/*Panel.cpp src/StatusBar.cpp)
+file(GLOB CHOPFRACTAL_PLUGIN_SOURCES CONFIGURE_DEPENDS src/*.cpp)
+
+# Brand fonts (SIL OFL, see THIRD_PARTY_NOTICES.md): Latin subsets, static instances cut from the Google Fonts variable files.
+juce_add_binary_data(ChopFractalFonts HEADER_NAME CdlFonts.h NAMESPACE CdlFonts SOURCES
+  assets/fonts/Inter-Regular.ttf assets/fonts/Inter-SemiBold.ttf assets/fonts/JetBrainsMono-Medium.ttf
+  assets/fonts/BigShouldersStencilDisplay-Black.ttf assets/fonts/RubikSprayPaint-Regular.ttf)
+set_target_properties(ChopFractalFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 file(GLOB CHOPFRACTAL_SHELL_TEST_SOURCES CONFIGURE_DEPENDS tests/test_*.cpp)
 target_sources(ChopFractal PRIVATE ${CHOPFRACTAL_PLUGIN_SOURCES})
 # Version stamp generated from the root VERSION file (single source of truth).
@@ -106,6 +110,7 @@ target_link_libraries(ChopFractal
     chopfractal::preset_store
     chopfractal::plugin_host_adapter
     chopfractal::input_capture
+    ChopFractalFonts
     juce::juce_audio_utils
     juce::juce_audio_formats
   PUBLIC
@@ -124,9 +129,10 @@ if(CHOPFRACTAL_BUILD_TESTS)
   target_sources(ChopFractalShellTests PRIVATE ${CHOPFRACTAL_SHELL_TEST_SOURCES} ${CHOPFRACTAL_PLUGIN_SOURCES})
   target_include_directories(ChopFractalShellTests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated" ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
   target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1
-    CHOPFRACTAL_VERSION_FILE="${CMAKE_CURRENT_LIST_DIR}/../VERSION")
+    CHOPFRACTAL_VERSION_FILE="${CMAKE_CURRENT_LIST_DIR}/../VERSION"
+    CHOPFRACTAL_TOKENS_FILE="${CMAKE_CURRENT_LIST_DIR}/../docs/design/cdl-tokens.json")
   target_link_libraries(ChopFractalShellTests PRIVATE
     chopfractal::composition chopfractal::plugin_ui_adapter chopfractal::preset_store chopfractal::plugin_host_adapter chopfractal::input_capture
-    juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
+    ChopFractalFonts juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
   add_test(NAME plugin.shell COMMAND ChopFractalShellTests)
 endif()
