@@ -1113,9 +1113,7 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
           dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
     auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
-    const std::size_t need = component.isEnabled() ? 20 : 8;  // a disabled control may carry just the short reason it is off
-    if (tooltip && tooltip->getTooltip().length() <= need) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
-                                                                     component.getParentComponent() ? component.getParentComponent()->getComponentID().toRawUTF8() : "-", tooltip->getTooltip().toRawUTF8());
+    const int need = component.isEnabled() ? 20 : 8;  // a disabled control may carry just the short reason it is off
     if (tooltip) CHECK(tooltip->getTooltip().length() > need);
     ++controls;
   });

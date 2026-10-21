@@ -5,16 +5,6 @@
 using namespace shelltest;
 namespace cf = chopfractal;
 
-namespace {
-juce::Slider* findSlider(juce::Component& root, const juce::String& title) {
-  juce::Slider* found = nullptr;
-  forEachControl(root, [&](juce::Component& c) {
-    if (auto* s = dynamic_cast<juce::Slider*>(&c))
-      if (s->getTitle() == title) found = s;
-  });
-  return found;
-}
-}  // namespace
 
 CHOP_TEST(arrangement_drawer_builds_sections_from_scenes_and_enforces_the_bar_rule) {
   if (!haveDisplay()) return;
