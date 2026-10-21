@@ -74,7 +74,13 @@ struct Voice {
   float tremDepth = 0.f;
   float level = 1.f, panBase = 0.f;
   int panDir = 1;
+  // Performance pads (F07): tag 2 marks a pad voice. Pad voices survive transport stop, seek and loop wrap.
+  std::uint8_t tag = 0;
+  std::uint8_t padNote = 0;
+  std::uint8_t padGroup = 0;
 };
+
+constexpr std::uint8_t kTagPad = 2;
 
 struct Trigger {
   int frame;
@@ -106,6 +112,15 @@ struct Renderer::Impl {
   int previewIndex = 0;
   std::vector<float> mixL, mixR;
   std::vector<Trigger> triggers;
+  Mailbox<PadBank> padBank;
+  const PadBank* bank = nullptr;             // acquired once per chunk
+  const PadEvent* padEvents = nullptr;       // the live input of the call being processed
+  int numPadEvents = 0;
+  int padOffset = 0;                         // frame of the current chunk within the host block
+  PadParams padParams;
+  std::atomic<int> padVoices{0};
+  std::atomic<std::uint64_t> padDroppedCount{0};
+  std::atomic<std::uint64_t> padUnmappedCount{0};
 
   double outGain = 1.0;
   double dry = 0.0;
@@ -186,7 +201,43 @@ struct Renderer::Impl {
   }
 
   void releaseAll() {
-    for (Voice& v : voices) releaseVoice(v);
+    for (Voice& v : voices)
+      if (v.tag != kTagPad) releaseVoice(v);  // pad voices belong to the player, not to the transport
+  }
+
+  void releasePadVoices(std::uint8_t note, bool anyNote, std::uint8_t group, bool anyGroup) {
+    for (Voice& v : voices)
+      if (v.active && v.tag == kTagPad && (anyNote || v.padNote == note) && (anyGroup || v.padGroup == group)) releaseVoice(v);
+  }
+
+  // One pad event at its exact frame. The source must be ready (callers check).
+  void applyPad(const PadEvent& e, const SourceData& src) {
+    switch (e.type) {
+      case PadEvent::Type::AllNotesOff: releasePadVoices(0, true, 0, true); return;
+      case PadEvent::Type::NoteOff:
+        if (padParams.mode == PadMode::Gate && e.note < kPadNotes) releasePadVoices(e.note, false, 0, true);  // one-shots ignore note-off
+        return;
+      case PadEvent::Type::NoteOn: break;
+    }
+    if (e.note >= kPadNotes || !bank) return;
+    const PadSlot& slot = bank->slots[e.note];
+    if (slot.region.empty() || slot.region.start < 0 || slot.region.end > src.frames) {
+      padUnmappedCount.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    if (padParams.mode == PadMode::Mono) releasePadVoices(0, true, 0, true);
+    else if (padParams.mode == PadMode::Gate) releasePadVoices(e.note, false, 0, true);
+    if (slot.chokeGroup != 0) releasePadVoices(0, true, slot.chokeGroup, false);
+    Voice* v = allocateVoice();
+    if (!v) return;
+    EventTransform tx;
+    tx.level = velocityGain(padParams.curve, e.velocity);
+    const double rate = static_cast<double>(src.sampleRate) / cfg.sampleRate;  // pitch 0
+    const std::int64_t gate = static_cast<std::int64_t>(std::ceil(static_cast<double>(slot.region.length()) / rate));  // the whole chop plays
+    startVoice(*v, src, slot.region, tx, gate, slot.fadeInFrames, slot.fadeOutFrames);
+    v->tag = kTagPad;
+    v->padNote = e.note;
+    v->padGroup = slot.chokeGroup;
   }
 
   static void passthrough(const float* const* in, float* const* out, int nch, int frames) {
@@ -566,8 +617,36 @@ struct Renderer::Impl {
     });
   }
 
+  // Renders [0, frames), starting voices from the pattern triggers and the pad events in frame order. At equal frames the
+  // pattern goes first. Pad events carry frames of the whole host block; padOffset rebases them for an oversize-block chunk.
+  void renderWithEvents(const Playback& pb, double tpf, int frames) {
+    constexpr int kNone = 0x7fffffff;
+    std::size_t ti = 0;
+    int pi = 0;
+    int cursor = 0;
+    while (pi < numPadEvents && padEvents[pi].frame < padOffset) ++pi;  // events of earlier chunks
+    for (;;) {
+      const int tf = ti < triggers.size() ? triggers[ti].frame : kNone;
+      const int pf = (pi < numPadEvents && padEvents[pi].frame - padOffset < frames) ? padEvents[pi].frame - padOffset : kNone;
+      if (tf == kNone && pf == kNone) break;
+      const int at = std::min(tf, pf);
+      if (at > cursor) {
+        renderVoices(cursor, at);
+        cursor = at;
+      }
+      if (tf <= pf) {
+        const Trigger& t = triggers[ti++];
+        startFromEvent(*pb.source, *t.event, pb.slices[static_cast<std::size_t>(t.event - pb.events.data())], tpf);
+      } else {
+        applyPad(padEvents[pi++], *pb.source);
+      }
+    }
+    renderVoices(cursor, frames);
+  }
+
   void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
     const Playback* pb = mailbox.acquire();
+    bank = padBank.acquire();
     if (pb != current) {
       // Compare the cached source pointer: once acquire() acknowledged the new Playback, the publisher may free
       // the old one, so `current` must not be dereferenced here.
@@ -601,7 +680,7 @@ struct Renderer::Impl {
       if (wasPlaying) releaseAll();
       wasPlaying = false;
       haveExpected = false;
-      renderVoices(0, frames);
+      renderWithEvents(*pb, 0.0, frames);  // no pattern triggers; pad events still play
       const bool limitIt = params.limiterEnabled || limiter.active();
       for (int i = 0; i < frames; ++i) {
         const float x0 = (in && in[0]) ? in[0][i] : 0.f;
@@ -651,15 +730,7 @@ struct Renderer::Impl {
       wasPlaying = true;
     }
 
-    int cursor = 0;
-    for (const Trigger& t : triggers) {
-      if (t.frame > cursor) {
-        renderVoices(cursor, t.frame);
-        cursor = t.frame;
-      }
-      startFromEvent(*pb->source, *t.event, pb->slices[static_cast<std::size_t>(t.event - pb->events.data())], tpf);
-    }
-    renderVoices(cursor, frames);
+    renderWithEvents(*pb, tpf, frames);
 
     // Output stage: generated playback (times the level-match gain), plus optionally the current input; all gains are
     // smoothed per sample so the result does not depend on the host block size. The limiter, when on, comes last.
@@ -734,12 +805,27 @@ struct Renderer::Impl {
     }
   }
 
-  void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+  void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames, const LiveInput& live) {
     if (frames <= 0 || nch < 1 || nch > 2 || !out || !out[0] || (nch == 2 && !out[1])) return;
     if (!prepared) {
       passthrough(in, out, nch, frames);
       return;
     }
+    padParams = live.padParams;
+    padEvents = live.pads;
+    numPadEvents = (live.pads && live.numPads > 0) ? std::min(live.numPads, kMaxPadEventsPerBlock) : 0;
+    if (live.pads && live.numPads > kMaxPadEventsPerBlock) padDroppedCount.fetch_add(static_cast<std::uint64_t>(live.numPads - kMaxPadEventsPerBlock), std::memory_order_relaxed);
+    padOffset = 0;
+    processBlocks(tb, params, in, out, nch, frames);
+    int pads = 0;
+    for (const Voice& v : voices)
+      if (v.active && v.tag == kTagPad) ++pads;
+    padVoices.store(pads, std::memory_order_relaxed);
+    padEvents = nullptr;
+    numPadEvents = 0;
+  }
+
+  void processBlocks(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
     if (frames <= cfg.maxBlock) {
       processChunk(tb, params, in, out, nch, frames);
       return;
@@ -754,6 +840,7 @@ struct Renderer::Impl {
         inp[c] = (in && in[c]) ? in[c] + done : nullptr;
         outp[c] = out[c] + done;
       }
+      padOffset = done;
       TransportBlock t2 = tb;
       if (tb.positionValid && std::isfinite(tb.ppq)) t2.ppq = tb.ppq + static_cast<double>(done) * bpm / (60.0 * cfg.sampleRate);
       processChunk(t2, params, inp, outp, nch, n);
@@ -769,8 +856,18 @@ Mailbox<Playback>& Renderer::mailbox() { return impl_->mailbox; }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames) {
-  impl_->process(transport, params, in, out, numChannels, frames);
+  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{});
 }
+
+void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+                       int numChannels, int frames, const LiveInput& live) {
+  impl_->process(transport, params, in, out, numChannels, frames, live);
+}
+
+Mailbox<PadBank>& Renderer::padMailbox() { return impl_->padBank; }
+std::uint64_t Renderer::padDropped() const { return impl_->padDroppedCount.load(std::memory_order_relaxed); }
+std::uint64_t Renderer::padUnmapped() const { return impl_->padUnmappedCount.load(std::memory_order_relaxed); }
+int Renderer::activePadVoices() const { return impl_->padVoices.load(std::memory_order_relaxed); }
 
 bool Renderer::requestPreview(const PreviewRequest& request) {
   const std::uint32_t head = impl_->previewHead.load(std::memory_order_relaxed);

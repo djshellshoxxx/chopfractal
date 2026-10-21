@@ -141,6 +141,7 @@ ProjectSession::ProjectSession() : history_(history::Config{}) {
   // future bump: raise the module's schema constant, register one step per version, add a fixture test.
   migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
   registerSectionDecoder(kTagGroove, "Groove", [this](const StateSection& sec) { return decodeGroove(sec); });
+  registerSectionDecoder(kTagPads, "pad", [this](const StateSection& sec) { return decodePads(sec); });
 }
 
 void ProjectSession::notice(Notice::Level level, std::string text) { notices_.push_back({level, std::move(text)}); }
@@ -180,6 +181,7 @@ void ProjectSession::attachMailbox(render::Mailbox<render::Playback>* mailbox) {
 void ProjectSession::publish(std::shared_ptr<const render::Playback> pb) {
   playback_ = std::move(pb);
   if (mailbox_) mailbox_->publish(playback_);
+  publishPadBank();
 }
 
 std::unique_ptr<roles::GrammarPolicy> ProjectSession::makePolicy() const {
@@ -931,6 +933,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   patterns_.reset();
   groove_ = groove::Groove{};  // a project without the Groove section plays straight; the decoder below restores a saved one
   grooveHistory_.reset(groove_);
+  padSettings_ = PadSettings{};  // before the publish below; the decoder restores a saved one
   if (newPattern) patterns_.restore(std::move(*newPattern));
   patterns_.restoreSlots(std::move(newSlots));  // after restore(), which clears the slots
   extras_ = std::move(newExtras);
@@ -961,6 +964,8 @@ void ProjectSession::reset() {
   rules_ = roles::RuleSet{};
   extras_ = ProjectExtras{};
   sections_.clear();
+  padSettings_ = PadSettings{};
+  publishPadBank();
   groove_ = groove::Groove{};
   grooveHistory_.reset(groove_);
   notices_.clear();

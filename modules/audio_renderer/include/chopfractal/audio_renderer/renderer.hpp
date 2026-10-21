@@ -15,6 +15,7 @@
 // non-RT producer thread.
 #include <chopfractal/audio_renderer/limiter.hpp>
 #include <chopfractal/audio_renderer/mailbox.hpp>
+#include <chopfractal/audio_renderer/pads.hpp>
 #include <chopfractal/chop_contracts/event.hpp>
 #include <chopfractal/chop_contracts/result.hpp>
 #include <chopfractal/chop_contracts/time.hpp>
@@ -140,6 +141,16 @@ class Renderer {
   // `in` may alias `out`. numChannels is 1 or 2. frames may be 0.
   void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
               int numChannels, int frames);
+  // The same, with live performance input (F07): pad events sorted by frame in [0, frames). They start voices on their
+  // exact sample on top of the pattern, with the transport playing or stopped. The six-argument form forwards LiveInput{}
+  // and is bit-identical to it.
+  void process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+              int numChannels, int frames, const LiveInput& live);
+  // Which MIDI note plays which chop. Publish from a non-RT thread; the audio thread acquires it once per block.
+  Mailbox<PadBank>& padMailbox();
+  std::uint64_t padDropped() const;  // pad events beyond kMaxPadEventsPerBlock in one block (dropped)
+  std::uint64_t padUnmapped() const; // note-ons that matched no chop
+  int activePadVoices() const;       // sounding pad voices, published once per block (any thread)
 
   bool requestPreview(const PreviewRequest& request);  // false when the queue is full
   void reset();                                         // RT-safe: silences everything immediately

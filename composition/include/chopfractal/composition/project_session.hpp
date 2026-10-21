@@ -155,11 +155,46 @@ struct StateSection {
 // the warning "Some <feature> settings could not be restored.".
 using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
+constexpr std::uint8_t kTagPads = 10;         // owned by F07 Performance pads (composition/src/pads.cpp)
 constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
 constexpr std::size_t kMaxExtrasBlocks = 32;
 constexpr std::size_t kMaxExtrasBytes = 40u * 1024u * 1024u;
+
+// ---- performance pads (F07; composition/src/pads.cpp) ----
+// Project-level pad choices. Pad mode and velocity curve are host parameters; takes are never saved.
+struct PadSettings {
+  std::uint8_t baseNote = 36;          // 0..111; chop i plays on note baseNote + i
+  std::uint8_t midiChannel = 0;        // 0 omni, 1..16
+  std::uint8_t quantizeDivision = 16;  // 0 off, 4, 8, 16, 32
+  bool quantizeTriplet = false;
+  std::uint8_t merge = 0;              // 0 add to the pattern, 1 replace the hit's slot
+  std::map<std::uint64_t, std::uint8_t> chokeOverride;  // chop id -> 0 off, 1..4; absent = default (role "hat" -> 1, else off)
+  friend bool operator==(const PadSettings& a, const PadSettings& b) {
+    return a.baseNote == b.baseNote && a.midiChannel == b.midiChannel && a.quantizeDivision == b.quantizeDivision &&
+           a.quantizeTriplet == b.quantizeTriplet && a.merge == b.merge && a.chokeOverride == b.chokeOverride;
+  }
+};
+constexpr std::size_t kMaxTakeHits = 4096;
+// One recorded pad press. ppqOff < 0 means the release was not seen.
+struct TakeHit {
+  double ppqOn = 0.0;
+  double ppqOff = -1.0;
+  std::uint8_t note = 0;
+  std::uint8_t velocity = 100;
+};
+struct TakeOptions {
+  int quantizeDivision = 16;  // 0 off, 4, 8, 16, 32
+  bool triplet = false;
+  std::uint8_t merge = 0;     // 0 add, 1 replace
+  render::VelocityCurve curve = render::VelocityCurve::Linear;
+  render::PadMode mode = render::PadMode::Poly;
+  int baseNote = 36;
+};
+struct TakeReport {
+  int added = 0, replaced = 0, skippedLocked = 0, skippedCap = 0, skippedUnmapped = 0, skippedDuplicate = 0;
+};
 
 struct LoadOptions {
   bool deferSourceResolve = false;  // true: never call the resolver and queue no "not found" notice (the caller restores the audio itself)
@@ -261,6 +296,19 @@ class ProjectSession {
   Status setFavorite(history::NodeId node, bool favorite);
   Status deleteBranch(history::NodeId node, bool includeFavorites = false);
   Result<std::string> compareNodes(history::NodeId a, history::NodeId b) const;
+
+  // ---- performance pads (F07; composition/src/pads.cpp) ----
+  // Where the note-to-chop bank is published. Not owned; must outlive the session or be detached.
+  void attachPadMailbox(render::Mailbox<render::PadBank>* mailbox);
+  const PadSettings& padSettings() const { return padSettings_; }
+  // Validates, stores (section tag 10, absent while default) and republishes the bank. No undo step.
+  Status setPadSettings(const PadSettings& settings);
+  Status setChokeGroup(ChopId chop, std::uint8_t group);  // 0 off, 1..4
+  // The bank last published.
+  std::shared_ptr<const render::PadBank> padBank() const { return padBank_; }
+  // Quantizes the hits onto the pattern grid and merges them as user-owned events in one undo step. When nothing
+  // changes there is no undo entry.
+  Result<TakeReport> mergeTake(const std::vector<TakeHit>& hits, const TakeOptions& options);
 
   // ---- Groove Lab (F17; composition/src/groove.cpp) ----
   // Playback-time swing, push/pull, humanize and accents. Never changes the pattern; rebuilds the playback snapshot.
@@ -381,6 +429,11 @@ class ProjectSession {
   groove::Groove groove_;
   SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
   Status decodeGroove(const StateSection& s);
+  Status decodePads(const StateSection& s);
+  void publishPadBank();
+  PadSettings padSettings_;
+  render::Mailbox<render::PadBank>* padMailbox_ = nullptr;
+  std::shared_ptr<const render::PadBank> padBank_;
   Result<std::shared_ptr<const render::Playback>> buildPlayback(const pattern::Pattern& p, bool withGroove) const;
 };
 

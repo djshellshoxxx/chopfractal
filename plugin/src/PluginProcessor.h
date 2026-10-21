@@ -7,7 +7,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
+#include <vector>
 #include <atomic>
+#include <chopfractal/audio_renderer/spsc_queue.hpp>
 #include <chopfractal/composition/export_job.hpp>
 #include <chopfractal/composition/project_session.hpp>
 #include <chopfractal/composition/source_replace.hpp>
@@ -42,7 +44,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   using juce::AudioProcessor::processBlock;
   juce::AudioProcessorEditor* createEditor() override;
   bool hasEditor() const override { return true; }
-  bool acceptsMidi() const override { return false; }
+  bool acceptsMidi() const override { return true; }  // performance pads (F07); producesMidi and isMidiEffect stay false
   bool producesMidi() const override { return false; }
   bool isMidiEffect() const override { return false; }
   void setNonRealtime(bool isNonRealtime) noexcept override;
@@ -127,6 +129,26 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Everything buildCaptureView() needs, read from the engine, the host state and the session (message thread).
   chopfractal::ui::CaptureUiInput captureUiInput(chopfractal::capture::CaptureMode mode, int bars, double maxSeconds);
 
+  // ---- performance pads (F07; docs/specs/roadmap/F07-performance-pads.md) ----
+  // Any thread. The press reaches the audio thread through a fixed-size queue and sounds one block later; a full queue drops it.
+  void padTrigger(int note, int velocity, bool on);
+  void padAllNotesOff();
+  // Project-level pad choices (base note, MIDI channel, quantize, merge); republishes the note bank.
+  chopfractal::Status setPadSettings(const chopfractal::composition::PadSettings& settings);
+  chopfractal::Status setChokeGroup(chopfractal::ChopId chop, std::uint8_t group);
+  chopfractal::composition::PadSettings padSettings();
+  // Record: while armed, the transport plays and the host reports a song position, pad presses become take hits. The take
+  // merges into the pattern at the next loop midpoint, when Record is switched off, and when the transport stops.
+  void setRecordArmed(bool armed);
+  bool recordArmed() const { return recordArmed_.load(); }
+  void discardTake();
+  int takeHits() const { return takeCount_.load(); }
+  std::uint64_t takeDropped() const { return takeDropped_.load(); }  // hits lost because the audio-to-UI queue was full
+  std::uint64_t padDropped() const { return padInputDropped_.load() + renderer_.padDropped(); }
+  // Bit n of word n >> 5 is set when note n started since the last call (MIDI and on-screen pads). Editor timer.
+  std::array<std::uint32_t, 4> takePadActivity();
+  int activePadVoices() const { return renderer_.activePadVoices(); }
+
   // Decodes WAV/AIFF (and other basic formats) within the spec's size limits.
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
@@ -134,6 +156,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);
+  void pollPads(bool midpointCrossed);  // message thread: drains the take queue and merges takes
+  void mergePendingTake();
   void pollCapture();     // message thread: frees idle capture memory and reports how a capture ended
   void finishKeep(std::uint64_t ticket, std::shared_ptr<const chopfractal::render::SourceData> data, std::string name, bool chopAfter, bool wrapped, double seconds, bool failed);
   void pollOutputStage();  // message thread: gesture-effect settings, level-match measurement, export parameters, latency
@@ -147,6 +171,28 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<double, 5> lastGrooveParams_{};  // Groove Lab knobs as of the last poll (message thread): the session is touched only when one moved
   std::atomic<double> sampleRate_{48000.0};
   chopfractal::capture::CaptureEngine capture_;
+  // ---- pads ----
+  struct UiPad {
+    std::uint8_t note = 0, velocity = 0, kind = 0;  // kind: 0 note off, 1 note on, 2 all notes off
+  };
+  struct TakeEvent {
+    double ppq = 0.0;
+    std::uint8_t note = 0, velocity = 0;
+    bool on = false;
+  };
+  chopfractal::render::SpscQueue<UiPad, 128> uiPadQueue_;      // any thread -> audio thread
+  chopfractal::render::SpscQueue<TakeEvent, 1024> takeQueue_;  // audio thread -> message thread
+  std::array<chopfractal::render::PadEvent, chopfractal::render::kMaxPadEventsPerBlock> padEvents_{};  // audio thread
+  std::array<std::atomic<std::uint32_t>, 4> padActivity_{};
+  std::atomic<int> padChannel_{0};
+  std::atomic<bool> recordArmed_{false};
+  std::atomic<std::uint64_t> padInputDropped_{0};
+  std::atomic<std::uint64_t> takeDropped_{0};
+  std::atomic<int> takeCount_{0};
+  std::vector<chopfractal::composition::TakeHit> takeBuffer_;  // message thread
+  std::array<int, 128> openHit_{};                             // message thread: index of the open hit per note, -1 none
+  bool takeFullReported_ = false;
+  bool wasPlayingForTake_ = false;
   std::atomic<bool> captureBlocked_{false};
   std::atomic<int> inputOverride_{-1};
   int captureInputChannels() const { const int o = inputOverride_.load(); return o >= 0 ? o : getTotalNumInputChannels(); }

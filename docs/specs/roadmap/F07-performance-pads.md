@@ -1,15 +1,25 @@
 # F07 Performance pads
 
-**Status:** Ready for development  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` section: extras tag 10); soft dependency
+**Status:** Renderer, host parameters, composition, processor and view model implemented on `feat/AIO-audio-io`; PadPanel and the "Pads" toggle are wired by the GUI rewrite from section 12  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` section: extras tag 10); soft dependency
 on F08 (reuses `render::SpscQueue` and `render::LiveInput`; whichever merges second adapts, section 5)  **Blocks:** F11 (shares `processBlock` and bus/MIDI declarations; lands after F07
 per README)
 
-## 0. Implementation status (audited 2026-10-20)
-**Not started.** Nothing in the as-built plugin accepts MIDI (`acceptsMidi` is false) and there is no pad UI. Decisions recorded by the audit:
-- **Manifest:** pass 3 already bumped `kManifestVersion` to 3 and appended `chaos` at index 14. `perf_mode` and `perf_velocity_curve` are appended after `chaos` (indices 15 and 16) with `sinceVersion` 3; the manifest version stays 3 until the first beta tag freezes it (roadmap README section 5, "Manifest policy"). Wherever the body says "set by whichever of F08/F07 merges first" read "already 3".
-- **Project state:** the `pads` section is F01 extras tag 10 (F01 section 4.4), cap 64 KiB.
-- **Gesture plumbing:** F08's gesture engine (CC mapper, `LiveInput`) is still unbuilt and F08 was reduced to gestures only (see F08 section 0). F07 still depends on it only for CC1/CC16/CC17 mapping; without F08 the pads work and CC input is ignored.
-- The PadPanel is a new row-less overlay inside FeaturePanel's free width: it opens from a `Pads` toggle (90 px) in FeaturePanel row E (roadmap README, "FeaturePanel row budget"). Pixel placement is decided at implementation against F00's as-built panel sizes (FeaturePanel 920 x 104).
+## 0. Implementation status
+**Implemented (AIO branch, 2026-10-21):** `audio_renderer` pads (`pads.hpp`, `spsc_queue.hpp`, pad voices, `Renderer::process(..., LiveInput)`, `padMailbox()`), host parameters `perf_mode` and `perf_velocity_curve` (indices 15 and 16, `sinceVersion` 3, manifest version still 3), `ProjectSession` pad bank, `PadSettings`, state section tag 10, `mergeTake`, processor MIDI input (`acceptsMidi`, `NEEDS_MIDI_INPUT TRUE`), on-screen pad queue, take recording and the midpoint merge, and the portable view model `plugin_ui_adapter/pads_view.hpp`. Tests: `modules/audio_renderer/tests/test_pads.cpp`, `composition/tests/test_pads.cpp`, `modules/plugin_ui_adapter/tests/test_pads_view.cpp`, `plugin/tests/test_pads_shell.cpp`.
+
+**Not built here:** `PadPanel`, the "Pads" toggle in FeaturePanel and the GUI tests of section 7 (`pad_panel_pads_trigger_and_record`). The GUI rewrite wires them from the command list in section 12.
+
+Decisions made while implementing (these override the text below where they differ):
+- **Manifest:** `perf_mode` and `perf_velocity_curve` are appended after `chaos`; `kManifestVersion` stays 3.
+- **Gesture plumbing:** F08's gesture engine does not exist, so `LiveInput` carries the pad fields only (`pads`, `numPads`, `padParams`); F08 adds its fields. CC input other than All Notes Off (CC123) and All Sound Off (CC120) is ignored.
+- **SpscQueue** is created here as F08 section 4 specifies it. The UI-to-audio pad queue has one producer: call `padTrigger` from the message thread only (or serialize callers).
+- **Pad bank** is rebuilt by `publishPadBank()` from `ProjectSession::publish`, so a marker edit, a role change or a settings change always reaches the audio thread. A role assigned with `assignRole` reaches the bank at the next publish (Generate, Mutate, marker edit, load), like the pattern itself.
+- **Default choke group** is 1 for chops whose role (explicit or detected) is hat; `setChokeGroup` stores an override only when it differs from that default, so the section stays absent for untouched projects. Pattern voices keep the engine's own choke groups; pad choke groups apply to pad voices only.
+- **Take merge** runs from `pollAudioFlags` (30 Hz timer) at a loop midpoint, when Record is switched off, and when the transport stops. A take that finds no pattern is dropped with "Recording needs a pattern. Generate one first." `setStateInformation` discards a waiting take.
+- **Extra messages** (not in section 3): "Recording needs a pattern. Generate one first." and, for duplicates in Add mode, "N skipped: already in the pattern.". Recording is not refused during a morph or scene playback because F09 and F10 do not exist yet.
+- **Record while `effect_enable` is off:** pad input is ignored and nothing is recorded.
+- **Pad lighting** comes from `takePadActivity()` (a note-on bit per MIDI note, cleared on read) and `PadUiInput::sounding`; the view marks lit pads with `PadCell::lit`, which the editor must draw with a shape or text as well as colour.
+- **Pad velocity from the mouse:** `ui::padVelocityFromY(y, height)`.
 
 ## 1. Summary and user value
 Play the chops like a sampler: MIDI notes from the DAW (or a 4x4 grid of on-screen pads) trigger the current chops sample-accurately on top of the running pattern, with velocity,
@@ -244,6 +254,26 @@ still work, and the QA note in the manual says so. (8) Open the plugin in the va
 - **Voice starvation** (pads steal pattern voices). Matches the existing quietest-voice policy; raising `maxVoices` is a separate decision.
 - **Stuck notes** (Gate). All clear paths: NoteOff, AllNotesOff, `Renderer::reset()`, `prepareToPlay`, bypass, editor close for UI pads (`padTrigger` release on `~PadPanel`).
 - **Merging into a pattern changed meanwhile.** Takes store positions only; covered by a test.
+
+## 12. GUI command list (what each control must call)
+The editor builds a `ui::PadUiInput` on its 30 Hz timer (chop count and roles from `proc.withSession`, `proc.padSettings()`, `proc.recordArmed()`, `proc.takeHits()`, `proc.hostPlaying`, `proc.hostHasPosition`, and the bits from `proc.takePadActivity()` OR-ed into a short hold) and passes it to `ui::buildPadView()` (`plugin_ui_adapter/pads_view.hpp`). Every label, enable flag and title below comes from the returned `PadView`. Take messages reach the status bar through `statusMessage()`; the editor shows them, it does not compose them.
+
+| Control | Calls |
+|---|---|
+| "Pads" toggle in FeaturePanel (title "Show the performance pads") | UI only; shows or hides the PadPanel. Empty text: `view.emptyText` |
+| "Pad 1" .. "Pad 16" (`view.pads[i]`) | name and text `cell.name`, painted `cell.label`, `cell.role`, `cell.noteName`, title `cell.title`, enabled by `cell.enabled`, outline and marker when `cell.lit`. Mouse down: `proc.padTrigger(cell.note, ui::padVelocityFromY(y, height), true)`; mouse up or exit: `proc.padTrigger(cell.note, 0, false)`; closing the panel or editor: `proc.padAllNotesOff()` |
+| Pad right-click menu (`ui::padChokeMenuItems()`) | check mark on `cell.chokeGroup`; choice n calls `proc.setChokeGroup(chopId, n)` with the chop id from the snapshot at index `cell.chop` |
+| "Pad page" combo (`view.pageItems`, hidden unless `view.showPage`) | UI state `page` |
+| "Pad mode" combo (`ui::kPadModeItems`) | `ComboBoxAttachment` on parameter `perf_mode` |
+| "Velocity curve" combo (`ui::kPadCurveItems`) | `ComboBoxAttachment` on parameter `perf_velocity_curve` |
+| "Base note" slider 0..111 | text `view.baseNoteText` (`ui::padBaseNoteText`); `proc.setPadSettings(settings with baseNote)` |
+| "MIDI channel" combo (`ui::padMidiChannelItems()`) | `proc.setPadSettings(settings with midiChannel = index)` |
+| "Record" toggle | enabled by `view.recordEnabled`, state `view.recordOn`, hint `view.recordHint`; `proc.setRecordArmed(on)` |
+| "Quantize" combo (`ui::kPadQuantizeItems`) | `ui::padQuantizeFromIndex(index)` then `proc.setPadSettings(...)` (`quantizeDivision`, `quantizeTriplet`) |
+| "Merge" combo (`ui::kPadMergeItems`) | `proc.setPadSettings(settings with merge = index)` |
+| "Discard Take" | label `view.discardLabel`, enabled by `view.discardEnabled` -> `proc.discardTake()` |
+
+Settings are read-modify-write: `auto s = proc.padSettings(); s.baseNote = n; proc.setPadSettings(s);`. All boxes except Record are disabled unless `view.settingsEnabled`. Keyboard order: pads (row-major), page, mode, curve, base note, channel, Record, Quantize, Merge, Discard Take. Every control needs `setTitle`.
 
 ## 11. Implementation steps
 1. CMake `NEEDS_MIDI_INPUT TRUE`, `acceptsMidi() true`, updated shell assertion; run the validator (alone, revertible). 2. `spsc_queue.hpp` (if F08 absent) + `pads.hpp`/`velocityGain` +

@@ -1,7 +1,9 @@
 #include <chopfractal/input_capture/capture.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <limits>
 #include <new>

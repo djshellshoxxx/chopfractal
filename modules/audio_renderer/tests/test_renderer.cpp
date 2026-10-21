@@ -775,3 +775,50 @@ CHOP_TEST(process_performs_no_heap_allocation_with_the_quality_stage_and_every_g
   gCountAllocs = false;
   CHECK_EQ(gAllocs.load(), 0);
 }
+
+// F07: the pad path (events, bank lookups, voice starts, mono/gate/choke releases, oversize chunking) never allocates.
+CHOP_TEST(pad_path_performs_no_heap_allocation) {
+  Renderer r;
+  Config cfg;
+  cfg.maxBlock = 256;  // smaller than the 700-frame blocks below: oversize chunking is covered
+  r.prepare(cfg);
+  auto src = makeSource(2, 44100, 48000, ramp);
+  FlatEventList events;
+  for (std::uint64_t i = 1; i <= 16; ++i) events.push_back(ev(i, 20000, static_cast<Ticks>(i * 100), 300));
+  r.mailbox().publish(playback(src, events));
+  auto bank = std::make_shared<PadBank>();
+  for (int k = 0; k < 32; ++k) {
+    bank->slots[static_cast<std::size_t>(36 + k)].region = {k * 1000, k * 1000 + 3000};
+    bank->slots[static_cast<std::size_t>(36 + k)].chokeGroup = static_cast<std::uint8_t>(k % 3);
+  }
+  r.padMailbox().publish(bank);
+  std::vector<float> x(700, 0.1f), oL(700), oR(700);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  RenderParams p;
+  std::vector<PadEvent> pads(300);  // above the per-block cap: the excess is dropped and counted, not allocated for
+  r.process(tb, p, in, out, 2, 700);  // warm-up: first acquire
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 300; ++i) {
+    tb.ppq = i * 700 * 120.0 / (60.0 * 48000.0);
+    tb.playing = i % 40 != 39;
+    for (std::size_t k = 0; k < pads.size(); ++k) {
+      pads[k].frame = static_cast<std::int32_t>(k * 700 / pads.size());
+      pads[k].type = (k + static_cast<std::size_t>(i)) % 5 == 0 ? PadEvent::Type::NoteOff : ((k % 97 == 96) ? PadEvent::Type::AllNotesOff : PadEvent::Type::NoteOn);
+      pads[k].note = static_cast<std::uint8_t>(30 + (k * 7 + static_cast<std::size_t>(i)) % 50);  // some unmapped
+      pads[k].velocity = static_cast<std::uint8_t>(1 + k % 127);
+    }
+    LiveInput live;
+    live.pads = pads.data();
+    live.numPads = static_cast<int>(i % 3 == 0 ? pads.size() : 20);
+    live.padParams.mode = static_cast<PadMode>(i % 3);
+    live.padParams.curve = static_cast<VelocityCurve>(i % 4);
+    r.process(tb, p, in, out, 2, 700, live);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+}

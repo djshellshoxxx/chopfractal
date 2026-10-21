@@ -2,7 +2,7 @@
 
 **Status:** Draft for review
 
-**Implementation (audited 2026-10-20):** Built: 8 voices, scheduler, fixed transform order extended with crunch and filter, lock-free handoff, offline render through the same `Renderer::process`, allocation-free `process()`, output bit-identical across block sizes. No output limiter or loudness matching exists (F16); no MIDI input (F07); one stereo output bus (F11). The renderer prepared-event cap is 4096 after retrigger expansion. Per-event echo and tremolo-pan are specified as E01 and E02.
+**Implementation (audited 2026-10-20):** Built: 8 voices, scheduler, fixed transform order extended with crunch and filter, lock-free handoff, offline render through the same `Renderer::process`, allocation-free `process()`, output bit-identical across block sizes. No output limiter or loudness matching exists (F16); MIDI input is limited to the performance pads (F07, built: notes trigger chops through `LiveInput`; the plugin declares a MIDI input bus, no output, `Fx` category, latency 0); one stereo output bus (F11). The renderer prepared-event cap is 4096 after retrigger expansion. Per-event echo and tremolo-pan are specified as E01 and E02.
 
 
 ## Signal flow
@@ -28,7 +28,7 @@ The audio input is used for explicit capture and optional dry blending. The fini
 - Main output: stereo, with mono support.
 - No sidechain bus or auxiliary outputs in the first release.
 - Host bypass remains functional and should not destroy plugin state.
-- No MIDI output in the first release; audio rendering and export are specified separately.
+- Hosts that do not route MIDI to effects (Ableton Live, some FL Studio setups) reach the pads only through the on-screen pads. No MIDI output in the first release; audio rendering and export are specified separately.
 
 ## Scheduler and playback
 

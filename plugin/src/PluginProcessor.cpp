@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include <chopfractal/plugin_ui_adapter/capture_view.hpp>
+#include <chopfractal/plugin_ui_adapter/pads_view.hpp>
 
 #include "PluginEditor.h"
 
@@ -36,6 +37,9 @@ ChopFractalProcessor::ChopFractalProcessor()
   }
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
+  session_.attachPadMailbox(&renderer_.padMailbox());
+  takeBuffer_.reserve(cf::composition::kMaxTakeHits);
+  openHit_.fill(-1);
   startTimerHz(30);
 }
 
@@ -95,7 +99,7 @@ bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
   return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels());
 }
 
-void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
+void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
   const int frames = buffer.getNumSamples();
   const int channels = juce::jmin(2, buffer.getNumChannels());
@@ -146,7 +150,47 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     capture_.process(buffer.getArrayOfReadPointers(), juce::jmin(2, getTotalNumInputChannels(), buffer.getNumChannels()), frames, ct);
   }
 
-  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames);
+  // Performance pads: on-screen presses first (frame 0), then the MIDI notes at their own samples. Nothing here allocates.
+  int numPads = 0;
+  const bool padsOn = pv.get(cf::host::kEffectEnable) >= 0.5;
+  const bool recording = padsOn && recordArmed_.load(std::memory_order_relaxed) && tt.block.playing && tt.block.positionValid;
+  const double ppqPerFrame = tt.block.bpm / (60.0 * sampleRate_.load(std::memory_order_relaxed));
+  const auto addPad = [&](int frame, cf::render::PadEvent::Type type, int note, int velocity) {
+    if (numPads >= cf::render::kMaxPadEventsPerBlock) {
+      padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    cf::render::PadEvent& e = padEvents_[static_cast<std::size_t>(numPads++)];
+    e.frame = frame;
+    e.type = type;
+    e.note = static_cast<std::uint8_t>(note);
+    e.velocity = static_cast<std::uint8_t>(velocity);
+    if (type == cf::render::PadEvent::Type::NoteOn) padActivity_[static_cast<std::size_t>(note >> 5)].fetch_or(1u << (note & 31), std::memory_order_relaxed);
+    if (recording && type != cf::render::PadEvent::Type::AllNotesOff)
+      if (!takeQueue_.tryPush(TakeEvent{tt.block.ppq + frame * ppqPerFrame, e.note, e.velocity, type == cf::render::PadEvent::Type::NoteOn}))
+        takeDropped_.fetch_add(1, std::memory_order_relaxed);
+  };
+  {
+    UiPad u;
+    while (uiPadQueue_.tryPop(u))
+      addPad(0, u.kind == 2 ? cf::render::PadEvent::Type::AllNotesOff : (u.kind == 1 ? cf::render::PadEvent::Type::NoteOn : cf::render::PadEvent::Type::NoteOff), u.note, u.velocity);
+  }
+  if (!midi.isEmpty()) {
+    const int channel = padChannel_.load(std::memory_order_relaxed);
+    for (const auto meta : midi) {
+      const juce::MidiMessage msg = meta.getMessage();
+      if (channel != 0 && msg.getChannel() != channel) continue;
+      const int frame = juce::jlimit(0, frames - 1, meta.samplePosition);
+      if (msg.isNoteOn(false) && msg.getVelocity() > 0) addPad(frame, cf::render::PadEvent::Type::NoteOn, msg.getNoteNumber(), msg.getVelocity());
+      else if (msg.isNoteOff(true)) addPad(frame, cf::render::PadEvent::Type::NoteOff, msg.getNoteNumber(), 0);
+      else if (msg.isAllNotesOff() || msg.isAllSoundOff()) addPad(frame, cf::render::PadEvent::Type::AllNotesOff, 0, 0);
+    }
+  }
+  cf::render::LiveInput live;
+  live.pads = padEvents_.data();
+  live.numPads = numPads;
+  live.padParams = cf::host::toPadParams(pv);
+  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames, live);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.
@@ -211,6 +255,11 @@ void ChopFractalProcessor::pollOutputStage() {
 void ChopFractalProcessor::pollAudioFlags() {
   pollOutputStage();
   pollCapture();
+  {  // the project may have been loaded since the last poll: follow its MIDI channel
+    int channel = 0;
+    withSession([&channel](cf::composition::ProjectSession& s) { channel = s.padSettings().midiChannel; });
+    padChannel_.store(channel, std::memory_order_relaxed);
+  }
   {  // Groove Lab knobs: applied to the session (playback-time layer) only when one of them moved since the last poll
     const cf::host::ParamValues pv = currentParams();
     const std::array<double, 5> now = {pv.get(cf::host::kGrooveEnable), pv.get(cf::host::kGrooveTemplate), pv.get(cf::host::kGrooveSwing),
@@ -226,7 +275,9 @@ void ChopFractalProcessor::pollAudioFlags() {
       if (s.hasPendingActivation()) s.onLoopBoundary();
     });
   if (boundaryCount_.exchange(0) > 0) withSession([](cf::composition::ProjectSession& s) { s.onLoopBoundary(); });
-  if (const std::uint32_t crossings = midpointCount_.exchange(0)) {
+  const std::uint32_t crossings = midpointCount_.exchange(0);
+  pollPads(crossings > 0);  // before Evolve steps: the take is merged first, then the pattern evolves around it
+  if (crossings) {
     // Evolve: the step lands mid-loop so the new pattern is in place before the next loop begins. Each loop
     // midpoint crossed since the last tick is one step (bounded, so a long stall cannot trigger a burst).
     const double chaos = currentParams().get(cf::host::kChaos);
@@ -409,6 +460,7 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
 
 void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes) {
   clearUndoKeep();
+  discardTake();  // a take waiting for a merge belongs to the project being replaced
   const std::uint64_t ticket = ++loadTicket_;  // a file load or audio restore still in flight must not replace the project being restored
   juce::MemoryInputStream in(data, static_cast<std::size_t>(juce::jmax(0, sizeInBytes)), false);
   char magic[4] = {};
@@ -775,3 +827,137 @@ void ChopFractalProcessor::finishExport(const cf::Result<cf::composition::Export
 juce::AudioProcessorEditor* ChopFractalProcessor::createEditor() { return new ChopFractalEditor(*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ChopFractalProcessor(); }
+
+// ---------------------------------------------------------------------------------------------
+// performance pads (F07)
+// ---------------------------------------------------------------------------------------------
+
+void ChopFractalProcessor::padTrigger(int note, int velocity, bool on) {
+  if (note < 0 || note > 127) return;
+  UiPad u;
+  u.note = static_cast<std::uint8_t>(note);
+  u.velocity = static_cast<std::uint8_t>(juce::jlimit(1, 127, velocity));
+  u.kind = on ? 1 : 0;
+  if (!uiPadQueue_.tryPush(u)) padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void ChopFractalProcessor::padAllNotesOff() {
+  UiPad u;
+  u.kind = 2;
+  if (!uiPadQueue_.tryPush(u)) padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+cf::Status ChopFractalProcessor::setPadSettings(const cf::composition::PadSettings& settings) {
+  cf::Status st;
+  withSession([&](cf::composition::ProjectSession& s) { st = s.setPadSettings(settings); });
+  if (st.ok()) padChannel_.store(settings.midiChannel, std::memory_order_relaxed);
+  else setStatusMessage(juce::String(st.error().message));
+  return st;
+}
+
+cf::Status ChopFractalProcessor::setChokeGroup(cf::ChopId chop, std::uint8_t group) {
+  cf::Status st;
+  withSession([&](cf::composition::ProjectSession& s) { st = s.setChokeGroup(chop, group); });
+  if (!st.ok()) setStatusMessage(juce::String(st.error().message));
+  return st;
+}
+
+cf::composition::PadSettings ChopFractalProcessor::padSettings() {
+  cf::composition::PadSettings out;
+  withSession([&](cf::composition::ProjectSession& s) { out = s.padSettings(); });
+  return out;
+}
+
+std::array<std::uint32_t, 4> ChopFractalProcessor::takePadActivity() {
+  std::array<std::uint32_t, 4> out{};
+  for (std::size_t i = 0; i < out.size(); ++i) out[i] = padActivity_[i].exchange(0, std::memory_order_relaxed);
+  return out;
+}
+
+void ChopFractalProcessor::setRecordArmed(bool armed) {
+  if (!armed) {
+    recordArmed_.store(false);  // the next poll merges what was played
+    return;
+  }
+  bool ready = false;
+  withSession([&](cf::composition::ProjectSession& s) { ready = s.pattern() != nullptr && s.chops() && !s.chops()->chops.empty(); });
+  if (!ready) {
+    setStatusMessage(cf::ui::kPadNoPatternText);
+    return;
+  }
+  recordArmed_.store(true);
+  const bool noPosition = hostPlaying.load() && !hostHasPosition.load();
+  setStatusMessage(noPosition ? cf::ui::kPadNoPositionText : cf::ui::kPadArmedText);
+}
+
+void ChopFractalProcessor::discardTake() {
+  TakeEvent e;
+  while (takeQueue_.tryPop(e)) {
+  }
+  takeBuffer_.clear();
+  openHit_.fill(-1);
+  takeCount_.store(0);
+  takeFullReported_ = false;
+}
+
+void ChopFractalProcessor::pollPads(bool midpointCrossed) {
+  TakeEvent e;
+  while (takeQueue_.tryPop(e)) {
+    if (e.note > 127) continue;
+    if (e.on) {
+      if (takeBuffer_.size() >= cf::composition::kMaxTakeHits) {
+        if (!takeFullReported_) {
+          takeFullReported_ = true;
+          setStatusMessage(cf::ui::kPadTakeFullText);
+        }
+        continue;
+      }
+      cf::composition::TakeHit h;
+      h.ppqOn = e.ppq;
+      h.note = e.note;
+      h.velocity = e.velocity;
+      takeBuffer_.push_back(h);
+      openHit_[e.note] = static_cast<int>(takeBuffer_.size()) - 1;
+    } else {
+      const int i = openHit_[e.note];
+      if (i >= 0 && i < static_cast<int>(takeBuffer_.size())) takeBuffer_[static_cast<std::size_t>(i)].ppqOff = e.ppq;
+      openHit_[e.note] = -1;
+    }
+  }
+  takeCount_.store(static_cast<int>(takeBuffer_.size()));
+  const bool playing = hostPlaying.load();
+  const bool stopped = wasPlayingForTake_ && !playing;
+  wasPlayingForTake_ = playing;
+  if (!takeBuffer_.empty() && (midpointCrossed || stopped || !recordArmed_.load())) mergePendingTake();
+}
+
+void ChopFractalProcessor::mergePendingTake() {
+  const std::vector<cf::composition::TakeHit> hits = takeBuffer_;
+  discardTake();
+  const cf::host::ParamValues pv = currentParams();
+  withSession([&](cf::composition::ProjectSession& s) {
+    const cf::composition::PadSettings ps = s.padSettings();
+    cf::composition::TakeOptions opt;
+    opt.quantizeDivision = ps.quantizeDivision;
+    opt.triplet = ps.quantizeTriplet;
+    opt.merge = ps.merge;
+    opt.baseNote = ps.baseNote;
+    const cf::render::PadParams pp = cf::host::toPadParams(pv);
+    opt.curve = pp.curve;
+    opt.mode = pp.mode;
+    auto r = s.mergeTake(hits, opt);
+    if (!r.ok()) {
+      setStatusMessage(r.error().code == cf::ErrorCode::InvalidArgument ? juce::String(cf::ui::kPadNoPatternText) : juce::String(r.error().message));
+      return;
+    }
+    cf::ui::PadTakeCounts c;
+    c.added = r.value().added;
+    c.skippedLocked = r.value().skippedLocked;
+    c.skippedCap = r.value().skippedCap;
+    c.skippedUnmapped = r.value().skippedUnmapped;
+    c.skippedDuplicate = r.value().skippedDuplicate;
+    c.eventCap = s.pattern() ? s.pattern()->settings.maxEvents : c.eventCap;
+    const std::string text = cf::ui::padTakeNotice(c);
+    if (!text.empty()) setStatusMessage(text);
+  });
+}

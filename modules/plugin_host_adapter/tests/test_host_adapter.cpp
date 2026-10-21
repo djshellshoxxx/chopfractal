@@ -75,6 +75,8 @@ const Golden kGolden[] = {
     {"roll_rate_end", ParamKind::Choice, 0.0, 9.0, 8.0, 3},
     {"roll_freeze", ParamKind::Float, 0.0, 100.0, 0.0, 3},
     {"slice_polish", ParamKind::Bool, 0.0, 1.0, 1.0, 3},
+    {"perf_mode", ParamKind::Choice, 0.0, 2.0, 0.0, 3},
+    {"perf_velocity_curve", ParamKind::Choice, 0.0, 3.0, 0.0, 3},
 };
 }  // namespace
 
@@ -102,6 +104,11 @@ CHOP_TEST(manifest_matches_the_golden_list_and_indices) {
   CHECK_EQ(std::string(m[kEngineVersion].id), "engine_version");
   CHECK_EQ(std::string(m[kGrooveHumVel].id), "groove_hum_vel");
   CHECK_EQ(kEngineVersion, kChaos + 1);
+  CHECK_EQ(std::string(m[kPerfMode].id), "perf_mode");  // F07 rows follow the last shipped row (slice_polish)
+  CHECK_EQ(kPerfMode, kSlicePolish + 1);
+  CHECK_EQ(kPerfVelocityCurve, kPerfMode + 1);
+  CHECK_EQ(std::string(m[kPerfMode].choices), "Poly|Mono|Gate");
+  CHECK_EQ(std::string(m[kPerfVelocityCurve].choices), "Linear|Soft|Hard|Fixed");
   CHECK(findParam("density") == &m[kDensity]);
   CHECK(findParam("seed") == nullptr);  // the seed is never an automatable parameter
   CHECK(findParam("nope") == nullptr);
@@ -294,4 +301,15 @@ CHOP_TEST(choice_label_counts_match_their_ranges) {
   CHECK_EQ(v.get(kGrooveEnable), 0.0);
   CHECK_NEAR(snapValue(*findParam("groove_swing"), 58.3), 58.5, 1e-9);
   CHECK_NEAR(snapValue(*findParam("groove_hum_time"), 99.0), 30.0, 0.0);
+}
+
+CHOP_TEST(pad_parameters_map_to_the_renderer_pad_params) {
+  ParamValues v = ParamValues::defaults();
+  CHECK(toPadParams(v).mode == render::PadMode::Poly && toPadParams(v).curve == render::VelocityCurve::Linear);  // what a project without the rows gets
+  v.set(kPerfMode, 2.0);
+  v.set(kPerfVelocityCurve, 3.0);
+  CHECK(toPadParams(v).mode == render::PadMode::Gate && toPadParams(v).curve == render::VelocityCurve::Fixed);
+  v.set(kPerfMode, 1.0);
+  v.set(kPerfVelocityCurve, 2.0);
+  CHECK(toPadParams(v).mode == render::PadMode::Mono && toPadParams(v).curve == render::VelocityCurve::Hard);
 }

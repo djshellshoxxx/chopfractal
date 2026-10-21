@@ -144,7 +144,8 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
 | F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |
 | F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
-| F06, F07 | Rule editor, performance pads | Not started |
+| F06 | Rule editor | Not started |
+| F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |
 | F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
 | F09, F10, F11, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
 | F13 | MIDI drag-out | Partly built in pass 3: Drag MIDI and Drag WAV of the current pattern; variations and kit not built |

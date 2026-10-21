@@ -1,6 +1,7 @@
 // Arms a free-running capture, feeds it one second of a ramp as a host would, stops it and takes the audio.
 #include <chopfractal/input_capture/capture.hpp>
 
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 

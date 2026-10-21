@@ -65,6 +65,8 @@ const std::vector<ParamDef>& parameterManifest() {
       {"roll_rate_end", "Roll End Rate", "", ParamKind::Choice, 0.0, 9.0, 8.0, 1.0, 0.0, 3, "1/4|1/4T|1/8|1/8T|1/16|1/16T|1/32|1/32T|1/64|1/64T"},
       {"roll_freeze", "Roll Freeze Point", "%", ParamKind::Float, 0.0, 100.0, 0.0, 0.0, 10.0, 3, nullptr},
       {"slice_polish", "Slice Polish", "", ParamKind::Bool, 0.0, 1.0, 1.0, 1.0, 0.0, 3, nullptr},
+      {"perf_mode", "Pad Mode", "", ParamKind::Choice, 0.0, 2.0, 0.0, 1.0, 0.0, 3, "Poly|Mono|Gate"},
+      {"perf_velocity_curve", "Velocity Curve", "", ParamKind::Choice, 0.0, 3.0, 0.0, 1.0, 0.0, 3, "Linear|Soft|Hard|Fixed"},
   };
   return manifest;
 }
@@ -134,6 +136,13 @@ render::PlaybackOptions toPlaybackOptions(const ParamValues& values) {
   o.tremRate = static_cast<std::uint8_t>(std::lround(values.get(kTremRate)));
   o.tremDepth = static_cast<std::uint8_t>(std::lround(values.get(kTremDepth)));
   return o;
+}
+
+render::PadParams toPadParams(const ParamValues& values) {
+  render::PadParams p;
+  p.mode = static_cast<render::PadMode>(std::min(2L, std::max(0L, std::lround(values.get(kPerfMode)))));
+  p.curve = static_cast<render::VelocityCurve>(std::min(3L, std::max(0L, std::lround(values.get(kPerfVelocityCurve)))));
+  return p;
 }
 
 TimeTranslation translateHostTime(const HostTimeInfo& host, double manualBpm, TimeSignature fallbackMeter) {

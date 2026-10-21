@@ -75,6 +75,8 @@ enum ParamIndex : std::size_t {
   kRollRateEnd,
   kRollFreeze,
   kSlicePolish,   // renderer slice-boundary quality stage
+  kPerfMode,      // F07 performance pads: 0 Poly, 1 Mono, 2 Gate
+  kPerfVelocityCurve,  // F07: 0 Linear, 1 Soft, 2 Hard, 3 Fixed
   kParamCount
 };
 
@@ -114,5 +116,7 @@ int barsFromChoice(double choiceIndex);
 render::RenderParams toRenderParams(const ParamValues& values, float matchGainDb = 0.f);
 // Global fallbacks of the Echo and Tremolo-Pan blocks that carry "use the global value" markers.
 render::PlaybackOptions toPlaybackOptions(const ParamValues& values);
+// Pad mode and velocity curve (F07) as the renderer takes them.
+render::PadParams toPadParams(const ParamValues& values);
 
 }  // namespace chopfractal::host

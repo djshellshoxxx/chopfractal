@@ -14,6 +14,7 @@ Headless view models for the editor so geometry, text, and layout are unit-testa
 - `buildOrbitView(pattern, chops)`, `playheadAngle()`, `hitPulse()`, `arcRadii()`, `hitTest()` (Orbit View model)
 - `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` (pixel/tick/lane geometry for direct hit editing)
 - `buildCaptureView()`, `captureEndNotice()`, `formatCaptureTime()` (input capture control state, labels and notices)
+- `buildPadView()`, `padTakeNotice()`, `padNoteName()`, `padVelocityFromY()`, `padQuantizeFromIndex()` (performance pad grid, labels, settings boxes and take messages)
 
 Public headers:
 
@@ -21,6 +22,7 @@ Public headers:
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
 - `include/chopfractal/plugin_ui_adapter/capture_view.hpp`
+- `include/chopfractal/plugin_ui_adapter/pads_view.hpp`
 
 ## Contract
 
