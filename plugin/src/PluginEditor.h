@@ -89,6 +89,10 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Point<int> selectionStart_, selectionEnd_;
 
   juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
+  // Input capture: Arm, then Stop (or let a bar length finish), then Keep to load it as the source.
+  juce::TextButton recArm_{"Rec Arm"}, recStop_{"Rec Stop"}, recKeep_{"Rec Keep"};
+  juce::ComboBox capLen_;
+  void updateCaptureControls();
   juce::TextEditor statusMessages_;
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"},

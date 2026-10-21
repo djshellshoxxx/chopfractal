@@ -67,6 +67,36 @@ jobs:
           cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
           cmake --build build-tsan --target test_audio_renderer
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
+      - name: ThreadSanitizer on the input capture (control thread vs audio thread)
+        run: |
+          cmake -S modules/input_capture -B build-tsan-capture -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan-capture --target test_input_capture
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan-capture/test_input_capture
+
+  # The plugin shell tests (processor, editor, fuzz, capture) under AddressSanitizer and UBSan with a virtual display.
+  plugin-sanitizers:
+    timeout-minutes: 90
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libgl1-mesa-dev libfreetype-dev libfontconfig1-dev libgtk-3-dev
+      - name: Build the shell tests with sanitizers
+        run: |
+          cmake -S . -B build-plugin-asan -G Ninja -DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_SANITIZE=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build-plugin-asan --target ChopFractalShellTests
+      - name: Run (headless, then with a virtual display)
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          CHOPFRACTAL_REQUIRE_DISPLAY: "1"
+          CF_FUZZ_EVENTS: "2000"
+        run: |
+          env -u DISPLAY -u CHOPFRACTAL_REQUIRE_DISPLAY ./build-plugin-asan/plugin/ChopFractalShellTests_artefacts/RelWithDebInfo/ChopFractalShellTests
+          xvfb-run -a ./build-plugin-asan/plugin/ChopFractalShellTests_artefacts/RelWithDebInfo/ChopFractalShellTests
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
   transfer-smoke:

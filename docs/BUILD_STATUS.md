@@ -1,6 +1,6 @@
 # ChopFractal build status
 
-Last updated with the implementation pass that added all code (the repository previously held specifications only).
+Last updated after audit round 5, alpha 2 (Windows standalone with local playback, drag-and-drop loading, section selection and hover help) and the start of beta preparation.
 
 ## Where the build stands
 
@@ -8,19 +8,19 @@ Last updated with the implementation pass that added all code (the repository pr
 |---|---|---|
 | 0 Toolchain audit | **Done** | C++17; GCC 13, Clang 18, Apple Clang (macOS arm64) and MSVC 2022 all build and pass the full suite in CI |
 | 1 Source and pattern model | **Done** | Deterministic generation, locks, undo, state round-trip, no audio needed to test it |
-| 2 Minimal audio effect | **Done on Linux** | VST3 shell builds, passes the official Steinberg validator (47/47), pass-through before a source exists |
-| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. **Not done: input capture** (Arm / Capture / Stop / Keep) |
-| 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
-| 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
-| 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
-| 7 Compatibility, optimization, beta | **Not started** | Needs real DAWs, macOS/Windows *plugin* builds (the portable modules already build there), performance thresholds, installers |
-| 8 Release | **Not started** | |
+| 2 Minimal audio effect | **Done** | VST3, CLAP and a stand-alone app build in CI on Linux, Windows and macOS; the Steinberg validator passes 47/47 on Linux; pass-through before a source exists |
+| 3 Source workflow | **Done** | File import and drag-and-drop loading (WAV verified; AIFF and other JUCE formats untested), transient and grid analysis, marker editing, audition. Live input capture (Rec Arm / Rec Stop / Rec Keep, free or exact bars, bar-aligned) is implemented; see `docs/specs/input-capture.md` |
+| 4 Pattern creation and editing | **Done** | Generate, Mutate, locks, seed, undo/redo, A/B, Fractal, Evolve, Chaos, direct hit editing with keyboard nudge, family tree, presets |
+| 5 Event transforms and polished GUI | **Transforms and effects done; GUI functional, not polished** | Reverse, pitch, retrigger, gate/fades, level, pan, filter, tape glide, crunch are tested. Editor has hover help, local Play/Stop and Follow DAW, section selection, scrollable status. No level meters or rule editor yet |
+| 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, factory and user presets, MIDI/WAV drag-out |
+| 7 Compatibility, optimization, beta | **In progress** | Alpha packages build on three operating systems and pass automated QA (including random-input fuzzing). Still needed: real DAW testing, performance thresholds, plugin sanitizer CI, signing and installers |
+| 8 Release | **Not started** | Licensing decision: the project stays all rights reserved, so binaries are not for public distribution yet |
 
 Modular plan: Stages A to D are complete; Stage E (portability and release) is complete for portability and not started for packaging.
 
 ## What exists
 
-Sixteen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
+Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root, and a thin JUCE shell.
 
 | Module | Role | Test cases |
 |---|---|---|
@@ -37,10 +37,12 @@ Sixteen portable C++17 modules (no JUCE, no host types), a headless composition 
 | `fractal_rhythm` | self-similar motif groove as nested events | 8 |
 | `chop_insight` | chop features, role suggestions, loop/tempo suggestions | 4 |
 | `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 23 |
-| `plugin_host_adapter` | parameter manifest (version 2), host-time validation, bus rules | 6 |
+| `preset_store` | preset records, factory presets, file-name safety | 5 |
+| `input_capture` | real-time-safe input recorder: free or exact-bar capture, bar-aligned start, block-size independent | 10 |
+| `plugin_host_adapter` | parameter manifest (version 3), host-time validation, bus rules | 6 |
 | `plugin_ui_adapter` | headless view models including the Orbit View | 8 |
 | `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 18 |
-| `plugin/` (JUCE) | processor, editor, state glue | 11 |
+| `plugin/` (JUCE) | processor, editor, state glue, presets, drag-out, input capture | 30 |
 
 Features added in the second round (each has a spec in `docs/specs/`): **Fractal Rhythm** (unique), **Evolve** (fun), **Producer Kit + WAV export** (valuable), **Smart Setup** (usable), **Orbit View** (visual), and three effects (**Filter, Tape Glide, Crunch**).
 

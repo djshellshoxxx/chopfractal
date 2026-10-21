@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chopfractal/composition/project_session.hpp>
+#include <chopfractal/input_capture/capture.hpp>
 #include <chopfractal/plugin_host_adapter/host_time.hpp>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 
@@ -55,6 +56,20 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   void stopPlayback();
   void followHostTransport();  // return to normal DAW transport after local preview
   void audition(chopfractal::ChopId chop);                    // preview a chop through the output
+
+  // ---- input capture (message thread) ----
+  // Records the plugin's audio input. bars = 0 records until Stop; bars > 0 records exactly that many bars,
+  // starting on the next bar line while the host (or local Play) is running. Keep loads the result as the source.
+  bool armCapture(int bars);
+  void stopCapture();   // stops a recording (it can then be kept) or disarms a capture that has not started
+  void cancelCapture(); // throws the capture away
+  bool keepCapture();   // loads a finished capture as the project's source audio (embedded in the project)
+  struct CaptureInfo {
+    chopfractal::capture::State state = chopfractal::capture::State::Idle;
+    double seconds = 0.0;        // recorded so far
+    double targetSeconds = 0.0;  // 0 for a free-length capture
+  };
+  CaptureInfo captureInfo() const;
   juce::String statusMessage() const;
   void setStatusMessage(const juce::String& message);
 
@@ -79,6 +94,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
 
   // Declaration order matters: the renderer must outlive the session that publishes into its mailbox.
   chopfractal::render::Renderer renderer_;
+  chopfractal::capture::Capture capture_;  // audio thread: process(); message thread: arm/stop/take
   chopfractal::composition::ProjectSession session_;
   juce::CriticalSection sessionLock_;
   std::array<std::atomic<float>*, chopfractal::host::kParamCount> paramPtrs_{};

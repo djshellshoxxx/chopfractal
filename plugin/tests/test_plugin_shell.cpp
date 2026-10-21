@@ -5,6 +5,7 @@
 #include <chopfractal/chop_contracts/rng.hpp>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 #include <cstdlib>
 #include <cstring>
 
@@ -770,7 +771,7 @@ int fuzzEvents(int fallback) { return std::getenv("CF_FUZZ_EVENTS") ? std::max(1
 CHOP_TEST(fuzz_random_editor_and_audio_input_never_breaks_the_plugin) {
   if (!haveDisplay()) return;
   std::vector<std::uint64_t> seeds = {1, 2, 3, 4, 5, 6};
-  if (const char* s = std::getenv("CF_FUZZ_SEED")) seeds = {static_cast<std::uint64_t>(std::atoll(s))};
+  if (const char* s = std::getenv("CF_FUZZ_SEED")) seeds.assign(1, static_cast<std::uint64_t>(std::atoll(s)));  // assign(): GCC mis-warns on the braced reassignment
   for (std::uint64_t seed : seeds) {
     bool ok = true;
     const FuzzResult r = fuzzEditor(seed, fuzzEvents(5000), &ok);
@@ -1012,10 +1013,10 @@ CHOP_TEST(dropped_wav_is_loaded_by_the_async_source_loader) {
   auto stream = file.createOutputStream();
   CHECK(stream != nullptr);
   if (!stream) return;
-  std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), 48000, 1, 16, {}, 0));
+  std::unique_ptr<juce::OutputStream> outStream = std::move(stream);
+  std::unique_ptr<juce::AudioFormatWriter> writer = format.createWriterFor(outStream, juce::AudioFormatWriterOptions().withSampleRate(48000.0).withNumChannels(1).withBitsPerSample(16));
   CHECK(writer != nullptr);
   if (!writer) return;
-  stream.release();
   juce::AudioBuffer<float> samples(1, 4800);
   for (int i = 0; i < samples.getNumSamples(); ++i) samples.setSample(0, i, 0.4f * std::sin(0.05f * i));
   CHECK(writer->writeFromAudioSampleBuffer(samples, 0, samples.getNumSamples()));
@@ -1046,10 +1047,10 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     auto stream = file.createOutputStream();
     CHECK(stream != nullptr);
     if (!stream) return;
-    std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), 48000, 1, 16, {}, 0));
+    std::unique_ptr<juce::OutputStream> outStream = std::move(stream);
+    std::unique_ptr<juce::AudioFormatWriter> writer = format.createWriterFor(outStream, juce::AudioFormatWriterOptions().withSampleRate(48000.0).withNumChannels(1).withBitsPerSample(16));
     CHECK(writer != nullptr);
     if (!writer) return;
-    stream.release();
     juce::AudioBuffer<float> audio(1, static_cast<int>(source->frames));
     audio.copyFrom(0, 0, source->channel(0), audio.getNumSamples());
     CHECK(writer->writeFromAudioSampleBuffer(audio, 0, audio.getNumSamples()));
@@ -1163,6 +1164,140 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
   }
   CHECK(controls > 35);
   CHECK(editor.getTooltip().length() > 20);
+}
+
+// Input capture end to end through the real processor: arm a one-bar capture, play the host across it, keep it,
+// then chop, generate, play and save/restore the project (the captured audio must travel inside the project).
+CHOP_TEST(captured_input_becomes_the_embedded_source_and_the_whole_workflow_runs) {
+  ChopFractalProcessor p;
+  prepare(p, 512);
+  FakePlayHead host;  // 120 BPM, 4/4, playing from ppq 0 (a bar line)
+  CHECK(!p.keepCapture());  // nothing captured yet
+  CHECK(p.armCapture(1));
+  CHECK(!p.armCapture(1));  // already armed
+  CHECK(p.captureInfo().state == cf::capture::State::Armed);
+  // Drums as the live input: bursts of noise like the drum loop, for one 2-second bar (96000 frames at 48 kHz).
+  const auto drums = drumLoop();
+  p.setPlayHead(&host);
+  juce::MidiBuffer midi;
+  std::int64_t pos = 0;
+  host.ppq = 0.0;
+  while (p.captureInfo().state != cf::capture::State::Done && pos < 400000) {
+    juce::AudioBuffer<float> buf(2, 512);
+    for (int i = 0; i < 512; ++i) {
+      const float v = drums->samples[static_cast<std::size_t>((pos + i) % drums->frames)];
+      buf.setSample(0, i, v);
+      buf.setSample(1, i, v);
+    }
+    p.processBlock(buf, midi);
+    pos += 512;
+    host.ppq += 512.0 * host.bpm / (60.0 * 48000.0);
+  }
+  p.setPlayHead(nullptr);
+  CHECK(p.captureInfo().state == cf::capture::State::Done);
+  CHECK_NEAR(p.captureInfo().seconds, 2.0, 0.001);
+
+  CHECK(p.keepCapture());
+  CHECK(p.embedSource.load());
+  CHECK(p.captureInfo().state == cf::capture::State::Idle);
+  p.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.playback() && s.playback()->source);
+    if (!(s.playback() && s.playback()->source)) return;
+    CHECK_EQ(s.playback()->source->frames, 96000);
+    CHECK(s.playback()->source->channels == 2);
+    // The recording starts on frame 0 of the bar: the first drum hit is at the very start.
+    float first = 0.f;
+    for (int i = 0; i < 2000; ++i) first = std::max(first, std::fabs(s.playback()->source->channel(0)[i]));
+    CHECK(first > 0.1f);
+    cf::composition::DetectOptions d;
+    d.analysis.sensitivity = 0.8;
+    CHECK(s.applyChops(d).ok());
+    cf::pattern::Settings settings;
+    settings.bars = 1;
+    settings.density = 0.7;
+    settings.seed = 9;
+    CHECK(s.generate(settings).ok());
+  });
+
+  FakePlayHead host2;
+  CHECK(peak(run(p, host2, 200)) > 0.05f);  // the pattern made from the captured audio plays
+
+  // Save and restore into a fresh plugin instance: no file exists, so the audio must come from the project.
+  juce::MemoryBlock saved;
+  p.getStateInformation(saved);
+  ChopFractalProcessor q;
+  prepare(q, 512);
+  q.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+  q.withSession([&](cf::composition::ProjectSession& s) {
+    CHECK(s.playback() && s.playback()->source && s.playback()->source->frames == 96000);
+    CHECK(!s.sourceMissing());
+  });
+  CHECK(q.embedSource.load());
+}
+
+CHOP_TEST(capture_buttons_follow_the_capture_state) {
+  if (!haveDisplay()) return;
+  ChopFractalProcessor p;
+  prepare(p, 512);
+  std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+  CHECK(ed != nullptr);
+  if (!ed) return;
+  ed->setVisible(true);
+  auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(250); };
+  pump();
+  auto click = [&](const char* text) {  // Button::triggerClick is asynchronous: let the message loop run it
+    juce::Button* b = findButton(*ed, text);
+    CHECK(b != nullptr);
+    if (b) b->triggerClick();
+    pump();
+  };
+  auto enabled = [&](const char* text) {
+    juce::Button* b = findButton(*ed, text);
+    CHECK(b != nullptr);
+    return b && b->isEnabled();
+  };
+  CHECK(enabled("Rec Arm") && !enabled("Rec Stop") && !enabled("Rec Keep"));
+  click("Rec Arm");
+  CHECK(p.captureInfo().state == cf::capture::State::Armed);
+  CHECK(!enabled("Rec Arm") && enabled("Rec Stop") && !enabled("Rec Keep"));
+  click("Rec Stop");  // disarm before it started
+  CHECK(p.captureInfo().state == cf::capture::State::Idle);
+  CHECK(enabled("Rec Arm") && !enabled("Rec Stop"));
+
+  // A free-length capture: record some audio, stop, keep.
+  const auto drums = drumLoop();
+  juce::MidiBuffer midi;
+  auto feed = [&](int blocks) {
+    for (int b = 0; b < blocks; ++b) {
+      juce::AudioBuffer<float> buf(2, 512);
+      for (int i = 0; i < 512; ++i) {
+        const float v = drums->samples[static_cast<std::size_t>((b * 512 + i) % drums->frames)];
+        buf.setSample(0, i, v);
+        buf.setSample(1, i, v);
+      }
+      p.processBlock(buf, midi);
+    }
+  };
+  auto* length = dynamic_cast<juce::ComboBox*>([&]() -> juce::Component* {
+    for (auto* ch : ed->getChildren())
+      if (auto* cb = dynamic_cast<juce::ComboBox*>(ch))
+        if (cb->getTitle() == "Capture length") return cb;
+    return nullptr;
+  }());
+  CHECK(length != nullptr);
+  if (length) length->setSelectedId(1);  // Free
+  click("Rec Arm");
+  feed(10);
+  CHECK(p.captureInfo().state == cf::capture::State::Recording);
+  click("Rec Stop");
+  feed(1);  // the audio thread applies the stop
+  pump();
+  CHECK(p.captureInfo().state == cf::capture::State::Done);
+  CHECK(enabled("Rec Keep") && enabled("Rec Arm"));  // a finished capture can be kept, or re-recorded (which discards it)
+  click("Rec Keep");
+  pump();
+  p.withSession([&](cf::composition::ProjectSession& s) { CHECK(s.playback() && s.playback()->source && s.playback()->source->frames == 10 * 512); });
+  CHECK(!enabled("Rec Keep") && enabled("Rec Arm"));
 }
 
 CHOP_TEST(local_preview_can_return_to_the_daw_transport) {
