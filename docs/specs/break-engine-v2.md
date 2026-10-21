@@ -62,4 +62,12 @@ Host parameters, appended to manifest v3: `engine_version`, `break_profile`, `br
 - `break_quality_audio` (ctest, runs `tools/engine_audition.cpp --check`): audio-level metrics 16, 18, 19, 20, 23, 25 over
   every profile on the synthetic kit loop. Metric 22 (choke) belongs to the renderer branch that consumes the hints.
   Metrics 17, 21 and 24 are not automated on a full mix; see the notes in the audition tool.
+- `composition.integration` case `session_break_metrics_hold_across_profiles_seeds_and_macros` (tests/test_break_session_metrics.cpp):
+  through `settingsFromParams` (new-project defaults) over all profiles, 6 seeds, density 0.3/0.5/0.8, chaos 0/1, glitch 0/1:
+  kick on 1, snare on 5 and 13, hits per bar against `break_stats.json`, fill in the last quarter of bar 4, identical-slice
+  runs, kick and snare never on the same tick. A second case renders with polish and the limiter on (stutter 60 %) and
+  checks finite output, the -1 dBFS ceiling, end-of-hit discontinuities and the choke and smooth-fade hints.
+- Macros: the Glitch macro raises the gesture allowances (retrigger at 0.2, reverse at 0.3, tape glide at 0.4) because the
+  planner only places those gestures while allowed; before this it did nothing with the default allowances off. The macro
+  strip's Stutter knob switches `allow_stutter` on when turned above zero for the same reason.
 - Audition: `engine_audition --seeds 8 --out DIR` writes one WAV per profile and seed and prints a text report.

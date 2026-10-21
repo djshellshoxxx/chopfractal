@@ -2,6 +2,7 @@
 
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
 
 #include "CdlLookAndFeel.h"
@@ -53,6 +54,15 @@ MacroKnob::MacroKnob(juce::AudioProcessorValueTreeState& apvts, const char* para
   slider_.setTitle(label + " macro");  // not the bare name: the help catalog would replace the one-clause tip
   slider_.setTooltip(tip);
   slider_.onValueChange = [this] { repaint(); };
+  if (std::strcmp(paramId, "stutter_amount") == 0) {
+    // The Stutter amount only reaches the pattern while "Allow Stutter" is on; turning the macro up must not be silent.
+    slider_.onValueChange = [this] {
+      repaint();
+      if (slider_.getValue() > 0.0)
+        if (auto* allow = apvts_.getParameter("allow_stutter"))
+          if (allow->getValue() < 0.5f) allow->setValueNotifyingHost(1.0f);
+    };
+  }
   addAndMakeVisible(slider_);
   if (apvts_.getParameter(paramId) != nullptr) attachment_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts_, paramId, slider_);
   if (def_ != nullptr) slider_.setDoubleClickReturnValue(true, def_->defaultValue);  // double-click resets to the manifest default
