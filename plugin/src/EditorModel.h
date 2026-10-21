@@ -90,6 +90,7 @@ class EditorModel {
   void setEmbedSource(bool on) { proc_.embedSource = on; }
 
  private:
+  void announceSelection();  // status text plus the Selection change, after a rubber-band selection
   void emit(Change c) { listeners_.call([c](Listener& l) { l.modelChanged(c); }); }
 
   ChopFractalProcessor& proc_;

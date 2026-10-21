@@ -132,9 +132,7 @@ void EditorModel::selectSectionsInWave(int startX, int endX, bool click, int can
         std::find(selectedChops_.begin(), selectedChops_.end(), view_.chops[static_cast<std::size_t>(hit.chopIndex)].id) != selectedChops_.end())
       selectedHits_.push_back(hit.id);
   if (!selectedHits_.empty()) selected_ = selectedHits_.front();
-  setStatus(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " + juce::String(static_cast<int>(selectedHits_.size())) +
-            " pattern hits selected. Zoom In subdivides selected hits.");
-  emit(Change::Selection);
+  announceSelection();
 }
 
 void EditorModel::selectSectionsInPattern(juce::Rectangle<int> band, juce::Point<int> end, bool click, juce::Rectangle<int> canvas) {
@@ -148,9 +146,7 @@ void EditorModel::selectSectionsInPattern(juce::Rectangle<int> band, juce::Point
     if (hit.depth == 0 && (click ? bounds.contains(end.toFloat()) : bounds.intersects(band.toFloat()))) selectedHits_.push_back(hit.id);
   }
   if (!selectedHits_.empty()) selected_ = selectedHits_.front();
-  setStatus(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " + juce::String(static_cast<int>(selectedHits_.size())) +
-            " pattern hits selected. Zoom In subdivides selected hits.");
-  emit(Change::Selection);
+  announceSelection();
 }
 
 void EditorModel::setSeed(std::uint64_t seed) {
@@ -179,4 +175,10 @@ juce::String EditorModel::statusLine() const {
 void EditorModel::setStatus(const juce::String& text) {
   proc_.setStatusMessage(text);
   emit(Change::Status);
+}
+
+void EditorModel::announceSelection() {
+  setStatus(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " + juce::String(static_cast<int>(selectedHits_.size())) +
+            " pattern hits selected. Zoom In subdivides selected hits.");
+  emit(Change::Selection);
 }

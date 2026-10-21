@@ -1,27 +1,23 @@
 #pragma once
-// Editor: draws the headless view models from plugin_ui_adapter and routes user actions to the composition
-// root. It contains no pattern, chop, or history logic of its own.
+// The editor shell: owns the model, the command layer and the seven panels, lays them out, runs the 10 Hz refresh
+// and handles file drops, key presses and the hover help. The panels draw the headless view models from
+// plugin_ui_adapter and route user actions through EditorCommands to the composition root; the shell holds no
+// pattern, chop or history logic of its own.
 #include <juce_audio_utils/juce_audio_utils.h>
 
-#include <chopfractal/plugin_ui_adapter/orbit.hpp>
-#include <chopfractal/plugin_ui_adapter/views.hpp>
-#include <functional>
-#include <memory>
-
 #include "ControlsPanel.h"
-#include "DragOut.h"
 #include "EditorCommands.h"
 #include "EditorModel.h"
-#include "PluginProcessor.h"
+#include "EditorTheme.h"
+#include "FeaturePanel.h"
 #include "HistoryPanel.h"
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
-#include "PresetManager.h"
-#include "WavePanel.h"
+#include "PluginProcessor.h"
 #include "StatusBar.h"
-#include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
+#include "WavePanel.h"
 
-class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer, private EditorModel::Listener {
+class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer {
  public:
   explicit ChopFractalEditor(ChopFractalProcessor& processor);
   ~ChopFractalEditor() override;
@@ -29,70 +25,44 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::String getTooltip() override;
   bool isInterestedInFileDrag(const juce::StringArray& files) override;
   void filesDropped(const juce::StringArray& files, int x, int y) override;
-  void paint(juce::Graphics&) override;
+  void paint(juce::Graphics& g) override { g.fillAll(editor_theme::background()); }
   void resized() override;
   bool keyPressed(const juce::KeyPress&) override;
 
   // Public so tests can drive them without modal dialogs.
-  void doReroll();
-  void applyPreset(const chopfractal::presets::Preset& p);
-  chopfractal::presets::Preset currentPreset(const juce::String& name) const;
-  void savePresetNamed(const juce::String& name, bool overwrite);
-  void deleteSelectedPreset();
-  void reloadPresets();
-  juce::File makeDragFile(bool wav);
-  // Read-only views for tests and accessibility tooling.
+  void doReroll() { features_.reroll(); }
+  void applyPreset(const chopfractal::presets::Preset& p) { features_.applyPreset(p); }
+  chopfractal::presets::Preset currentPreset(const juce::String& name) const { return features_.currentPreset(name); }
+  void savePresetNamed(const juce::String& name, bool overwrite) { features_.savePresetNamed(name, overwrite); }
+  void deleteSelectedPreset() { features_.deleteSelectedPreset(); }
+  void reloadPresets() { features_.reloadPresets(); }
+  juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
+  // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
+  juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
   const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
   int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
   chopfractal::EventId selectedHit() const { return model_.selected(); }
   const std::vector<chopfractal::EventId>& selectedHits() const { return model_.selectedHits(); }
   const std::vector<chopfractal::ChopId>& selectedChops() const { return model_.selectedChops(); }
-  juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
 
  private:
-  void timerCallback() override { refresh(false); }
-  void refresh(bool force);
-  void askSavePreset();
-  FractalUi fractalUi() const;
-  EvolveUi evolveUi() const;
-  ExportUi exportUi() const;
-  void pushEvolve();
+  void timerCallback() override;
+  void syncHelpTree();
 
-  void modelChanged(EditorModel::Change) override;
-  ChopFractalProcessor& proc_;
+  // Declaration order is destruction order reversed: the panels (and the attachments they own) go before the model.
   EditorModel model_;
   EditorCommands commands_;
-  ControlsPanel controls_;
-  StatusBar status_;
-  OrbitPanel orbit_;
-  HistoryPanel history_;
-  PatternPanel pattern_;
-  WavePanel wave_;
-  juce::TextButton reroll_{"Reroll"}, savePreset_{"Save Preset"}, deletePreset_{"Delete"};
-  juce::ComboBox preset_;
-  std::vector<PresetManager::Entry> presets_;
-  DragHandle dragMidi_{"Drag MIDI", [this] { return makeDragFile(false); }};
-  DragHandle dragWav_{"Drag WAV", [this] { return makeDragFile(true); }};
-  double fractalMutation_ = -1.0;  // < 0: derive from the Variation control; set by a preset
-  double fractalAccent_ = 0.85;
   juce::TooltipWindow tooltip_{this};
   juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
-
-  // Feature controls (not host parameters: they act on the project).
-  juce::TextButton locate_{"Locate Source"}, smart_{"Smart Setup"}, acceptRoles_{"Accept Roles"}, useTempo_{"Use Tempo"}, fractal_{"Fractal"}, keep_{"Keep"},
-      exportWav_{"Export WAV"}, exportKit_{"Export Kit"};
-  juce::TextButton storeA_{"Store A"}, recallA_{"Recall A"}, storeB_{"Store B"}, recallB_{"Recall B"}, setRole_{"Set Role"};
-  juce::ComboBox role_;
-  juce::ToggleButton evolve_{"Evolve"};
-  juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
-  juce::TextEditor motif_;
-  juce::ComboBox detectMode_;
+  ControlsPanel controls_;
+  FeaturePanel features_;
+  WavePanel wave_;
+  PatternPanel pattern_;
+  HistoryPanel history_;
+  OrbitPanel orbit_;
+  StatusBar status_;
   bool lastPlaying_ = false;
-  chopfractal::evolve::Settings pushedEvolve_;  // the settings the editor last sent; a different session value (a restored project) is shown
-  juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
-  juce::Slider evolveAmount_;
-
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };

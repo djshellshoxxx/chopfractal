@@ -19,6 +19,7 @@ const PanelBounds kPanels[] = {
     {"ControlsPanel", {10, 10, 920, 232}},
     {"StatusBar", {10, 830, 920, 70}},
     {"OrbitPanel", {824, 720, 106, 106}},
+    {"FeaturePanel", {10, 248, 920, 104}},
     {"WavePanel", {10, 358, 920, 120}},
     {"PatternPanel", {10, 484, 920, 230}},
     {"HistoryPanel", {10, 720, 808, 106}},
