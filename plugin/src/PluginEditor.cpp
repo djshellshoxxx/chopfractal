@@ -1,6 +1,7 @@
 #include "PluginEditor.h"
 
 #include <algorithm>
+#include <initializer_list>
 
 #include "ControlHelp.h"
 #include "EditorTheme.h"
