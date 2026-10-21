@@ -396,6 +396,20 @@ CHOP_TEST(presets_are_commands_and_loading_one_reports_it) {
   CHECK(rig.ed->model().statusLine().contains("Preset \"" + juce::String(factory.front().name) + "\" applied"));
 }
 
+CHOP_TEST(panels_menu_drawers_open_from_the_palette) {
+  if (!haveDisplay()) return;
+  IsolatedUser user;
+  EditorRig rig;
+  if (!rig.ed) return;
+  CHECK(!rig.ed->topBar().menuEntries().empty());
+  rig.ed->openPalette();
+  rig.ed->palette().setQuery("open scenes");
+  CHECK(!rig.ed->palette().rows().empty() && rig.ed->palette().rows()[0].title.find("Scenes") != std::string::npos);
+  CHECK(rig.ed->palette().runSelected());
+  CHECK(!rig.ed->palette().isOpen());
+  CHECK(rig.ed->openDrawerId() == "scenes");
+}
+
 CHOP_TEST(the_question_mark_button_opens_the_palette_and_every_new_control_is_named) {
   if (!haveDisplay()) return;
   IsolatedUser user;

@@ -69,10 +69,11 @@ CHOP_TEST(history_panel_click_recalls_a_node_and_the_orbit_click_selects_the_sam
   sim.click({b.getX() + static_cast<int>((first.x0 + (first.x1 - first.x0) * 0.5) * b.getWidth()), b.getY() + static_cast<int>((static_cast<float>(first.chopIndex) + 0.5f) * laneH)});
   CHECK(ed->selectedHit() == first.id);
 
+  CHECK(ed->openDrawer("orbit"));
+  pump(30);
   auto* orbit = findById(*editor, "OrbitPanel");
   CHECK(orbit != nullptr);
   if (!orbit) return;
-  if (auto* tools = dynamic_cast<juce::Viewport*>(findById(*editor, "ToolsDrawer"))) tools->setViewPosition(2000, 400);  // scroll to the far corner (clamped) so the orbit is in view
   pump(30);
   const auto& view = probe.view().orbit;
   const double R = std::min(orbit->getWidth(), orbit->getHeight()) / 2.0 - 4.0;

@@ -1,6 +1,7 @@
 #include "EditorModel.h"
 
 #include <algorithm>
+#include <chopfractal/plugin_ui_adapter/session_views.hpp>
 #include <cmath>
 
 #include <chopfractal/plugin_ui_adapter/status_text.hpp>
@@ -32,7 +33,8 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
   proc_.withSession([&](cf::composition::ProjectSession& s) {
     juce::String sig;
     sig << juce::String::toHexString(reinterpret_cast<std::uintptr_t>(s.playback().get())) << "|" << static_cast<int>(s.history().size()) << "|"
-        << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1);
+        << static_cast<juce::int64>(s.history().active()) << "|" << (s.chopMap() ? static_cast<int>(s.chopMap()->markers().size()) : -1) << "|"
+        << (s.morphActive() ? juce::String(s.morphAmount(), 4) : juce::String("-")) << "|" << (s.displayPattern() != s.pattern() ? "p" : "-");
     sourceMissing_ = s.sourceMissing();
     pendingNow = s.pendingActivationNode();
     activeNow = s.history().active();
@@ -61,12 +63,14 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     if (s.chopMap()) {
       next.markers = cf::ui::buildMarkerViews(*s.chopMap(), cf::ui::ViewWindow{0, std::max<std::int64_t>(1, next.sourceFrames), static_cast<double>(waveWidthPx)});
       if (s.chops()) next.chops = s.chops()->chops;
-      if (s.pattern() && s.chops()) {
-        next.pattern = cf::ui::buildPatternView(*s.pattern(), *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
-        next.orbit = cf::ui::buildOrbitView(*s.pattern(), *s.chops());
-        next.barTicks = cf::pattern::barTicks(s.pattern()->settings);
-        next.gridTicks = cf::gridTicks(s.pattern()->settings.grid);
-        next.barCount = static_cast<int>(s.pattern()->bars.size());
+      if (const auto* shown = s.displayPattern(); shown && s.chops()) {
+        next.pattern = cf::ui::buildPatternView(*shown, *s.chops(), [&](cf::ChopId id) { return s.roleMap().roleOf(id); });
+        next.orbit = cf::ui::buildOrbitView(*shown, *s.chops());
+        next.barTicks = cf::pattern::barTicks(shown->settings);
+        next.gridTicks = cf::gridTicks(shown->settings.grid);
+        next.barCount = static_cast<int>(shown->bars.size());
+        if (s.morphActive()) next.previewLabel = juce::String::fromUTF8(cf::ui::buildMorphView({true, true, true, s.morphAmount(), false}).badgeText.c_str());
+        else if (shown != s.pattern()) next.previewLabel = "Scene preview";
       }
     }
     next.tree = cf::ui::layoutHistoryTree(s.history().listAll(), s.history().active());

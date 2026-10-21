@@ -24,6 +24,7 @@
 #include "PatternPanel.h"
 #include "ExportDrawer.h"
 #include "PresetBrowser.h"
+#include "PerformDrawers.h"
 #include "PluginProcessor.h"
 #include "QuickStartCard.h"
 #include "QuickStartTracker.h"
@@ -50,6 +51,12 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
 
   // ---- drawer registration (second wave panels plug in here) ----
   void registerDrawer(const juce::String& id, const juce::String& title, juce::Component& content, int preferredWidth = 320, bool showButton = true);
+  // A drawer opened from the top bar's Panels menu instead of its own button (the wave-two panels).
+  void registerMenuDrawer(const juce::String& id, const juce::String& title, juce::Component& content, int preferredWidth = 340) {
+    drawer_.registerDrawer(id, title, content, preferredWidth);
+    topBar_.addMenuEntry(id, title);
+  }
+  PerformDrawers& perform() { return perform_; }
   bool openDrawer(const juce::String& id) { return drawer_.open(id); }
   void closeDrawer() { drawer_.close(); }
   bool toggleDrawer(const juce::String& id) { return drawer_.toggle(id); }
@@ -140,6 +147,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Viewport legacyView_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
+  PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model
   QuickStartTracker quickStartTracker_;
   CommandRegistry registry_;
   QuickStartCard quickCard_;

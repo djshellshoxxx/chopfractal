@@ -131,6 +131,16 @@ void CommandRegistry::refreshPresets() {
     c.run = [edp, key = item.key] { edp->presetBrowser().loadKey(juce::String(key), edp->presetBrowser().applyAndGenerate()); };
     commands_.push_back(std::move(c));
   }
+  // The drawers in the Panels menu (Capture, Tempo, Pads, Scenes, Evolve, Outputs, Arrange, Orbit) open from the palette too.
+  for (const auto& [id, title] : ed_.topBar().menuEntries()) {
+    Command c;
+    c.id = "action.open." + id.toStdString();
+    c.title = "Open " + title.toStdString() + " panel";
+    c.category = "Action";
+    c.keywords = {id.toStdString(), "drawer", "panel"};
+    c.run = [edp, id] { edp->openDrawer(id); };
+    commands_.push_back(std::move(c));
+  }
 }
 
 const Command* CommandRegistry::find(const std::string& id) const {

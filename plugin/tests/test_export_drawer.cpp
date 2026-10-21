@@ -24,9 +24,9 @@ CHOP_TEST(export_drawer_settings_persist_in_the_project_and_drive_the_estimate) 
   pump(60);
   auto& d = rig.ed->exportDrawer();
   CHECK(d.isVisible() && rig.ed->openDrawerId() == "export");
-  auto* format = findCombo(*rig.ed, "Export format");
-  auto* rate = findCombo(*rig.ed, "Export sample rate");
-  auto* loops = findCombo(*rig.ed, "Export loops");
+  auto* format = findCombo(rig.ed->exportDrawer(), "Export format");
+  auto* rate = findCombo(rig.ed->exportDrawer(), "Export sample rate");
+  auto* loops = findCombo(rig.ed->exportDrawer(), "Export loops");
   CHECK(format && rate && loops);
   if (!(format && rate && loops)) return;
   format->setSelectedId(3, juce::sendNotificationSync);
@@ -58,10 +58,10 @@ CHOP_TEST(midi_options_flow_into_the_dragged_midi_and_the_kit) {
   if (!rig.ed) return;
   rig.ed->openDrawer("export");
   pump(60);
-  auto* base = findSlider(*rig.ed, "MIDI base note");
-  auto* curve = findCombo(*rig.ed, "MIDI velocity curve");
-  auto* fixed = findSlider(*rig.ed, "MIDI fixed velocity");
-  auto* ch = findCombo(*rig.ed, "MIDI channel");
+  auto* base = findSlider(rig.ed->exportDrawer(), "MIDI base note");
+  auto* curve = findCombo(rig.ed->exportDrawer(), "MIDI velocity curve");
+  auto* fixed = findSlider(rig.ed->exportDrawer(), "MIDI fixed velocity");
+  auto* ch = findCombo(rig.ed->exportDrawer(), "MIDI channel");
   CHECK(base && curve && fixed && ch);
   if (!(base && curve && fixed && ch)) return;
   CHECK(!fixed->isEnabled());  // only the Fixed curve uses it
@@ -123,11 +123,11 @@ CHOP_TEST(arrangement_rows_are_edited_filled_and_exported_with_progress_and_canc
   pump(60);
   auto& d = rig.ed->exportDrawer();
   CHECK(d.arrangementView().rows.empty());
-  auto* add = findButton(*rig.ed, "Add");
-  auto* autoFill = findButton(*rig.ed, "Auto fill 16 bars");
-  auto* exportArr = findButton(*rig.ed, "Export arrangement");
-  auto* remove = findButton(*rig.ed, "Remove");
-  auto* up = findButton(*rig.ed, "Up");
+  auto* add = findButton(rig.ed->exportDrawer(), "Add");
+  auto* autoFill = findButton(rig.ed->exportDrawer(), "Auto fill 16 bars");
+  auto* exportArr = findButton(rig.ed->exportDrawer(), "Export arrangement");
+  auto* remove = findButton(rig.ed->exportDrawer(), "Remove");
+  auto* up = findButton(rig.ed->exportDrawer(), "Up");
   CHECK(add && autoFill && exportArr && remove && up);
   if (!(add && autoFill && exportArr && remove && up)) return;
   CHECK(!exportArr->isEnabled());  // an empty arrangement cannot be exported

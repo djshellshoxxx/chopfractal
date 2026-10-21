@@ -804,6 +804,10 @@ int main() {
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
   juce::MessageManager::getInstance();
+  if (const char* only = std::getenv("CHOP_TEST_FILTER")) {  // run just the cases whose name contains the text
+    auto& cases = chop_test::registry();
+    cases.erase(std::remove_if(cases.begin(), cases.end(), [only](const chop_test::Case& c) { return std::string(c.name).find(only) == std::string::npos; }), cases.end());
+  }
   const int rc = chop_test::runAll();
   gui.reset();
   juce::DeletedAtShutdown::deleteAll();
@@ -1109,9 +1113,10 @@ CHOP_TEST(non_obvious_editor_controls_have_hover_help) {
           dynamic_cast<juce::ComboBox*>(&component) || dynamic_cast<juce::TextEditor*>(&component))) return;
     auto* tooltip = dynamic_cast<juce::TooltipClient*>(&component);
     CHECK(tooltip != nullptr);
-    if (tooltip && tooltip->getTooltip().length() <= 20) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
+    const int need = component.isEnabled() ? 20 : 8;  // a disabled control may carry just the short reason it is off
+    if (tooltip && tooltip->getTooltip().length() <= need) std::fprintf(stderr, "  no hover help: %s '%s' %s in %s tip='%s'\n", component.getTitle().toRawUTF8(), component.getComponentID().toRawUTF8(), typeid(component).name(),
                                                                      component.getParentComponent() ? component.getParentComponent()->getComponentID().toRawUTF8() : "-", tooltip->getTooltip().toRawUTF8());
-    if (tooltip) CHECK(tooltip->getTooltip().length() > 20);
+    if (tooltip) CHECK(tooltip->getTooltip().length() > need);
     ++controls;
   });
   CHECK(controls > 35);

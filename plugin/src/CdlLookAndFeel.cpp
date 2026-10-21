@@ -38,17 +38,12 @@ void paintTrace(juce::Graphics& g, float x0, float x1, float y, float stepAt) {
 
 void paintStencilTitle(juce::Graphics& g, const juce::String& text, juce::Rectangle<int> a, float s) {
   const auto f = font(FontRole::Title, s);
-  const auto o = std::max(2, juce::roundToInt(3.0f * s));
+  const auto o = std::max(1, juce::roundToInt(1.5f * s));  // a tight offset keeps the glyph edges crisp instead of smearing into a halo
   g.setFont(f);
-  const auto up = text.toUpperCase();
-  g.setColour(pal().spray);
-  g.drawText(up, a.translated(o, o), juce::Justification::centredLeft, false);
-  // A one pixel keyline in the background colour on the shadow side separates the two passes, so the thin stencil strokes
-  // stay crisp instead of blending into the spray layer.
-  g.setColour(pal().bg);
-  for (const auto d : {juce::Point<int>(1, 0), juce::Point<int>(0, 1), juce::Point<int>(1, 1)}) g.drawText(up, a.translated(d.x, d.y), juce::Justification::centredLeft, false);
+  g.setColour(pal().spray.withAlpha(0.75f));
+  g.drawText(text.toUpperCase(), a.translated(o, o), juce::Justification::centredLeft, false);
   g.setColour(pal().ink);
-  g.drawText(up, a, juce::Justification::centredLeft, false);
+  g.drawText(text.toUpperCase(), a, juce::Justification::centredLeft, false);
 }
 
 void paintSectionLabel(juce::Graphics& g, const juce::String& text, juce::Rectangle<int> a) {
@@ -317,6 +312,7 @@ void CdlLookAndFeel::fillTextEditorBackground(juce::Graphics& g, int w, int h, j
 
 void CdlLookAndFeel::drawTextEditorOutline(juce::Graphics& g, int w, int h, juce::TextEditor& e) {
   if (!e.isEnabled()) return;
+  if (e.getTitle() == "Status messages" && !e.hasKeyboardFocus(true)) return;  // the status line sits flat in the footer
   g.setColour(e.hasKeyboardFocus(true) && !e.isReadOnly() ? pal().spray : pal().edgeHi);
   g.drawRoundedRectangle(0.5f, 0.5f, static_cast<float>(w) - 1.0f, static_cast<float>(h) - 1.0f, 2.0f, 1.0f);
 }
