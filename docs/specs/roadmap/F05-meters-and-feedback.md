@@ -2,6 +2,19 @@
 
 **Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (StatusBar, HistoryPanel, WavePanel, EditorCommands), F04 for final StatusBar widths (can land before it; see section 3)  **Blocks:** F07 (voice display for pads), F11 (per-bus meters reuse `OutputMeter`)
 
+## 0. Implementation status (audited 2026-10-20)
+**Mostly not started; one story is partly built.**
+
+*Implemented:* dropping an audio file onto the editor loads it (`FileDragAndDropTarget`; accepts wav, aif, aiff, flac, ogg, mp3; stops playback and clears the selection; one source at a time). The status area is a scrolling read-only text box that shows the last message plus `Using local tempo: N BPM` and `Assuming 4/4` when the host gives no tempo or meter.
+
+*Not implemented:* output meter and clip latch, active-voice display, sync box, pending-activation ring, notice log with severity and history, drop-hover highlight, replace confirmation when a loop with a pattern is replaced (by drop or Load Loop), the soak test, copy-diagnostics.
+
+*Decisions that override the body below:*
+1. **StatusBar geometry:** the as-built status area is a 920 x 74 block (F00). The right-aligned widget cluster of section 3 (MeterStrip, VoiceBox, SyncBox, F01 Cancel Export, F04 view/scale) sits in a new 24 px strip carved from the top of that block; the existing scrolling text box keeps the remaining 50 px and becomes the notice log view's inline preview. Where this spec says "StatusBar (920 x 24)" read "the 24 px widget strip of the StatusBar".
+2. **Drag-and-drop is extended, not re-done:** keep the shipped accept/reject logic and message strings; add the hover highlight (`fileDragEnter/Exit`), the confirmation (`Replace the current loop? Its pattern stays but will be matched to the new chops.` with `Replace` / `Cancel`, only when a pattern exists), and route the load through `EditorCommands::requestLoad`.
+3. **Clip protection (limiter) is no longer a non-goal of the roadmap:** it is F16 (Level Match and Safety Limiter), which reuses `OutputMeter` for its gain-reduction readout. F05 itself still ships a passive meter only.
+4. The meter reads the final output of `Renderer::process`; when F16 lands, the limiter sits before the meter push so the meter shows what leaves the plugin.
+
 ## 1. Summary and user value
 The plugin gives almost no feedback: no output level or clip warning, no view of active voices, tempo/meter fallbacks are buried in the status text, a queued variation switch is invisible, only the last notice of each action is shown, and loops can only be loaded through a file chooser. F05 adds a lock-free output peak meter with a latched clip indicator, an active-voice display, a tempo/meter/sync box, a pending-activation indicator on the family tree and status bar, a severity-tagged notice log, and drag-and-drop of WAV/AIFF onto the editor. Producers see what the plugin is doing in the DAW and trust it more.
 

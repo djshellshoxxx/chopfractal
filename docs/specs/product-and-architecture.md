@@ -1,6 +1,9 @@
 # Product and system architecture
 
-**Status:** Draft for review
+**Status:** Approved baseline; implemented through build-plan stage 6
+
+**Implementation (audited 2026-10-20):** Built through build-plan stage 6 (see `../BUILD_STATUS.md`): source/chop model, deterministic generation with locks, Fractal, Evolve, Orbit, Smart Setup, effects, presets, WAV/MIDI/Producer Kit export, drag-out. Not built: input capture (F12), multi-output stems (F11), meters and notice log (F05), installers and host-matrix testing (F15). Shipped beyond the first-milestone scope below: a CLAP build and a Windows Standalone (unsigned alpha), and MIDI *file* export (live MIDI output is still out of scope). The feature roadmap is `roadmap/README.md`; the audit that reconciled these documents is dated 2026-10-20.
+
 
 ## Product definition
 
@@ -29,7 +32,7 @@ The primary workflow is: load or capture source → detect/edit chops → genera
 - Initial target: 64-bit VST3 audio effect on Windows and macOS, with Linux support assessed during toolchain setup.
 - Recommended implementation framework: JUCE, subject to a repo/toolchain audit at the start of development.
 - One stereo input and one stereo output; mono hosts are supported by duplicating mono to the internal stereo path and downmixing safely as required.
-- No MIDI output, multi-output buses, standalone app, or proprietary sample library in the first milestone.
+- No live MIDI output (exporting a MIDI file is in scope and shipped), no multi-output buses in the first milestone (specified as F11), no proprietary sample library. A Windows Standalone build exists as an unsigned extra; it is not a product target.
 - No cloud processing or machine-learning model is required.
 
 ## Source and playback model

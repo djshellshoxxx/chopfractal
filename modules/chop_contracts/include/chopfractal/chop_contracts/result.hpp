@@ -17,6 +17,7 @@ enum class ErrorCode : std::uint8_t {
   Blocked,  // a hard rule or lock prevented the operation; `hint` carries the rule id when known
   Corrupt,
   UnsupportedVersion,
+  Cancelled,  // a long-running operation was stopped by its progress callback
 };
 
 struct Error {

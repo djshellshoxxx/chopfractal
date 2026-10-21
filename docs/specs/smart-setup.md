@@ -1,6 +1,9 @@
 # Smart Setup
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested (`chop_insight`, `ProjectSession::suggestSetup/smartSetup/acceptRoleSuggestions`): chop features, role suggestions, loop/tempo suggestions. Editor: Smart Setup, Accept Roles, Use Tempo buttons. Known limit: Smart Setup only detects when no marker exists. Tempo-match use of the suggestion is F14.
+
 **Module ID:** `chop_insight`  
 **Purpose:** The usability feature. One click takes a freshly loaded loop from "audio file" to "ready to generate": it finds the chops, **suggests a role for each chop** (kick, snare, hat, cymbal, other) from the audio itself, and **suggests the loop's length and tempo**. Nothing is guessed silently: suggestions are shown, and the user's existing tags and tempo are never overwritten.
 

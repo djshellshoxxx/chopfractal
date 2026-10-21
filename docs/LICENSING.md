@@ -13,6 +13,14 @@ because:
 An open-source license, by contrast, cannot be taken back for copies already distributed, and a copyleft license
 would bind the whole project. Starting proprietary costs nothing and can always be loosened.
 
+## Time stretching: forbidden libraries
+
+`modules/time_stretch` is original WSOLA code with `"third_party": []`. Do not add Rubber Band (GPLv2-or-later;
+closed-source use needs Breakfast Quay's paid license), SoundTouch (LGPL-2.1; static linking into a closed VST3
+breaks the relink obligation), zplane elastique or similar commercial SDKs, and do not copy code from them. CI
+greps for those names. A permissively licensed engine could replace the DSP behind the same API only after it is
+recorded here and in the module's `third_party` list and the determinism baseline is redone.
+
 ## Changing it later
 
 ```sh

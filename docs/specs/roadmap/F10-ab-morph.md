@@ -3,6 +3,12 @@
 **Status:** Ready for development  **Size:** M (4 engineer-days)  **Depends on:** F00 (FeaturePanel, EditorModel `displayPattern`), F01 (persisted A/B slots, `ab` section; morph itself
 works without it but the slots would not survive a reload)  **Blocks:** none
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** The A/B slots exist in the model (`PatternSession` snapshot slots, `ProjectSession::storeSnapshot/recallSnapshot`) and in the editor (Store A, Recall A, Store B, Recall B); they are **not saved with the project** and a recall can fail after the chops changed (both documented in BUILD_STATUS). Morph, its slider, the preview playback and commit do not exist. Decisions recorded by the audit:
+- Persisting the slots is F01 (extras tag 8, `ab`); morph needs both slots present, so it is usable in a session before F01 lands and survives restarts after it.
+- **Chaos interplay is removed:** Chaos v1 is generation-time (F08 audit note), so there is no overlay to layer on the morph. Playback is `morph -> flatten`. The test `chaos_layers_on_top_of_the_morph` is dropped.
+- A failed slot recall (chops changed) makes `beginMorph` return `NotFound` with the Recall message `That snapshot no longer fits the current chops.`; this is the only recall-failure path morph needs to handle.
+
 ## 1. Summary and user value
 Today the editor has Store A / Recall A / Store B / Recall B: a hard A-or-B comparison. F10 adds a **Morph** slider that blends continuously between the two stored patterns: levels,
 pans, pitches, effects and timing glide per event, while hits that exist in only one pattern fade in or out by probability. The producer scrubs the slider while the loop plays (the
@@ -73,7 +79,7 @@ void cancelMorph();                         // republish() the real pattern; no 
 `storeSnapshot` (currently inline in the header) additionally calls `refreshMorph()`. Every path that changes `patterns_` or the playback source ends the morph: `finalize`, `undo`,
 `redo`, `recallSnapshot`, `applyActivation`, `loadState`, `loadSource`, `clearSource`, `reset`, `setEvolve(enabled)`; each gets one line `endMorph(true)` (notice flag). Audio side: no
 renderer change; the preview uses `installPlayback(morphed)` (flatten + `makePlayback` + `Mailbox::publish`), so the swap happens at the next audio block, sounding voices finish
-naturally, and with F08 present the Chaos overlay is applied on top of the morph (`morph -> chaos -> flatten`). Plugin: the FeaturePanel calls the commands `commands.beginMorph()`,
+naturally. There is no Chaos overlay (Chaos is generation-time), so playback is `morph -> flatten`. Plugin: the FeaturePanel calls the commands `commands.beginMorph()`,
 `setMorph(t)`, `commitMorph()`, `cancelMorph()`; no processor change.
 
 ## 6. Behavior details and edge cases
@@ -138,7 +144,7 @@ side before matching (same repair rule as variation activation).
 
 **Interactions.** Locks: locks in A's structure are copied as metadata; the morph blends two finished snapshots and does
 not enforce locks inside the blend (documented in the tooltip of "Morph"). Roles/rules: not consulted (no generation happens). Undo history and the family tree are untouched until
-Commit. Evolve and scenes: mutually exclusive (see UX). Chaos: layered on top for playback only. Determinism: same `(a, b, t, chops)` -> byte-identical `serialize(result)` within a
+Commit. Evolve and scenes: mutually exclusive (see UX). Chaos: not involved (generation-time only). Determinism: same `(a, b, t, chops)` -> byte-identical `serialize(result)` within a
 platform and build (float lerps use plain `+ - *` and `llround`; compilers may fuse operations differently across platforms, which can differ in the last float bit; this is acceptable
 because committed results are stored as data and never recomputed).
 
@@ -164,7 +170,7 @@ equal between `flatten(morph(..., false))` and `flatten(morph(..., true))` for 5
 `commit_creates_a_node_labelled_with_the_percent_and_one_undo_step` (label `"Morph A>B 37%"`, `undo()` restores the pre-commit pattern, `pattern()` equals the frozen result);
 `other_commands_end_the_morph` (loop over Generate, Mutate, undo, recall, activate, loadState, setEvolve: `morphActive()` false and the notice present);
 `store_slot_while_morphing_refreshes_the_preview`; `failed_set_morph_keeps_previous_preview`; `morph_survives_marker_edits_via_sanitize`; `ab_slots_persist_and_morph_works_after_reload`
-(needs F01 `ab`); `display_pattern_returns_the_preview_while_active`; `chaos_layers_on_top_of_the_morph` (when F08 is present).
+(needs F01 `ab`); `display_pattern_returns_the_preview_while_active`.
 
 **GUI, `plugin/tests/test_morph_gui.cpp`** (xvfb, F00
 helpers): `morph_controls_enable_with_both_slots_and_commit_adds_a_node`: load `drumLoop()`, Detect Chops, click "Generate", "Store A", "Mutate", "Store B"; before storing B assert

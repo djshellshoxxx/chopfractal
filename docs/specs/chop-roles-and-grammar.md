@@ -1,6 +1,9 @@
 # Chop Roles and Grammar
 
 **Status:** Creation spec for review  
+
+**Implementation (audited 2026-10-20):** Built and tested (`chop_roles_grammar`): roles, serializable rules, explainable `GrammarPolicy`, templates, composition injection. Editor: role combo with Set Role, Smart Setup suggestions with Accept Roles. **No rule-editing UI** (F06). Known limits (BUILD_STATUS, rounds 4/5): Mutate can break "at most N" rules using later events; `FirstInBar` means the first event of any chop; policy-driven generation is slow with very large rule sets.
+
 **Module ID:** `chop_roles_grammar`  
 **Purpose:** Give chops user-defined musical roles and use compact rules to guide generation without relying on opaque AI or genre labels.
 

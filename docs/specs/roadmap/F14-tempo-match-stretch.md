@@ -1,6 +1,9 @@
 # F14 Tempo-match stretch
 
-**Status:** Ready for development  **Size:** L (10 engineer-days)  **Depends on:** F00 (FeaturePanel, WavePanel, StatusBar); F01 (background job runner, optional); shares `sourceNeedsEmbed()` with F12 (whichever lands first adds it)  **Blocks:** none
+**Status:** Portable parts implemented (module, session API, tests); plugin and UI pending  **Size:** L (10 engineer-days)  **Depends on:** F00 (FeaturePanel, WavePanel, StatusBar); F01 (background job runner, optional); shares `sourceNeedsEmbed()` with F12 (whichever lands first adds it)  **Blocks:** none
+
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** Smart Setup's loop/tempo suggestion and "Use Tempo" (manual BPM fallback) exist and are the assist the body builds on; there is no stretch engine. Decisions recorded by the audit: no conflicts with the as-built code were found; the FeaturePanel controls (`Match to host`, `Cancel`, `Undo Stretch`) need a home because rows A to D are full (row A is 648 px used before F06/F07, row C 848): they open from a single `Tempo match...` button (110 px) appended to row A (648 + 90 for F06 + 110 = 848 of 920 px) that shows the call-out holding the Quality combo, Match to host, Cancel and Undo Stretch. The body's inline status strings are unchanged. F16 note: a stretched source changes loudness only marginally; Level Match re-measures the source after a stretch.
 
 ## 1. Summary and user value
 Match a loop that was recorded or downloaded at one tempo to the project's tempo by time-stretching it offline into a new source, while keeping every chop boundary exactly on its scaled position, so roles, pattern events and Smart Setup still apply. Today the renderer only resamples (pitch follows duration, see `renderer.hpp` header comment) and `suggestLoop` only suggests a BPM; the producer must stretch in a DAW and re-import. This turns "any loop, any tempo" into one click.
@@ -92,7 +95,7 @@ Unit (`modules/time_stretch/tests/test_time_stretch.cpp`, synthetic signals):
 - `duration_error_of_events_is_zero`: click train (impulse every 0.5 s, 10 clicks) with anchors at each click; after stretch ratio r the peak frame of click i equals `mapPosition(pos_i, in, out)` exactly (0 frame error), peak amplitude >= 0.99 (attack preserved).
 - `map_position_has_no_drift`: 1,000 positions p over 11.52M frames, several (in,out): `|mapPosition - p*out/in| <= 0.5`, monotonic, `mapPosition(0)=0`, `mapPosition(in)=out`, and mapping a boundary computed cumulatively would differ (documents the rule).
 - `region_joins_are_seamless`: sine through anchors; max sample-to-sample difference at region boundaries <= 1.5x the signal's own max difference.
-- `energy_is_preserved`: white noise (seeded `chop_contracts` RNG), output RMS within 1 dB of input for all ratios/qualities.
+- `energy_is_preserved`: white noise (seeded `chop_contracts` RNG), output RMS within 1.5 dB of input for all ratios/qualities (measured worst case -1.13 dB at 0.5x: uncorrelated overlapped frames add in power, so noise is the worst case for WSOLA; tonal material is unaffected).
 - `silence_and_dc_and_nonfinite_inputs`: zeros -> zeros; NaN input -> finite output; DC 0.5 -> 0.5 +/- 1e-6.
 - `mono_and_stereo_identical_to_dual_mono`: stereo with L=R equals mono result in both channels; stereo with different channels uses a common alignment (cross-channel phase relation preserved: correlation >= 0.99 for a panned sine pair).
 - `hit_mode_keeps_attack_and_fades_cut`: region shorter than `3N`, `Lout < Lin`: first `Lout - fade` samples identical to source, fade monotonic; `Lout > Lin`: tail zeros.
@@ -148,3 +151,14 @@ Manual QA: 1) Import a 4-bar breakbeat at 96 BPM; Smart Setup lists "4 bars at 9
 6. Processor worker, progress, cancel, undo, forced embed; shell tests without GUI.
 7. FeaturePanel "Tempo match" UI + GUI tests under xvfb.
 8. Corpus listening QA, docs, BUILD_STATUS update.
+
+## 12. As built (portable parts) and decisions taken
+- `ErrorCode::Cancelled` was appended to `chop_contracts` in this branch (F01 had not landed); if F01 adds the same value, keep one.
+- `time_stretch` also exports `mapLength`, `qualityParams` and `kMaxPlanFrames` (2e9, keeps `2*p*out` inside int64). `makePlan` itself enforces the 0.5..2 ratio, ignores anchors outside `(0, inFrames)` and drops an anchor that would land on the previous output frame. Sample rates 8 kHz..384 kHz are accepted. Regions are processed with a streaming overlap-add buffer (about `N` doubles per channel), so scratch memory is tiny; non-finite samples cause a sanitized copy of that region only.
+- Measured (Release, GCC, 2 shared cores, 60 s stereo 48 kHz, 1.25x): Draft 0.2 s, Standard 0.4 s, High 6.0 s.
+- `source_chop` does not depend on `time_stretch`: `ChopMap::rescaled` uses the identical integer formula locally and a composition test asserts the two agree. Its `Conflict` message is generic with the count in `hint`; the composition root builds the user-facing sentence of section 3 (with the target BPM).
+- Composition additions live in `composition/include/chopfractal/composition/stretch.hpp` and `composition/src/stretch.cpp`: `StretchRequest`, `StretchPlan`, `runStretch` (worker-side wrapper over `stretch::stretch`), `maxStretchFrames`, `looksStretched` (the "already stretched" warning is derived from the name suffix `" @<bpm> BPM"`, so no new state is needed), `previewStretch` (the exact status-line texts, levels and `canApply` of section 3) and `loopLengthChoices` / `sourceBpmForBars` (the Loop length combo, fed by `insight::suggestLoop`). `ProjectSession` only gains `sourceData()`, `sourceNeedsEmbed()`, `planStretch` and `applyStretched` declarations.
+- `planStretch` additionally dry-runs `ChopMap::rescaled`, so tiny-chop collisions are reported before any audio work. Repeated stretches replace the name suffix instead of stacking it.
+- Shared one-level undo: `SourceReplaceUndo` (`composition/include/chopfractal/composition/source_replace.hpp`, `composition/src/source_replace.cpp`) with `capture(session)`, `available()`, `restore(session)`, `clear()`. It stores `saveState(false)` plus the old `SourceData` pointer (never copies or embeds the audio), and restores through `loadState` with a resolver that returns that pointer. F12 reuses it.
+- `stretch_apply_is_all_or_nothing` injects failures by (1) a stretched buffer that does not match the plan and (2) markers edited after planning so the rescale collides; both leave `saveState` bytes unchanged.
+- CI: the license grep guard is in the `portability` job and `test_time_stretch` runs under ThreadSanitizer in the `sanitizers` job.

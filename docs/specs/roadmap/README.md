@@ -1,12 +1,12 @@
 # ChopFractal roadmap: implementation plan
 
-Companion to the per-feature specs in this folder (`F00` to `F15`). Read this first: it fixes the **order**, the **branch and merge rules**, the **file ownership** that keeps parallel work from colliding, the **quality gates**, and what only the maintainer can supply.
+Companion to the per-feature specs in this folder (`F00` to `F19`, plus the per-event effects `E01` and `E02`). Read this first: it fixes the **order**, the **branch and merge rules**, the **file ownership** that keeps parallel work from colliding, the **quality gates**, and what only the maintainer can supply.
 
-Baseline: `main` after PR #3 (15 portable modules, composition root, JUCE shell, 32 ctest targets, plugin shell tests 13/13, VST3 validator 47/47, CI green on 8 jobs).
+Baseline: `main` at ddbb8bd (portable modules, composition root, JUCE shell, pass 3 shipped: Chaos, drag-out, presets, direct hit editing basics; VST3 validator 47/47). See `docs/BUILD_STATUS.md` for the live numbers and each spec's section 0 for what is already implemented.
 
 ## 1. Why the order matters (the three merge hazards)
 
-1. **`plugin/src/PluginEditor.cpp` (815 lines) is one file that every UI feature edits.** Parallel feature branches would conflict on every merge. Fix: **F00** splits it into panel classes first. After F00, each feature mostly adds files.
+1. **`plugin/src/PluginEditor.cpp` (1404 lines as built; 815 when this plan was first written) is one file that every UI feature edits.** Parallel feature branches would conflict on every merge. Fix: **F00** splits it into panel classes first. After F00, each feature mostly adds files.
 2. **State format.** Several features add saved state (scenes, presets, A/B, capture, settings). Done one at a time they would bump the schema repeatedly and fight over `saveState`/`loadState`. Fix: **F01** defines one coordinated bump (state v2), wires the migration registry, and provides a small `StateSection` API so later features append their own section without touching shared code.
 3. **`ProjectSession` (826 + 293 lines) and `parameters.cpp` are shared.** Fix: new feature logic goes into **new portable modules** or new `composition/src/<feature>.cpp` files, with only a thin declaration in `project_session.hpp`. Host parameters are appended in **one manifest bump (version 3)** reserved per wave (section 5).
 
@@ -35,7 +35,16 @@ Wave 3 (audio-engine changes; one at a time through renderer.cpp / PluginProcess
   F12 input-capture        (audio-thread ring buffer)
   F11 multi-output-stems   (bus layout; riskiest for host compatibility)
   F14 tempo-match-stretch  (new portable module; offline only, so it can run in parallel with any Wave 3 item)
+
+Wave 4 (new specs; each is independent of the others except where noted)
+  F16 level-match-and-limiter   (renderer output stage + new module level_match; before F18)
+  F17 groove-lab                (new module groove + Playback::build hook; before F18)
+  E01 echo                      (event bit 64, effect pass, renderer expansion)  ->  E02 tremolo-pan (bit 128, shares E01's pass and state tag 17)
+  F18 arrangement-export        (needs F09, F13; uses F16/F17/E01/E02 when present)
+  F19 command-palette           (needs F04; last, so it registers every earlier action; its parameter commands read the manifest automatically)
 ```
+
+Wave 4 dependencies in one line: F16, F17, E01 need F01 (state sections); E02 needs E01; F18 needs F09, F13 (soft F16, F17); F19 needs F04 (soft everything).
 
 Hard dependencies: F01 needs F00. F02, F03, F05, F06, F09, F10, F13 need F00. F03, F09, F10, F12 also need F01. F04 needs F02 and F05 (it binds keys to their actions). F07 needs F08's gesture plumbing only if both ship together (otherwise independent). F11 should land **after** F07 and F12, because all three change `processBlock` and bus/MIDI declarations.
 
@@ -54,6 +63,18 @@ Critical path (about 7 sequential items): F00, F01, F02, F04, F08, F07, F11. Eve
 - **Performance pads and hosts (F07):** Ableton Live cannot route MIDI to an Fx-category plugin and the plugin category stays `Fx`; on-screen pads are the guaranteed path. Adding an Instrument category is a product decision. Whether JUCE adds MIDI-CC emulation parameters once `acceptsMidi` is true, and the validator test count, must be checked when F07 lands.
 - **State sections API:** F01 defines the exact signature; F07/F08/F09 sections (`pads`, `chaos`, `scenes`) are written against "id + schema + bytes, optional, absent when default" and must be adjusted to F01's final form.
 - **Maintainer decisions still open:** minimum macOS version (specs assume 11.0), bundle id domain (assumed `com.chopfractal`), Windows signing route, whether Linux ships, Apple/Windows certificates, JUCE license route, factory preset content, Chaos mapping taste.
+
+## 2c. FeaturePanel row budget (shared UI space)
+
+Rows A to D are used as built (about 848 to 870 px of the 920 px content height). New buttons go to a new **row E** of 28 px height; controls that do not fit open a call-out from one button. Allocation: F06 and F07 buttons on row A or E (their specs say which), E01 140 px, E02 140 px, F16 260 px, F17 150 px, F18 90 px. If row E overflows 920 px, F04's reflow moves the least used button into a `More...` menu; do not widen the editor beyond 940 x 912 without a maintainer decision.
+
+## 2d. Manifest policy (host parameters)
+
+Version stays 3. Parameter ids are permanent and never reordered or reused; each feature appends its rows after the last row present when it merges (the golden list test is updated in the same PR). Rows reserved by the specs, in expected merge order after `chaos`: F07 `perf_mode`, `perf_velocity_curve`; F11 `stems_enabled`; F16 `level_match`, `match_trim_db`, `limiter_enable`, `limiter_ceiling_db`; E01 `allow_echo`, `echo_amount`, `echo_rate`, `echo_decay`, `echo_tone`; E02 `allow_tremolo`, `trem_amount`, `trem_mode`, `trem_rate`, `trem_depth`; F17 `groove_enable`, `groove_template`, `groove_swing`, `groove_hum_time`, `groove_hum_vel`. F18 and F19 add none. Positions follow merge order, not this list; ids are what is fixed. Whether to freeze version 3 at first public release and use version 4 for later rows is a maintainer decision (open item).
+
+## 2e. State section tag registry (F01 `StateSection`)
+
+Authoritative table is F01 section 4.4. Tags claimed by later specs: 14 `groove` (F17), 15 `levelmatch` cache (F16), 16 `arrangement` (F18), 17 `fx` (E01, extended by E02). F19 keeps its data in a per-user file, not in project state. Pattern event flag bits: 1 to 32 used, **64 E01, 128 E02**; the byte is then full, so the next per-event feature needs pattern schema 2 with an extension byte (E02 section 4.1).
 
 ## 3. Branch, PR and merge rules
 
@@ -85,11 +106,16 @@ Critical path (about 7 sequential items): F00, F01, F02, F04, F08, F07, F11. Eve
 | `modules/audio_renderer` | F08 (hook), F11 (buses) | sequential |
 | new modules | the feature that creates them | n/a |
 | `.github/workflows/ci.yml`, installers | F15 | feature PRs may add a test step only |
+| `modules/audio_renderer/src/renderer.cpp` output stage and `Playback::build` | F16 (limiter, match gain), F17 (groove), E01/E02 (expansion, LFO) | sequential: F16, then F17, then E01, then E02 |
+| `modules/chop_contracts/src/event.cpp` (flags byte) | E01 (bit 64), E02 (bit 128) | none; no other feature may claim a flag bit |
+| `modules/pattern_engine/src/fx_pass.cpp` | E01 creates, E02 extends | none |
+| `composition/src/{level_match,groove,fx_settings,arrangement}.cpp` | F16, F17, E01/E02, F18 | thin declarations in `project_session.hpp` |
+| `plugin/src/CommandRegistry.*` | F19 | each panel registers its commands in its own `registerCommands()` |
 
 ## 5. Parameter and state budget
 
-- **Manifest v3 (one bump, Wave 3):** `chaos` (F08), `perf_mode`, `perf_velocity_curve` (F07), optional `stems_enabled` (F11). Declared up front so the golden list is edited in one coordinated PR sequence; each PR appends its own rows below the previous one (append conflicts resolve trivially).
-- **State v2 sections** (F01 API): `ui` (seed, motif, depth, export settings, detect mode), `ab` (A/B snapshots), `evolve`, `presets` (selected only; preset files live in the user folder), `scenes` (F09), `capture` (F12 metadata only; audio rides the existing embedded-audio block), `stems` (F11 routing). Unknown sections are preserved and written back (forward compatibility).
+- **Manifest v3 (one bump, Wave 3):** `chaos` (F08), `perf_mode`, `perf_velocity_curve` (F07), optional `stems_enabled` (F11); Wave 4 appends 4 (F16) + 5 (E01) + 5 (E02) + 5 (F17) rows, see section 2d. Declared up front so the golden list is edited in one coordinated PR sequence; each PR appends its own rows below the previous one (append conflicts resolve trivially).
+- **State v2 sections** (F01 API): `ui` (seed, motif, depth, export settings, detect mode), `ab` (A/B snapshots), `evolve`, `presets` (selected only; preset files live in the user folder), `scenes` (F09), `capture` (F12 metadata only; audio rides the existing embedded-audio block), `stems` (F11 routing); Wave 4 tags 14 to 17 (section 2e). Unknown sections are preserved and written back (forward compatibility).
 
 ## 6. Quality gates (every PR, no exceptions)
 
@@ -123,6 +149,10 @@ Per-feature "definition of done": every acceptance criterion in the spec checked
 | F08, F09, F10 | mid-tier model | small logic plus tests, parameter plumbing |
 | F07, F12, F11 | strongest model for the audio-thread parts; mid-tier for UI parts | real-time safety and host compatibility |
 | F14 | strongest model for the DSP, then mid-tier for UI | algorithm quality and measured error bounds |
+| F16 | strongest model for the limiter and loudness math; mid-tier for UI | true-peak guarantee, audio-thread safety |
+| F17, E01, E02 | mid-tier model; strongest reviews the renderer hooks | determinism and golden-hash neutrality |
+| F18 | mid-tier model | job, formats and tests are well specified |
+| F19 | mid-tier model | UI and glue plus a small portable matcher |
 | F15 | mid-tier model plus the maintainer for certificates and accounts | mostly YAML/scripts; secrets need a human |
 | Every PR | an independent **read-only review pass** by a second model with the diff only, then the gates in section 6 | catches what the author is blind to; cheap relative to a bad merge |
 
@@ -157,8 +187,11 @@ Developer prompt template (paste with the spec): "Implement `docs/specs/roadmap/
 | F05 | M | 3 | F13 | S | 2 |
 | F06 | M | 5 | F14 | L | 8 |
 | F07 | L | 6 | F15 | L | 7 |
+| F16 | M | 6 | F18 | L | 9 |
+| F17 | M-L | 8 | F19 | M | 6 |
+| E01 | M | 5 | E02 | S-M | 4 |
 
-Total about 78 engineer-days. With three parallel engineers following the waves: about 5 to 6 calendar weeks, bounded by the critical path (about 28 days) plus review and host-testing time. Add one week of dedicated real-host testing and fixes before any public beta.
+Total about 116 engineer-days (78 for F00 to F15, 38 for Wave 4). With three parallel engineers following the waves: about 5 to 6 calendar weeks, bounded by the critical path (about 28 days) plus review and host-testing time. Add one week of dedicated real-host testing and fixes before any public beta.
 
 ## 11. Release readiness checklist (after Wave 3)
 

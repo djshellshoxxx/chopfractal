@@ -1,6 +1,9 @@
 # Event effects: Filter, Tape Glide, Crunch
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested end to end: `EventFx` data, generation draws appended to the per-event streams, `setEventFx`, state flag bit 32, renderer DSP in the fixed order, host parameters `allow_filter`, `allow_glide`, `allow_crunch`, `fx_intensity` (manifest version 2). Editor: three Allow toggles and the Effect Intensity slider; per-hit effect editing is F02's event editor. **Flag bits in the event flags byte:** 1 to 32 are used; E01 (Echo) claims 64 and E02 (Tremolo-Pan) claims 128, which exhausts the byte (any later per-event block needs an extension byte under pattern schema 2; see E02 section 4).
+
 **Modules touched:** `chop_contracts` (data), `pattern_engine` (generation, edits, state), `audio_renderer` (DSP), `plugin_host_adapter` (parameters)  
 **Purpose:** Three per-hit effects chosen because they suit chopped loops: tone shaping, movement, and character. All are per event, so they can be generated, edited, locked, zoomed into and exported like any other event property.
 

@@ -1,6 +1,9 @@
 # Evolve Mode
 
 **Status:** Creation spec  
+
+**Implementation (audited 2026-10-20):** Built and tested (`evolve`, `ProjectSession::setEvolve/evolveStep/keepEvolved`): cadence, amount, ramp, failure stop, history nodes, replayable seeds. Editor: Evolve toggle, Every, amount slider, Keep. Evolve applies the live Chaos value. `enabled` is never persisted (a project never starts changing by itself). Scenes (recording an Evolve wander) are F09.
+
 **Module ID:** `evolve`  
 **Purpose:** The fun feature. Switch Evolve on and the beat **slowly mutates itself while it plays**: every few loops the pattern takes a small, controlled step. Locked bars, locked beats and the user's manual edits stay put, so you can protect the parts you love and let the rest wander. Because every step comes from a seed, a wander you like can be replayed exactly or kept as a named branch.
 

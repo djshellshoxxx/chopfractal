@@ -2,8 +2,26 @@
 
 **Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F00 (panels), F01 (persisted snap prefs in `ProjectExtras::ui`)  **Blocks:** F04 (Delete/Ctrl+D/arrow keys call these commands), F07, F10
 
+## 0. Implementation status (audited 2026-10-20)
+**Partly built by pass 3 (direct hit editing basics); the rest is not started.**
+
+*Implemented (in `plugin/src/PluginEditor.cpp`, tests in `plugin/tests` and `composition/tests`):*
+- Pure `pattern_engine` edits `resizeEvent`, `duplicateEvent` (same bar only) and `setEventEnabled`, plus the geometry helpers `xToTick`, `snapDown`, `snapNearest`, `splitTick`, `laneAtY` in `plugin_ui_adapter/hit_edit.hpp`.
+- Pattern grid: drag to move (time and lane), right-edge resize (6 px zone, one third for narrow hits), Alt+drag duplicates, Shift+click on empty space adds a one-cell hit, Delete/Backspace deletes, `M` mutes, `D` duplicates, Left/Right nudges and Shift+Left/Right resizes by one grid cell. One finished gesture is one undo step and one history node ("Edited hits"). Locked scopes refuse. A "Move / resize hits" toggle in the transport row switches between hit editing and rubber-band section selection.
+- Waveform: a click auditions the chop under the pointer (also starts a drag selection of chops), Shift+click adds a marker, Alt+click deletes the nearest marker within 8 px, double-click auditions. Double-click no longer adds markers.
+
+*Not implemented:* marker dragging, marker snap modes, enable/disable, trim, rename and marker undo/redo in the UI; waveform zoom and scroll; the event editor popup and the right-click menus; OrbitPanel editing; cross-bar duplicate and move-to-other-bar polish; snap toggle/division controls and their persistence; the nested-hit refusal messages.
+
+*Decisions that override the body below (the audit found these contradictions between this spec, the roadmap README and the shipped behavior; shipped behavior wins because users already have it):*
+1. **Add a marker with Shift+click** (shipped) or the right-click item `Add marker here`. The spec's "double-click on empty waveform adds a marker" is dropped; double-click keeps auditioning. Wherever this spec says double-click adds a marker, read Shift+click.
+2. **Add a hit with Shift+click on empty pattern space** (shipped); double-click on empty lane space is added as a second, equivalent gesture. Double-click on a hit opens the event editor popup as specified.
+3. **Keys:** plain `D` duplicates and `M` mutes (shipped, the editor leaves Ctrl/Cmd/Alt chords to the host). F04 adds `Ctrl/Cmd+D` as an alias; F02 adds nothing key-related.
+4. **Pure edits:** keep the shipped signatures. `duplicateEvent(p, id, newStartInBar)` stays; F02 adds the overload `duplicateEvent(p, id, bar, startInBar, EventId* newId)` for cross-bar drops. `resizeEvent` minimum duration is 60 ticks as specified (the shipped function must be checked against it and tightened if it allows less; add the test).
+5. **Geometry helpers:** extend the existing `hit_edit.hpp` (it already has `BarPos`, `splitTick`, `snapNearest`); do not create a second `BarPos` in `edit_geometry.hpp`. `planHitMove`, `planHitResize`, `snapMarkerFrame` and `angleOf` go into `edit_geometry.hpp`, which includes `hit_edit.hpp`.
+6. Panel sizes below are the F00 as-built sizes: PatternPanel 920 x 230, WavePanel 920 x 120, OrbitPanel 106 x 106.
+
 ## 1. Summary and user value
-Everything the engine can already edit (`pattern::moveEvent`, `addEvent`, `deleteEvent`, `setEventChop`, `setEventTransform`, `setEventFx`, `setLock`, `ChopMap::moveMarker/setEnabled/setLabel/setTrim`, `ProjectSession::editMarkers/undoMarkers/redoMarkers`) has no mouse access: the only editor gestures today are click-adds-marker, Alt-click-removes and select-a-hit. F02 adds drag, resize, move-between-lanes, duplicate, delete, mute, reset and effect editing of hits in PatternPanel and OrbitPanel, full marker editing and audition in WavePanel, and waveform zoom/scroll. Producers can shape a generated groove by hand instead of re-rolling the seed.
+Everything the engine can already edit (pass 3 added mouse access for move, resize, duplicate, delete and mute of hits; the rest below is still missing) (`pattern::moveEvent`, `addEvent`, `deleteEvent`, `setEventChop`, `setEventTransform`, `setEventFx`, `setLock`, `ChopMap::moveMarker/setEnabled/setLabel/setTrim`, `ProjectSession::editMarkers/undoMarkers/redoMarkers`) has no mouse access: the editor gestures that exist today are the pass-3 hit editing, Shift+click-adds-marker and Alt-click-removes (see section 0). F02 adds drag, resize, move-between-lanes, duplicate, delete, mute, reset and effect editing of hits in PatternPanel and OrbitPanel, full marker editing and audition in WavePanel, and waveform zoom/scroll. Producers can shape a generated groove by hand instead of re-rolling the seed.
 
 ## 2. User stories and scope
 - As a producer I can drag a hit to a new time and lane, stretch its end, and have it snap to the grid, so I fix one hit without regenerating.
@@ -29,11 +47,11 @@ All sizes in panel-local pixels. Modifier names: `Cmd` on macOS means Ctrl elsew
 
 **Event editor popup** (`plugin/src/EventEditor.h/.cpp`, a `juce::CallOutBox` 260 x 250 anchored to the hit): sliders `Level` 0..4 step 0.01 (default 1.0; text `%`-free, two decimals), `Pan` -1..1 step 0.01, `Pitch (semitones)` -24..24 step 1, `Retrigger` 1..8 step 1; toggle `Reverse`; combo `Filter` (`Off`, `Low-pass`, `High-pass`); sliders `Cutoff` 0..1, `Resonance` 0..1, `Glide (semitones)` -24..24 step 1, `Crush` 0..1 step 0.01; button `Reset`. Filter-dependent sliders are disabled when Filter is Off. A change is applied when a drag ends, on text-box commit or on combo/toggle change (never per drag tick).
 
-**OrbitPanel (190 x 190)**: dragging an arc moves it along time (angle to tick, snapped like PatternPanel) and radially to another ring (chop). Same ghost, same menu, same messages; no resize here.
+**OrbitPanel (106 x 106)**: dragging an arc moves it along time (angle to tick, snapped like PatternPanel) and radially to another ring (chop). Same ghost, same menu, same messages; no resize here.
 
 **WavePanel (920 x 120)**
 - Zoom: mouse wheel zooms around the pointer (`factor = 1.25^(wheel.deltaY * 4)` per event, clamped so the window is never narrower than 256 frames nor wider than the clip); `Shift`+wheel or horizontal wheel scrolls (`scrolledBy`). Overlay buttons top-right: `Fit` (44 x 20), `Undo Marker` (92), `Redo Marker` (92), 4 px gaps; the last two are enabled by `ProjectSession::canUndoMarkers()/canRedoMarkers()`.
-- Click on empty waveform: selects nothing and auditions the chop under the pointer (`proc.audition`). This replaces click-adds-marker. Double-click on empty waveform: adds a marker at the snapped frame. `Alt`+click near a marker (8 px) still deletes it.
+- Click on empty waveform: auditions the chop under the pointer (`proc.audition`; as built, the press also starts a chop drag-selection). Shift+click on empty waveform: adds a marker at the snapped frame (as built, now snapped). Double-click auditions. `Alt`+click near a marker (8 px) still deletes it.
 - Marker handle: 12 px wide hit zone centred on the line. Press selects it (line drawn 2 px, white label box), movement > 3 px starts a drag, release applies one `editMarkers(moveMarker)`. The drag is clamped to `[prev.position + minRegionFrames, next.position - minRegionFrames]` (`ChopMap::minRegionFrames()` = 64 by default) and cannot cross a neighbour. Snap (see `ProjectExtras::ui.markerSnap`): `Off`, `Transient` (default), `Zero crossing`; `Cmd` disables snap during the drag. A combo in the overlay is not added; the mode is in the right-click menu.
 - Right-click on a marker: `Enable chop` / `Disable chop`, `Rename marker...` (AlertWindow `Marker name`), `Trim start here`, `Trim end here`, `Clear trim`, separator, `Snap: Off` / `Snap: Transient` / `Snap: Zero crossing` (radio ticks), separator, `Delete marker`. Right-click on empty waveform: `Add marker here`, `Zoom to fit`.
 - Drawing: disabled markers grey as today; manual markers get a small filled square at the top, detected ones a triangle; labels (non-empty) replace the number; trimmed regions draw a darker overlay over the trimmed frames; the selected marker's chop region gets a 10 % white wash.
@@ -125,7 +143,7 @@ Each pattern command is one `ProjectSession::edit` call: all pure edits for that
 - `pattern_drag_moves_a_hit_one_grid_cell`: session with drum loop, Detect, Generate seed 42 (2 bars), then `edit(addEvent(bar0, chop0, start 0, dur 480))`; read the new rect from `view().pattern`; PatternPanel local: press at its centre, drag +`gridTicks/lengthTicks*920` px, release; assert event `start == 240`, `userOwned`, one `undo()` returns the previous bytes.
 - `pattern_drag_to_another_lane_changes_the_chop`; `pattern_right_edge_resizes`; `alt_drag_duplicates` (event count +1); `locked_hit_refuses_drag` (lock via `setHitLocked`, drag, bytes unchanged, status `That hit is locked. Unlock it or its bar first.`; repeat with `Lock Bar` on its bar); `double_click_empty_lane_adds_a_hit`.
 - `context_menu_items_exist_in_order`: invoke `PatternPanel::buildContextMenu(rect)` (public for tests) and compare item texts to section 3.
-- `wave_double_click_adds_marker_and_single_click_auditions`: marker count +1 on double-click at x=300; single click does not change markers (`chopMap()->markers().size()` same) and requests a preview (renderer preview queue accepted; assert via `proc.audition` call counter test hook).
+- `wave_shift_click_adds_marker_and_single_click_auditions`: marker count +1 on Shift+click at x=300; single click does not change markers (`chopMap()->markers().size()` same) and requests a preview (renderer preview queue accepted; assert via `proc.audition` call counter test hook).
 - `wave_marker_drag_moves_and_clamps`, `wave_wheel_zoom_keeps_anchor_frame_under_pointer` (anchor frame before/after within 1 px worth), `wave_alt_click_deletes_marker`, `undo_marker_button_restores`.
 - Existing `editor_buttons_drive_the_session` unchanged and green.
 **Sanitizers:** ASan/UBSan on all new tests (menus use `SafePointer`). **Manual QA:** (1) Load a loop, Detect, Generate; drag three hits, resize one, duplicate with Alt, mute one, delete one; press Undo five times: pattern returns to generated state. (2) Lock bar 1 via Lock Bar; try dragging a bar-1 hit: refused with the message. (3) Zoom to ~1 s of the loop, drag a marker onto a transient: it snaps; hold Cmd: no snap. (4) Right-click a marker: Disable chop; the lane for that chop disappears from PatternPanel after reconcile; `Undo Marker` brings it back. (5) Start Evolve, drag a hit, wait two loops: the dragged hit is preserved. (6) Open the family tree 3 s after a burst of edits: exactly one `Edited hits` node.
@@ -164,7 +182,7 @@ Each pattern command is one `ProjectSession::edit` call: all pure edits for that
 - Synthetic mouse events in tests differ from OS events: keep logic in panel methods taking `(Point, ModifierKeys)` and have `mouseDown/Drag/Up` forward to them; the unit tests hit those methods directly, the GUI tests prove the wiring.
 - History flooding: the debounce timer; fallback if the tree still floods is to disable `commitEdit` for gestures and rely on `Keep`.
 - `setTrim` validation gap for disabled markers: hide the items; add the missing validation to `ChopMap` only if QA finds a repro (separate fix).
-- Click semantics change (click no longer adds a marker): called out in release notes; double-click adds, right-click menu `Add marker here` is the discoverable path.
+- Click semantics already changed in pass 3 (a plain click no longer adds a marker); Shift+click and the right-click menu `Add marker here` are the discoverable paths.
 
 ## 11. Implementation steps
 1. pattern_engine: `setEventEnabled`, `resizeEvent`, `duplicateEvent` + tests (hot-file free, mergeable immediately).
