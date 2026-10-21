@@ -822,3 +822,109 @@ CHOP_TEST(pad_path_performs_no_heap_allocation) {
   gCountAllocs = false;
   CHECK_EQ(gAllocs.load(), 0);
 }
+
+CHOP_TEST(process_with_eight_aux_buses_performs_no_heap_allocation) {
+  Renderer r;
+  Config cfg;
+  cfg.maxBlock = 256;  // smaller than the 700-frame blocks below: the chunked aux pointers are covered
+  cfg.auxBuses = kMaxAuxBuses;
+  r.prepare(cfg);
+  auto src = makeSource(2, 44100, 48000, ramp);
+  FlatEventList events;
+  for (std::uint64_t i = 1; i <= 16; ++i) {
+    FlatEvent e = ev(i, 20000, static_cast<Ticks>(i * 100), 300);
+    e.chop = ChopId{i};
+    events.push_back(e);
+  }
+  BusRouting routing;
+  for (std::uint64_t i = 1; i <= 16; ++i) routing.chopBus.push_back({ChopId{i}, static_cast<std::uint8_t>(i % (kMaxAuxBuses + 1))});
+  auto routed = makePlayback(src, events, 3840, PlaybackOptions{}, &routing);
+  CHECK(routed.ok());
+  if (!routed.ok()) return;
+  r.mailbox().publish(routed.value());
+  std::vector<float> x(700, 0.1f), oL(700), oR(700);
+  std::vector<std::vector<float>> bus(2 * kMaxAuxBuses, std::vector<float>(700));
+  float* ap[kMaxAuxBuses][2];
+  AuxOutputs aux;
+  aux.count = kMaxAuxBuses;
+  for (int b = 0; b < kMaxAuxBuses; ++b) {
+    ap[b][0] = bus[static_cast<std::size_t>(2 * b)].data();
+    ap[b][1] = bus[static_cast<std::size_t>(2 * b + 1)].data();
+    aux.bus[b] = ap[b];
+  }
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = true;
+  RenderParams p;
+  r.process(tb, p, in, out, 2, 700, aux);  // warm-up: first acquire
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 300; ++i) {
+    tb.ppq = i * 700 * 120.0 / (60.0 * 48000.0);
+    tb.playing = i % 40 != 39;
+    p.limiterEnabled = (i / 50) % 2 == 1;  // the aux delay line engages and clears without allocating
+    aux.count = (i % 7 == 0) ? 3 : kMaxAuxBuses;
+    r.process(tb, p, in, out, 2, 700, aux);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+}
+
+CHOP_TEST(eight_aux_buses_cost_at_most_a_modest_factor_over_one_bus) {
+  auto src = makeSource(2, 44100, 48000, ramp);
+  FlatEventList events;
+  BusRouting routing;
+  for (std::uint64_t i = 1; i <= 24; ++i) {
+    FlatEvent e = ev(i, 12000, static_cast<Ticks>(i * 70), 600);
+    e.chop = ChopId{i};
+    events.push_back(e);
+    routing.chopBus.push_back({ChopId{i}, static_cast<std::uint8_t>(i % (kMaxAuxBuses + 1))});
+  }
+  auto routed = makePlayback(src, events, 1920, PlaybackOptions{}, &routing);
+  auto plain = makePlayback(src, events, 1920);
+  CHECK(routed.ok() && plain.ok());
+  if (!routed.ok() || !plain.ok()) return;
+  auto time = [&](const std::shared_ptr<const Playback>& pb, int buses) {
+    Renderer r;
+    Config cfg;
+    cfg.auxBuses = buses;
+    r.prepare(cfg);
+    r.mailbox().publish(pb);
+    std::vector<float> x(512, 0.f), oL(512), oR(512);
+    std::vector<std::vector<float>> bus(2 * kMaxAuxBuses, std::vector<float>(512));
+    float* ap[kMaxAuxBuses][2];
+    AuxOutputs aux;
+    aux.count = buses;
+    for (int b = 0; b < buses; ++b) {
+      ap[b][0] = bus[static_cast<std::size_t>(2 * b)].data();
+      ap[b][1] = bus[static_cast<std::size_t>(2 * b + 1)].data();
+      aux.bus[b] = ap[b];
+    }
+    const float* in[2] = {x.data(), x.data()};
+    float* out[2] = {oL.data(), oR.data()};
+    TransportBlock tb;
+    tb.playing = true;
+    tb.positionValid = true;
+    double best = 1e30;
+    for (int rep = 0; rep < 5; ++rep) {
+      const auto t0 = std::chrono::steady_clock::now();
+      for (int i = 0; i < 400; ++i) {
+        tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
+        r.process(tb, RenderParams{}, in, out, 2, 512, aux);
+      }
+      best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    }
+    return best;
+  };
+  const double one = time(plain.value(), 0);
+  const double eight = time(routed.value(), kMaxAuxBuses);
+  // Optimized builds hold the 1.5x bound (about 1.2x measured); unoptimized or instrumented builds only guard against a blow-up.
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__)
+  const double bound = 1.5;
+#else
+  const double bound = 3.0;
+#endif
+  CHECK(eight <= one * bound + 1e-3);
+}

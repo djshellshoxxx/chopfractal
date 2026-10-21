@@ -69,8 +69,36 @@ void applyTremPan(PreparedSlice& s, const std::optional<TremPanFx>& t, const Pla
 
 }  // namespace
 
+std::uint8_t BusRouting::busFor(ChopId c) const {
+  auto it = std::lower_bound(chopBus.begin(), chopBus.end(), c.value, [](const std::pair<ChopId, std::uint8_t>& a, std::uint64_t v) { return a.first.value < v; });
+  return (it != chopBus.end() && it->first == c) ? it->second : defaultBus;
+}
+
+bool BusRouting::allMain() const {
+  if (defaultBus != 0) return false;
+  for (const auto& kv : chopBus)
+    if (kv.second != 0) return false;
+  return true;
+}
+
 Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks,
                                                      const PlaybackOptions& options) {
+  return makePlayback(std::move(source), events, lengthTicks, options, nullptr);
+}
+
+Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const FlatEventList& events, Ticks lengthTicks,
+                                                     const PlaybackOptions& options, const BusRouting* routing) {
+  if (routing) {
+    if (routing->defaultBus > kMaxAuxBuses) return makeError(ErrorCode::OutOfRange, "an output bus is out of range");
+    std::uint64_t previous = 0;
+    bool first = true;
+    for (const auto& kv : routing->chopBus) {
+      if (kv.second > kMaxAuxBuses) return makeError(ErrorCode::OutOfRange, "an output bus is out of range");
+      if (!first && kv.first.value <= previous) return makeError(ErrorCode::InvalidArgument, "the output routing is not sorted by chop");
+      previous = kv.first.value;
+      first = false;
+    }
+  }
   if (!source || source->frames <= 0 || (source->channels != 1 && source->channels != 2) || source->sampleRate < 8000 || source->sampleRate > 384000)
     return makeError(ErrorCode::InvalidArgument, "the source buffer is missing or has an unsupported format");
   if (source->samples.size() != static_cast<std::size_t>(source->channels) * static_cast<std::size_t>(source->frames))
@@ -258,6 +286,10 @@ Result<std::shared_ptr<const Playback>> makePlayback(SourcePtr source, const Fla
   for (Item& it : items) {
     pb->events.push_back(std::move(it.e));
     pb->slices.push_back(it.s);
+  }
+  if (routing && !routing->allMain()) {  // an all-main routing keeps eventBus empty, so the Playback equals the unrouted one
+    pb->eventBus.reserve(pb->events.size());
+    for (const FlatEvent& e : pb->events) pb->eventBus.push_back(routing->busFor(e.chop));
   }
   return std::shared_ptr<const Playback>(std::move(pb));
 }

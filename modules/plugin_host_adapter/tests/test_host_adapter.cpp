@@ -207,6 +207,24 @@ CHOP_TEST(bus_layouts) {
   CHECK(!isSupportedBusLayout(1, 2) && !isSupportedBusLayout(0, 0) && !isSupportedBusLayout(6, 6));
 }
 
+CHOP_TEST(bus_layout_rules_with_aux) {
+  const int none[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  const int one[8] = {2, 0, 0, 0, 0, 0, 0, 0};
+  const int gap[8] = {0, 0, 2, 0, 0, 0, 0, 2};
+  const int all[8] = {2, 2, 2, 2, 2, 2, 2, 2};
+  const int mono[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+  const int three[8] = {0, 3, 0, 0, 0, 0, 0, 0};
+  CHECK(isSupportedBusLayout(2, 2, none, 8) && isSupportedBusLayout(1, 1, none, 8));
+  CHECK(isSupportedBusLayout(2, 2, one, 8) && isSupportedBusLayout(2, 2, gap, 8) && isSupportedBusLayout(2, 2, all, 8));
+  CHECK(!isSupportedBusLayout(1, 1, one, 8));    // a mono main bus rejects every aux bus
+  CHECK(!isSupportedBusLayout(2, 2, mono, 8));   // aux buses are stereo or off
+  CHECK(!isSupportedBusLayout(2, 2, three, 8));
+  CHECK(!isSupportedBusLayout(2, 1, none, 8));   // the main rules are unchanged
+  CHECK(!isSupportedBusLayout(0, 0, none, 8) && !isSupportedBusLayout(6, 6, none, 8));
+  CHECK(isSupportedBusLayout(2, 2, nullptr, 0));
+  CHECK(!isSupportedBusLayout(2, 2, nullptr, 8) && !isSupportedBusLayout(2, 2, none, -1));
+}
+
 // ---- loop position (extracted from ChopFractalProcessor::processBlock) ----
 #include <chopfractal/plugin_host_adapter/loop_position.hpp>
 

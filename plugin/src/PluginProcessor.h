@@ -129,6 +129,12 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Everything buildCaptureView() needs, read from the engine, the host state and the session (message thread).
   chopfractal::ui::CaptureUiInput captureUiInput(chopfractal::capture::CaptureMode mode, int bars, double maxSeconds);
 
+  // ---- multiple outputs (F11; docs/specs/roadmap/F11-multi-output-stems.md) ----
+  // How many of the eight aux outputs ("Out 2" .. "Out 9") the host enabled for the current run, and which ones (bit i is
+  // "Out i + 2"). Read on the 30 Hz timer for the Outputs status line and the "off in host" labels.
+  int activeAuxBuses() const;
+  bool auxBusEnabled(int bus) const { return bus >= 1 && bus <= chopfractal::render::kMaxAuxBuses && ((auxMask_.load() >> (bus - 1)) & 1) != 0; }
+
   // ---- performance pads (F07; docs/specs/roadmap/F07-performance-pads.md) ----
   // Any thread. The press reaches the audio thread through a fixed-size queue and sounds one block later; a full queue drops it.
   void padTrigger(int note, int velocity, bool on);
@@ -171,6 +177,8 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   std::array<double, 5> lastGrooveParams_{};  // Groove Lab knobs as of the last poll (message thread): the session is touched only when one moved
   std::atomic<double> sampleRate_{48000.0};
   chopfractal::capture::CaptureEngine capture_;
+  static BusesProperties makeBuses();
+  std::atomic<int> auxMask_{0};
   // ---- pads ----
   struct UiPad {
     std::uint8_t note = 0, velocity = 0, kind = 0;  // kind: 0 note off, 1 note on, 2 all notes off

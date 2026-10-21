@@ -23,6 +23,7 @@ Public headers:
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
 - `include/chopfractal/plugin_ui_adapter/capture_view.hpp`
 - `include/chopfractal/plugin_ui_adapter/pads_view.hpp`
+- `include/chopfractal/plugin_ui_adapter/outputs_view.hpp`
 
 ## Contract
 

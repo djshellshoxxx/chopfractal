@@ -234,7 +234,8 @@ Status ProjectSession::applyStretched(const StretchPlan& sp, std::shared_ptr<con
     if (!valid.ok()) return valid.error();
     auto flat = pattern::flatten(clean, *newChops);
     if (!flat.ok()) return flat.error();
-    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(clean), playbackOptions_);
+    const render::BusRouting bus = busRouting();  // chop ids are preserved by the rescale
+    auto pb = render::makePlayback(stretched, flat.value(), pattern::lengthTicks(clean), playbackOptions_, &bus);
     if (!pb.ok()) return pb.error();
     newPlayback = pb.value();
     newPattern = std::move(clean);

@@ -118,6 +118,7 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 ## Known gaps
 
+- **Multiple outputs** have no GUI controls yet; routing is driven through the session API (see F11 spec section 12).
 - **Input capture** has no GUI controls yet; the engine, session API, processor and view-model exist (see F12 spec section 12).
 - **Editor polish:** no marker dragging, snap controls, detection preview/Merge dialog, rule editor, resizable layout, or full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
@@ -145,9 +146,10 @@ Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built
 | F04 | Keyboard and layout | Partly built: arrow nudge, Delete, M, D, tooltips catalog; resizing, focus order, accessibility, Simple view not built |
 | F05 | Meters and feedback | Partly built: WAV drag-and-drop onto the editor; meters, notice log not built |
 | F06 | Rule editor | Not started |
+| F11 | Multi-output stems | Renderer, host buses, session routing (state tag 9), processor and view model built and tested; the Outputs section is pending (command list in the F11 spec, section 12) |
 | F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |
 | F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
-| F09, F10, F11, F14 | Scenes, A/B morph, stems, input capture, tempo match | Not started |
+| F09, F10, F14 | Scenes, A/B morph, tempo match | Not started |
 | F13 | MIDI drag-out | Partly built in pass 3: Drag MIDI and Drag WAV of the current pattern; variations and kit not built |
 | F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
 | F16 to F19, E01, E02 | Level Match and Safety Limiter, Groove Lab, Arrangement Export, Command Palette and Quick Start, Echo, Tremolo-Pan | Specified 2026-10-20, not started |

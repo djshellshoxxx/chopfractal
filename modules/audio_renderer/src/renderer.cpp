@@ -78,6 +78,8 @@ struct Voice {
   std::uint8_t tag = 0;
   std::uint8_t padNote = 0;
   std::uint8_t padGroup = 0;
+  // Output bus (F11): 0 main, 1..kMaxAuxBuses aux. A bus the host has not enabled folds into main at render time.
+  std::uint8_t bus = 0;
 };
 
 constexpr std::uint8_t kTagPad = 2;
@@ -111,6 +113,16 @@ struct Renderer::Impl {
   std::array<Voice, 2> previews;
   int previewIndex = 0;
   std::vector<float> mixL, mixR;
+  std::vector<float> auxMix;                 // cfg.auxBuses x 2 x maxBlock, bus-major (prepare allocates it)
+  std::vector<float> auxDelay;               // cfg.auxBuses x 2 x limiter latency: keeps the aux buses aligned with a limited main
+  int auxDelayLen = 0;
+  int auxDelayPos = 0;
+  bool auxDelayActive = false;
+  std::vector<double> gainRamp;              // outGain per frame of the chunk, for the aux lanes (cfg.maxBlock)
+  std::array<bool, kMaxAuxBuses> auxDirty{}; // a voice mixed into this aux bus in the chunk being processed
+  int activeAux = 0;                         // 1 + the highest aux bus written by the chunk being processed (0 = none)
+  unsigned auxMask = 0;                      // bit b: aux bus b + 1 is written by the chunk being processed
+  const AuxOutputs* auxOut = nullptr;
   std::vector<Trigger> triggers;
   Mailbox<PadBank> padBank;
   const PadBank* bank = nullptr;             // acquired once per chunk
@@ -156,6 +168,16 @@ struct Renderer::Impl {
     previews = {};
     mixL.assign(static_cast<std::size_t>(cfg.maxBlock), 0.f);
     mixR.assign(static_cast<std::size_t>(cfg.maxBlock), 0.f);
+    cfg.auxBuses = std::max(0, std::min(cfg.auxBuses, kMaxAuxBuses));
+    auxMix.assign(static_cast<std::size_t>(cfg.auxBuses) * 2 * static_cast<std::size_t>(cfg.maxBlock), 0.f);
+    auxDelayLen = cfg.auxBuses > 0 ? std::max(1, Limiter::latencyFor(cfg.sampleRate)) : 0;
+    auxDelay.assign(static_cast<std::size_t>(cfg.auxBuses) * 2 * static_cast<std::size_t>(auxDelayLen), 0.f);
+    auxDelayPos = 0;
+    auxDelayActive = false;
+    gainRamp.assign(cfg.auxBuses > 0 ? static_cast<std::size_t>(cfg.maxBlock) : 0, 1.0);
+    auxDirty.fill(false);
+    activeAux = 0;
+    auxMask = 0;
     triggers.clear();
     triggers.reserve(kMaxPreparedEvents);
     smoothCoef = 1.0 - std::exp(-1.0 / (0.01 * cfg.sampleRate));
@@ -416,7 +438,7 @@ struct Renderer::Impl {
     }
   }
 
-  void startFromEvent(const SourceData& src, const FlatEvent& e, const PreparedSlice& slice, double ticksPerFrame) {
+  void startFromEvent(const SourceData& src, const FlatEvent& e, const PreparedSlice& slice, double ticksPerFrame, std::uint8_t bus) {
     if (e.region.empty() || e.region.start < 0 || e.region.end > src.frames) return;
     if (slice.fxBit && !(fxMask & slice.fxBit)) return;           // that effect is bypassed
     if (slice.replacedBy && (fxMask & slice.replacedBy)) return;  // its repeats play instead of this base event
@@ -434,6 +456,7 @@ struct Renderer::Impl {
     startVoice(*v, src, region, e.tx, gate, e.fadeInFrames, e.fadeOutFrames, e.fx, &slice, ticksPerFrame, e.duration);
     v->chokeGroup = e.chokeGroup;
     v->smoothFades = e.smoothFades;
+    v->bus = bus;
   }
 
   void drainPreview(const Playback* pb, bool allow) {
@@ -473,6 +496,11 @@ struct Renderer::Impl {
       if (v.cosFade) return 0.5f - 0.5f * std::cos(static_cast<float>(kPi) * x);
       return v.smoothFades ? smoothstep01(x) : x;
     };
+    // A voice on a bus the host did not enable plays on main.
+    const int bus = (v.bus != 0 && ((auxMask >> (v.bus - 1)) & 1u)) ? v.bus : 0;
+    float* const dstL = bus == 0 ? mixL.data() : auxMix.data() + (static_cast<std::size_t>(bus - 1) * 2) * static_cast<std::size_t>(cfg.maxBlock);
+    float* const dstR = bus == 0 ? mixR.data() : dstL + cfg.maxBlock;
+    if (bus != 0) auxDirty[static_cast<std::size_t>(bus - 1)] = true;
     for (int i = begin; i < end; ++i) {
       if (!v.active) return;
       if (v.age >= v.gateFrames) {
@@ -572,8 +600,8 @@ struct Renderer::Impl {
           *in2[c] = y;
         }
       }
-      mixL[static_cast<std::size_t>(i)] += el * gainL;
-      mixR[static_cast<std::size_t>(i)] += er * gainR;
+      dstL[i] += el * gainL;
+      dstR[i] += er * gainR;
       v.pos += v.step * v.rateScale;
       v.rateScale *= v.glideMul;
       ++v.age;
@@ -636,7 +664,8 @@ struct Renderer::Impl {
       }
       if (tf <= pf) {
         const Trigger& t = triggers[ti++];
-        startFromEvent(*pb.source, *t.event, pb.slices[static_cast<std::size_t>(t.event - pb.events.data())], tpf);
+        const std::size_t idx = static_cast<std::size_t>(t.event - pb.events.data());
+        startFromEvent(*pb.source, *t.event, pb.slices[idx], tpf, idx < pb.eventBus.size() ? pb.eventBus[idx] : std::uint8_t{0});
       } else {
         applyPad(padEvents[pi++], *pb.source);
       }
@@ -644,7 +673,63 @@ struct Renderer::Impl {
     renderVoices(cursor, frames);
   }
 
-  void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+  void resetAuxDelay() {
+    if (!auxDelayActive) return;
+    std::fill(auxDelay.begin(), auxDelay.end(), 0.f);
+    auxDelayPos = 0;
+    auxDelayActive = false;
+  }
+
+  // The raw aux buses: mix times the output gain (no dry, no level match, no limiter). Only buses a voice mixed into are
+  // computed; with the limiter's alignment delay every lane runs so a ringing-out tail is never left behind.
+  void writeAux(const AuxOutputs& aux, int frames, bool delayed) {
+    const std::size_t stride = static_cast<std::size_t>(cfg.maxBlock);
+    for (int b = 0; b < activeAux; ++b) {
+      if (!((auxMask >> b) & 1u)) continue;
+      if (!delayed && !auxDirty[static_cast<std::size_t>(b)]) continue;  // stays at the zeros written at the top of the chunk
+      for (int c = 0; c < 2; ++c) {
+        const std::size_t lane = static_cast<std::size_t>(b) * 2 + static_cast<std::size_t>(c);
+        const float* m = auxMix.data() + lane * stride;
+        float* dst = aux.bus[b][c];
+        const double* g = gainRamp.data();
+        for (int i = 0; i < frames; ++i) {
+          const float a = static_cast<float>(m[i] * g[i]);
+          dst[i] = (std::isfinite(a) && std::fabs(a) >= 1e-30f) ? a : 0.f;
+        }
+        if (delayed) {
+          float* ring = auxDelay.data() + lane * static_cast<std::size_t>(auxDelayLen);
+          int pos = auxDelayPos;
+          for (int i = 0; i < frames; ++i) {
+            const float old = ring[pos];
+            ring[pos] = dst[i];
+            dst[i] = old;
+            if (++pos >= auxDelayLen) pos = 0;
+          }
+        }
+      }
+    }
+    if (delayed) auxDelayPos = (auxDelayPos + frames) % auxDelayLen;
+  }
+
+  void processChunk(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames,
+                    const AuxOutputs& aux) {
+    // Aux outputs: every enabled bus is written for every frame, whatever path this block takes (hosts do not clear them).
+    const int auxCount = std::max(0, std::min(aux.count, kMaxAuxBuses));
+    for (int b = 0; b < auxCount; ++b)
+      for (int c = 0; c < 2; ++c)
+        if (aux.bus[b] && aux.bus[b][c]) std::fill(aux.bus[b][c], aux.bus[b][c] + frames, 0.f);
+    // An aux bus is served when the renderer was prepared for it and the host gave both channel pointers; a gap (Out 2 off,
+    // Out 3 on) is fine. Anything routed to a bus that is not served plays on main.
+    activeAux = 0;
+    auxMask = 0;
+    if (nch == 2) {
+      const int limit = std::min(auxCount, cfg.auxBuses);
+      for (int b = 0; b < limit; ++b)
+        if (aux.bus[b] && aux.bus[b][0] && aux.bus[b][1]) {
+          auxMask |= 1u << b;
+          activeAux = b + 1;
+        }
+    }
     const Playback* pb = mailbox.acquire();
     bank = padBank.acquire();
     if (pb != current) {
@@ -664,6 +749,7 @@ struct Renderer::Impl {
       wasPlaying = false;
       haveExpected = false;
       if (limiter.active()) limiter.reset();
+      resetAuxDelay();
       latency.store(0, std::memory_order_relaxed);
       passthrough(in, out, nch, frames);
       return;
@@ -673,9 +759,18 @@ struct Renderer::Impl {
 
     std::fill(mixL.begin(), mixL.begin() + frames, 0.f);
     std::fill(mixR.begin(), mixR.begin() + frames, 0.f);
+    for (int b = 0; b < kMaxAuxBuses; ++b) {
+      if (!auxDirty[static_cast<std::size_t>(b)]) continue;  // nothing was mixed into it last chunk: still zero
+      auxDirty[static_cast<std::size_t>(b)] = false;
+      for (int c = 0; c < 2; ++c) {
+        float* m = auxMix.data() + (static_cast<std::size_t>(b) * 2 + static_cast<std::size_t>(c)) * static_cast<std::size_t>(cfg.maxBlock);
+        std::fill(m, m + cfg.maxBlock, 0.f);
+      }
+    }
     triggers.clear();
 
     if (pb->passThrough) {
+      resetAuxDelay();  // the aux buses are silent here
       // Source loaded for audition but no pattern yet: input passes through, previews play on top.
       if (wasPlaying) releaseAll();
       wasPlaying = false;
@@ -751,6 +846,10 @@ struct Renderer::Impl {
       matchStep = (targetMatch - matchGain) / static_cast<double>(matchRampLeft);
     }
     const bool limitIt = params.limiterEnabled || limiter.active();
+    // The limiter delays main by its look-ahead; the raw aux buses get the same delay so stems stay aligned with main.
+    const bool delayAux = limitIt && activeAux > 0 && auxDelayLen > 0;
+    if (delayAux) auxDelayActive = true;
+    else resetAuxDelay();
     const float* in0 = (in && in[0]) ? in[0] : nullptr;
     const float* in1 = (nch > 1 && in && in[1]) ? in[1] : in0;
     for (int i = 0; i < frames; ++i) {
@@ -764,6 +863,7 @@ struct Renderer::Impl {
       }
       const float x0 = in0 ? in0[i] : 0.f;
       const float x1 = in1 ? in1[i] : 0.f;
+      if (activeAux > 0) gainRamp[static_cast<std::size_t>(i)] = outGain;
       float l = mixL[static_cast<std::size_t>(i)];
       float r = mixR[static_cast<std::size_t>(i)];
       if (matchGain != 1.0) {  // the generated branch only; skipped entirely at 0 dB so the plain path has no extra multiply
@@ -791,6 +891,7 @@ struct Renderer::Impl {
       out[0][i] = o0;
       if (nch == 2) out[1][i] = o1;
     }
+    if (activeAux > 0) writeAux(aux, frames, delayAux);
     if (limitIt) {
       limiter.process(lp, mixL.data(), mixR.data(), frames);
       for (int i = 0; i < frames; ++i) {
@@ -805,10 +906,14 @@ struct Renderer::Impl {
     }
   }
 
-  void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames, const LiveInput& live) {
+  void process(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames, const LiveInput& live,
+               const AuxOutputs& aux) {
     if (frames <= 0 || nch < 1 || nch > 2 || !out || !out[0] || (nch == 2 && !out[1])) return;
     if (!prepared) {
       passthrough(in, out, nch, frames);
+      for (int b = 0; b < std::min(aux.count, kMaxAuxBuses); ++b)
+        for (int c = 0; c < 2; ++c)
+          if (aux.bus[b] && aux.bus[b][c]) std::fill(aux.bus[b][c], aux.bus[b][c] + frames, 0.f);
       return;
     }
     padParams = live.padParams;
@@ -816,7 +921,7 @@ struct Renderer::Impl {
     numPadEvents = (live.pads && live.numPads > 0) ? std::min(live.numPads, kMaxPadEventsPerBlock) : 0;
     if (live.pads && live.numPads > kMaxPadEventsPerBlock) padDroppedCount.fetch_add(static_cast<std::uint64_t>(live.numPads - kMaxPadEventsPerBlock), std::memory_order_relaxed);
     padOffset = 0;
-    processBlocks(tb, params, in, out, nch, frames);
+    processBlocks(tb, params, in, out, nch, frames, aux);
     int pads = 0;
     for (const Voice& v : voices)
       if (v.active && v.tag == kTagPad) ++pads;
@@ -825,9 +930,10 @@ struct Renderer::Impl {
     numPadEvents = 0;
   }
 
-  void processBlocks(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames) {
+  void processBlocks(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames,
+                     const AuxOutputs& aux) {
     if (frames <= cfg.maxBlock) {
-      processChunk(tb, params, in, out, nch, frames);
+      processChunk(tb, params, in, out, nch, frames, aux);
       return;
     }
     // A host block larger than prepared: process in chunks rather than overrunning scratch memory.
@@ -841,9 +947,16 @@ struct Renderer::Impl {
         outp[c] = out[c] + done;
       }
       padOffset = done;
+      AuxOutputs chunkAux;
+      float* chunkPtrs[kMaxAuxBuses][2] = {};
+      chunkAux.count = std::max(0, std::min(aux.count, kMaxAuxBuses));
+      for (int b = 0; b < chunkAux.count; ++b) {
+        for (int c = 0; c < 2; ++c) chunkPtrs[b][c] = (aux.bus[b] && aux.bus[b][c]) ? aux.bus[b][c] + done : nullptr;
+        chunkAux.bus[b] = chunkPtrs[b];
+      }
       TransportBlock t2 = tb;
       if (tb.positionValid && std::isfinite(tb.ppq)) t2.ppq = tb.ppq + static_cast<double>(done) * bpm / (60.0 * cfg.sampleRate);
-      processChunk(t2, params, inp, outp, nch, n);
+      processChunk(t2, params, inp, outp, nch, n, chunkAux);
     }
   }
 };
@@ -856,12 +969,22 @@ Mailbox<Playback>& Renderer::mailbox() { return impl_->mailbox; }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames) {
-  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{});
+  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{}, AuxOutputs{});
 }
 
 void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
                        int numChannels, int frames, const LiveInput& live) {
-  impl_->process(transport, params, in, out, numChannels, frames, live);
+  impl_->process(transport, params, in, out, numChannels, frames, live, AuxOutputs{});
+}
+
+void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+                       int numChannels, int frames, const AuxOutputs& aux) {
+  impl_->process(transport, params, in, out, numChannels, frames, LiveInput{}, aux);
+}
+
+void Renderer::process(const TransportBlock& transport, const RenderParams& params, const float* const* in, float* const* out,
+                       int numChannels, int frames, const LiveInput& live, const AuxOutputs& aux) {
+  impl_->process(transport, params, in, out, numChannels, frames, live, aux);
 }
 
 Mailbox<PadBank>& Renderer::padMailbox() { return impl_->padBank; }
@@ -899,7 +1022,9 @@ LimiterTelemetry& Renderer::limiterTelemetry() { return impl_->limiter.telemetry
 
 std::uint64_t Renderer::droppedTriggers() const { return impl_->dropped; }
 
-Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& s, const ProgressFn& progress) {
+namespace {
+Result<OfflineStems> renderStems(std::shared_ptr<const Playback> playback, const OfflineSettings& s, int auxBuses, const ProgressFn& progress) {
+  if (auxBuses < 0 || auxBuses > kMaxAuxBuses) return makeError(ErrorCode::OutOfRange, "invalid number of aux buses");
   if (!playback || !playback->source) return makeError(ErrorCode::InvalidArgument, "no playback to render");
   if (!(s.sampleRate >= 8000.0 && s.sampleRate <= 384000.0)) return makeError(ErrorCode::OutOfRange, "invalid sample rate");
   if (!(s.bpm >= kMinBpm && s.bpm <= kMaxBpm)) return makeError(ErrorCode::OutOfRange, "invalid tempo");
@@ -910,6 +1035,7 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   Config cfg;
   cfg.sampleRate = s.sampleRate;
   cfg.maxBlock = s.blockSize;
+  cfg.auxBuses = auxBuses;
   r.prepare(cfg);
   r.mailbox().publish(playback);
 
@@ -923,6 +1049,7 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   const std::int64_t lat = (s.params.limiterEnabled && s.params.enabled) ? Limiter::latencyFor(s.sampleRate) : 0;
 
   std::vector<std::vector<float>> out(2, std::vector<float>(static_cast<std::size_t>(total + lat), 0.f));
+  std::vector<std::vector<std::vector<float>>> auxOut(static_cast<std::size_t>(auxBuses), std::vector<std::vector<float>>(2, std::vector<float>(static_cast<std::size_t>(total + lat), 0.f)));
   std::vector<float> silence(static_cast<std::size_t>(s.blockSize), 0.f);
   // Two phases so that no block ever straddles the end of the pattern: the output must not depend on the
   // block size. Phase 1 schedules events; phase 2 lets sounding voices ring out without starting new ones.
@@ -940,7 +1067,15 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
       tb.scheduleEvents = schedule;
       const float* in[2] = {silence.data(), silence.data()};
       float* o[2] = {out[0].data() + pos, out[1].data() + pos};
-      r.process(tb, s.params, in, o, 2, n);
+      AuxOutputs aux;
+      float* ap[kMaxAuxBuses][2] = {};
+      aux.count = auxBuses;
+      for (int b = 0; b < auxBuses; ++b) {
+        ap[b][0] = auxOut[static_cast<std::size_t>(b)][0].data() + pos;
+        ap[b][1] = auxOut[static_cast<std::size_t>(b)][1].data() + pos;
+        aux.bus[b] = ap[b];
+      }
+      r.process(tb, s.params, in, o, 2, n, aux);
       if (progress && ++blocksDone % 64 == 0 && !progress(std::min(0.999, static_cast<double>(blocksDone) / static_cast<double>(std::max<std::int64_t>(1, totalBlocks)))))
         aborted = true;
     }
@@ -950,12 +1085,30 @@ Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Play
   renderRange(mainFrames, total + lat, false);
   if (!aborted && progress && !progress(1.0)) aborted = true;
   if (aborted) return makeError(ErrorCode::Cancelled, "export cancelled");
-  if (lat > 0)
-    for (auto& ch : out) {
+  if (lat > 0) {
+    auto trim = [&](std::vector<float>& ch) {
       ch.erase(ch.begin(), ch.begin() + static_cast<std::ptrdiff_t>(lat));
       ch.resize(static_cast<std::size_t>(total));
-    }
-  return out;
+    };
+    for (auto& ch : out) trim(ch);
+    for (auto& bus : auxOut)
+      for (auto& ch : bus) trim(ch);
+  }
+  OfflineStems result;
+  result.main = std::move(out);
+  result.aux = std::move(auxOut);
+  return result;
+}
+}  // namespace
+
+Result<OfflineStems> renderOfflineStems(std::shared_ptr<const Playback> playback, const OfflineSettings& s, int auxBuses, const ProgressFn& progress) {
+  return renderStems(std::move(playback), s, auxBuses, progress);
+}
+
+Result<std::vector<std::vector<float>>> renderOffline(std::shared_ptr<const Playback> playback, const OfflineSettings& s, const ProgressFn& progress) {
+  auto stems = renderStems(std::move(playback), s, 0, progress);  // no aux buses: every event folds into main
+  if (!stems.ok()) return stems.error();
+  return std::move(stems.value().main);
 }
 
 }  // namespace chopfractal::render

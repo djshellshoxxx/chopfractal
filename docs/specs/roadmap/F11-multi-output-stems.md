@@ -1,12 +1,20 @@
 # F11 Multi-output stems
 
-**Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F00 (ControlsPanel/StatusBar split), F01 (state v2, trailing-block registry)  **Blocks:** none (F07/F08 only need the routing fields to stay append-only)
+**Status:** Renderer, host parameters, composition, processor and view model implemented on `feat/AIO-audio-io`; the Outputs section is wired by the GUI rewrite from section 12  **Size:** L (9 engineer-days)  **Depends on:** F00 (ControlsPanel/StatusBar split), F01 (state v2, trailing-block registry)  **Blocks:** none (F07/F08 only need the routing fields to stay append-only)
 
-## 0. Implementation status (audited 2026-10-20)
-**Not started.** The plugin has one stereo input and one stereo output (`isBusesLayoutSupported` accepts mono or stereo main only). Decisions recorded by the audit:
-- **Manifest:** the parameter manifest is at version 3 (pass 3 added `chaos`); this feature adds no parameter, so the body's "stays at version 2 unless F07/F08 bump it" reads "stays at the shipped version 3 plus whatever F07 appends". The optional `stems_enabled` parameter named in the roadmap README budget is **not created**: routing is state and the host enables aux buses itself.
-- **State:** routing is F01 extras tag 9 (already claimed here), cap 64 KiB. F16 (limiter) and F11 interact: the safety limiter acts on the main bus only; aux buses are raw (F16 section 6).
-- Land after F07 and F12 as the README orders it; nothing in the as-built code conflicts with the body.
+## 0. Implementation status
+**Implemented (AIO branch, 2026-10-21):** `audio_renderer` aux buses (`BusRouting`, `Playback::eventBus`, `Config::auxBuses`, `AuxOutputs`, the `process` overloads, `OfflineStems` and `renderOfflineStems`), the bus layout rules in `plugin_host_adapter`, `ProjectSession` routing (`OutputRouting`, state section tag 9, `setOutputRouting`, `autoRouteByRole`, `autoRouteByChop`, `outputBusOf`), the processor buses ("Main" plus disabled "Out 2" .. "Out 9"), and the portable view model `plugin_ui_adapter/outputs_view.hpp`. Tests: `modules/audio_renderer/tests/test_buses.cpp`, `composition/tests/test_routing.cpp`, `modules/plugin_host_adapter/tests/test_host_adapter.cpp`, `modules/plugin_ui_adapter/tests/test_outputs_view.cpp`, `plugin/tests/test_outputs_shell.cpp`.
+
+**Not built here:** the Outputs section in ControlsPanel and its GUI tests. The GUI rewrite wires them from the command list in section 12.
+
+Decisions made while implementing (these override the text below where they differ):
+- **Manifest:** no parameter is added; `kManifestVersion` stays 3. Routing is state (tag 9), the host enables the aux buses.
+- **Limiter and aux delay:** the main bus has the limiter's lookahead latency (88 frames at 48 kHz). Aux buses are raw (no limiter) but are delayed by the same amount through a preallocated ring, so stems stay sample-aligned with Main and sum to it. The ring is bypassed while no aux bus is active, so the default layout is bit-identical to before.
+- **MainOnly clears the maps:** setting the mode to Main only drops every role and chop route. Editing any single route in the editor selects Custom.
+- **Gaps in the enabled buses:** `Config::auxBuses` is the highest enabled bus; the renderer keeps a mask, so enabling Out 2 and Out 4 but not Out 3 serves both, and a chop routed to Out 3 folds into Main.
+- **No match gain on aux:** aux buses carry the raw voices with output gain only; dry mix and the level-match gain stay on Main.
+- **Previews** always play on Main. **Offline export** renders the main fold-down and ignores routing.
+- **Processor:** `prepareToPlay` reads which aux buses are enabled and calls `setAuxBusesAvailable`; `activeAuxBuses()` and `auxBusEnabled(bus)` feed the status line. Aux channels are located with `getChannelIndexInProcessBlockBuffer`, so no allocation happens in `processBlock`.
 
 ## 1. Summary and user value
 The plugin exposes the main stereo output plus up to 8 auxiliary stereo outputs ("Out 2" .. "Out 9"). Each chop (or each role) is routed to one output so the DAW can put a different compressor, reverb or sampler channel on kick, snare and hats. Hosts that only give the main bus keep working: everything folds into the main output exactly as today. Producers get a stem workflow without exporting files; it is the main reason to use ChopFractal inside a mixing session.
@@ -175,3 +183,18 @@ Manual QA (REAPER first): 1) Load a drum loop, Smart Setup, Generate. 2) Outputs
 6. PluginProcessor: BusesProperties, layout rules, processBlock wiring, shell tests; run validator.
 7. ControlsPanel "Outputs" section + GUI tests.
 8. Docs update and manual QA in REAPER, record results in docs/BUILD_STATUS.md.
+
+## 12. GUI command list (what each control must call)
+The editor builds a `ui::OutputsUiInput` on its 30 Hz timer: `hasSource`, `mode` from `session.outputRouting().mode`, `auxEnabledMask` from `proc.auxBusEnabled(1..8)`, one `OutputsRoleInput` per role that exists (bus from `outputRouting().roleBus`, 0 when absent), and one `OutputsChopInput` per chop in snapshot order (`explicitBus` from `outputRouting().chopBus`, -1 when absent). It passes that to `ui::buildOutputsView()` (`plugin_ui_adapter/outputs_view.hpp`). Every label, item, greyed flag, tooltip and enable flag below comes from the returned `OutputsView`. Notices reach the status bar through `takeNotices`.
+
+| Control | Calls |
+|---|---|
+| "Outputs" section header (collapsed by default) | UI only. Status line text: `view.status`; the section is disabled unless `view.enabled` |
+| "Output routing" combo (`view.modeItems`, selected `view.modeSelected`) | Main only: `session.resetOutputRouting()`. By role: `session.autoRouteByRole()`. By chop: `session.autoRouteByChop()`. Custom: no call (the box shows Custom after a manual edit) |
+| Role rows (`view.roleRows`) | name `row.name`, text `row.label`, `setTitle(row.title)`, items `row.choice.items` with `row.choice.greyed` disabled, selected `row.choice.selected`, tooltip `row.tooltip`. Change: read-modify-write `auto r = session.outputRouting(); r.mode = RoutingMode::Custom; r.roleBus[role] = bus; session.setOutputRouting(r);` |
+| Chop rows (`view.chopRows`, first `view.visibleRows` visible, scrollable) | text `row.label`, `setTitle(row.title)`, items and tooltip as above. Change to bus 0..8: `r.mode = Custom; r.chopBus[chopId] = bus;`. Change to "Role default" (index 9): `r.chopBus.erase(chopId)`. Then `session.setOutputRouting(r)` |
+| "Auto: by role" (`kOutputAutoByRoleLabel`, enabled by `view.autoByRoleEnabled`) | `session.autoRouteByRole()` |
+| "Auto: by chop" (`kOutputAutoByChopLabel`, enabled by `view.autoByChopEnabled`) | `session.autoRouteByChop()` |
+| "Reset to Main" (`kOutputResetLabel`, enabled by `view.resetEnabled`) | `session.resetOutputRouting()` |
+
+All calls run inside `proc.withSession`. Routing is project configuration, not a history step, so none of these is undoable. Empty text: `view.emptyText`. Keyboard order: mode, role rows, chop rows, the three buttons.

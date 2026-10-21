@@ -23,10 +23,17 @@ constexpr int kStateVersionV2 = 2;
 static_assert(ChopFractalProcessor::kMaxSourceSeconds == cf::capture::kMaxCaptureSeconds, "capture and file decoding share the 60 s limit");
 static_assert(ChopFractalProcessor::kMaxDecodedBytes == cf::capture::kMaxCaptureBytes, "capture and file decoding share the 100 MiB limit");
 
+// Main stereo in; main stereo out plus eight optional stereo aux outs ("Out 2" .. "Out 9"), disabled until the host enables them.
+ChopFractalProcessor::BusesProperties ChopFractalProcessor::makeBuses() {
+  auto p = BusesProperties()
+               .withInput("Input", juce::AudioChannelSet::stereo(), true)
+               .withOutput("Main", juce::AudioChannelSet::stereo(), true);
+  for (int i = 2; i <= 1 + cf::render::kMaxAuxBuses; ++i) p = p.withOutput("Out " + juce::String(i), juce::AudioChannelSet::stereo(), false);
+  return p;
+}
+
 ChopFractalProcessor::ChopFractalProcessor()
-    : AudioProcessor(BusesProperties()
-                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor(makeBuses()),
       apvts(*this, nullptr, "ChopFractal", createLayout()) {
   const auto& manifest = cf::host::parameterManifest();
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) paramPtrs_[i] = apvts.getRawParameterValue(manifest[i].id);
@@ -85,6 +92,19 @@ void ChopFractalProcessor::prepareToPlay(double sampleRate, int maximumExpectedS
   cf::render::Config cfg;
   cfg.sampleRate = sampleRate;
   cfg.maxBlock = maximumExpectedSamplesPerBlock > 0 ? maximumExpectedSamplesPerBlock : 2048;
+  // The aux outputs the host enabled for this run (JUCE calls prepareToPlay after every bus layout change).
+  int mask = 0, highest = 0;
+  for (int i = 1; i <= cf::render::kMaxAuxBuses && i < getBusCount(false); ++i)
+    if (auto* bus = getBus(false, i); bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() == 2) {
+      mask |= 1 << (i - 1);
+      highest = i;
+    }
+  cfg.auxBuses = highest;
+  auxMask_.store(mask);
+  {
+    const juce::ScopedLock lock(sessionLock_);
+    session_.setAuxBusesAvailable(highest);
+  }
   renderer_.prepare(cfg);
   sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
   if (capture_.onPrepare(sampleRate_.load(), getTotalNumInputChannels())) setStatusMessage(cf::ui::kCaptureReconfiguredText);
@@ -96,7 +116,15 @@ void ChopFractalProcessor::setNonRealtime(bool isNonRealtime) noexcept {
 }
 
 bool ChopFractalProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels());
+  int aux[cf::render::kMaxAuxBuses] = {};
+  for (int i = 0; i < cf::render::kMaxAuxBuses; ++i) aux[i] = layouts.getNumChannels(false, i + 1);
+  return cf::host::isSupportedBusLayout(layouts.getMainInputChannels(), layouts.getMainOutputChannels(), aux, cf::render::kMaxAuxBuses);
+}
+
+int ChopFractalProcessor::activeAuxBuses() const {
+  int n = 0;
+  for (int m = auxMask_.load(); m != 0; m &= m - 1) ++n;
+  return n;
 }
 
 void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
@@ -190,7 +218,22 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   live.pads = padEvents_.data();
   live.numPads = numPads;
   live.padParams = cf::host::toPadParams(pv);
-  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), buffer.getArrayOfWritePointers(), channels, frames, live);
+  // Aux outputs: the channels of bus i sit after the main channels, in bus order. Pointers only, nothing is allocated.
+  cf::render::AuxOutputs aux;
+  float* auxPtrs[cf::render::kMaxAuxBuses][2] = {};
+  float* const* writePtrs = buffer.getArrayOfWritePointers();
+  if (const int mask = auxMask_.load(std::memory_order_relaxed); mask != 0 && channels == 2) {
+    for (int i = 0; i < cf::render::kMaxAuxBuses; ++i) {
+      if (((mask >> i) & 1) == 0) continue;
+      const int first = getChannelIndexInProcessBlockBuffer(false, i + 1, 0);
+      if (first < 0 || first + 1 >= buffer.getNumChannels()) continue;
+      auxPtrs[i][0] = writePtrs[first];
+      auxPtrs[i][1] = writePtrs[first + 1];
+      aux.bus[i] = auxPtrs[i];
+      aux.count = i + 1;
+    }
+  }
+  renderer_.process(tt.block, cf::host::toRenderParams(pv, session_.matchGainDb()), buffer.getArrayOfReadPointers(), writePtrs, channels, frames, live, aux);
 
   // Tell the message thread when the playhead crosses the pattern's loop point (quantized variation switches)
   // or its midpoint (Evolve steps); the arithmetic lives in host::computeLoopPosition so it can be tested alone.

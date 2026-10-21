@@ -155,12 +155,23 @@ struct StateSection {
 // the warning "Some <feature> settings could not be restored.".
 using SectionDecoder = std::function<Status(const StateSection&)>;
 constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
+constexpr std::uint8_t kTagRouting = 9;       // owned by F11 Multi-output stems (composition/src/routing.cpp)
 constexpr std::uint8_t kTagPads = 10;         // owned by F07 Performance pads (composition/src/pads.cpp)
 constexpr std::uint8_t kTagGroove = 14;       // owned by F17 Groove Lab (composition/src/groove.cpp)
 constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
 std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
 constexpr std::size_t kMaxExtrasBlocks = 32;
 constexpr std::size_t kMaxExtrasBytes = 40u * 1024u * 1024u;
+
+// ---- multiple outputs (F11; composition/src/routing.cpp) ----
+enum class RoutingMode : std::uint8_t { MainOnly = 0, ByRole = 1, ByChop = 2, Custom = 3 };
+// Which output each chop plays on: bus 0 is Main, 1..8 are "Out 2".."Out 9". MainOnly means no routes at all (the maps are empty).
+struct OutputRouting {
+  RoutingMode mode = RoutingMode::MainOnly;
+  std::map<std::string, std::uint8_t> roleBus;   // role name -> bus 0..8
+  std::map<std::uint64_t, std::uint8_t> chopBus; // chop id -> bus 0..8, an explicit per-chop override
+  friend bool operator==(const OutputRouting& a, const OutputRouting& b) { return a.mode == b.mode && a.roleBus == b.roleBus && a.chopBus == b.chopBus; }
+};
 
 // ---- performance pads (F07; composition/src/pads.cpp) ----
 // Project-level pad choices. Pad mode and velocity curve are host parameters; takes are never saved.
@@ -297,6 +308,22 @@ class ProjectSession {
   Status deleteBranch(history::NodeId node, bool includeFavorites = false);
   Result<std::string> compareNodes(history::NodeId a, history::NodeId b) const;
 
+  // ---- multiple outputs (F11; composition/src/routing.cpp) ----
+  const OutputRouting& outputRouting() const { return routing_; }
+  // Validates (buses 0..8, chops and roles exist), stores (section tag 9, absent while default), rebuilds the Playback with the
+  // routing baked in and publishes it. MainOnly clears the maps. All or nothing; no undo step.
+  Status setOutputRouting(const OutputRouting& routing);
+  Status resetOutputRouting() { return setOutputRouting(OutputRouting{}); }
+  // Effective output of a chop: its own override, else its role's route, else Main (0).
+  int outputBusOf(ChopId chop) const;
+  // Deterministic assignment: one output per role in snapshot order of first appearance (roles beyond 8 stay on Main), or
+  // chop n on output 1 + n % 8. Both replace the previous routes and return how many roles or chops were routed.
+  int autoRouteByRole();
+  int autoRouteByChop();
+  // How many aux outputs the host has enabled (message thread; used for status text and "off in host" labels, never for the Playback).
+  void setAuxBusesAvailable(int n) { auxAvailable_ = n < 0 ? 0 : (n > render::kMaxAuxBuses ? render::kMaxAuxBuses : n); }
+  int auxBusesAvailable() const { return auxAvailable_; }
+
   // ---- performance pads (F07; composition/src/pads.cpp) ----
   // Where the note-to-chop bank is published. Not owned; must outlive the session or be detached.
   void attachPadMailbox(render::Mailbox<render::PadBank>* mailbox);
@@ -430,6 +457,12 @@ class ProjectSession {
   SnapshotStack<groove::Groove> grooveHistory_{groove::Groove{}};
   Status decodeGroove(const StateSection& s);
   Status decodePads(const StateSection& s);
+  Status decodeRouting(const StateSection& s);
+  render::BusRouting busRouting() const;
+  void pruneRouting();                 // drops routes of chops that no longer exist
+  void resetPerChopRouting();          // new source: routes and choke overrides name chops of the old one
+  OutputRouting routing_;
+  int auxAvailable_ = 0;
   void publishPadBank();
   PadSettings padSettings_;
   render::Mailbox<render::PadBank>* padMailbox_ = nullptr;
