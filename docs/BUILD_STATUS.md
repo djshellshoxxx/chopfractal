@@ -9,7 +9,7 @@ Last audited 2026-10-20 against the code on `main` (after pass 3 and audit round
 | 0 Toolchain audit | **Done** | C++17; GCC 13, Clang 18, Apple Clang (macOS arm64) and MSVC 2022 all build and pass the full suite in CI |
 | 1 Source and pattern model | **Done** | Deterministic generation, locks, undo, state round-trip, no audio needed to test it |
 | 2 Minimal audio effect | **Done on Linux** | VST3 shell builds, passes the official Steinberg validator (47/47), pass-through before a source exists |
-| 3 Source workflow | **Mostly done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition work. **Not done: input capture** (Arm / Capture / Stop / Keep) |
+| 3 Source workflow | **Done** | Import (WAV verified; AIFF and other JUCE basic formats are untested), transient and grid analysis, marker editing, audition, and live input capture (Rec Arm / Rec Stop / Rec Keep, free or exact bars, bar-aligned; see `docs/specs/input-capture.md`) |
 | 4 Pattern creation and editing | **Done (model); partial (UI)** | Generate, Mutate, locks, seed, undo/redo, A/B, duplicate bar, restore source order are all in the model; the editor exposes the main ones |
 | 5 Event transforms and polished GUI | **Transforms done; GUI is a first pass** | Reverse, pitch (resample), retrigger, gate/fades, level, pan are sample-tested. No filter. Editor is functional but not polished |
 | 6 State, presets, export | **Done** | Save/restore, missing-source recovery, optional embedding, WAV export, Producer Kit, six factory presets plus user presets, MIDI/WAV drag-out |
@@ -20,7 +20,7 @@ Modular plan: Stages A to D are complete; Stage E (portability and release) is c
 
 ## What exists
 
-Seventeen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 34 targets.
+Eighteen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 35 targets.
 
 | Module | Role | Test cases |
 |---|---|---|
@@ -39,10 +39,11 @@ Seventeen portable C++17 modules (no JUCE, no host types), a headless compositio
 | `preset_store` | preset records, versioned checksummed file format, six factory presets, file-name sanitizing | 5 |
 | `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, lock-free handoff, offline render | 26 |
 | `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
+| `input_capture` | real-time-safe input recorder: free or exact-bar capture, bar-aligned start, block-size independent | 10 |
 | `plugin_host_adapter` | parameter manifest (version 3: 15 parameters, `chaos` last), host-time validation, bus rules | 8 |
 | `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 9 |
 | `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 30 |
-| `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 28 |
+| `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out, input capture (shell tests, not ctest cases of a module) | 30 |
 
 Features added in the second round (each has a spec in `docs/specs/`): **Fractal Rhythm** (unique), **Evolve** (fun), **Producer Kit + WAV export** (valuable), **Smart Setup** (usable), **Orbit View** (visual), and three effects (**Filter, Tape Glide, Crunch**).
 

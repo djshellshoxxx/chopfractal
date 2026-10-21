@@ -1,0 +1,44 @@
+{
+  "id": "input_capture",
+  "name": "Input capture",
+  "version": "0.1.0",
+  "api_version": "0.1",
+  "state_schema_version": 1,
+  "language_standard": "C++17",
+  "build_target": "chopfractal::input_capture",
+  "public_headers": [
+    "include/chopfractal/input_capture/capture.hpp"
+  ],
+  "dependencies": [
+    {
+      "id": "chop_contracts",
+      "version": "^0.1",
+      "reason": "Result/Status"
+    }
+  ],
+  "license": "LicenseRef-ChopFractal-Proprietary",
+  "notices": [],
+  "third_party": [],
+  "threading": "One control thread (arm/stop/cancel/take) plus one audio thread (process); they communicate only through atomics. process() allocates, locks and waits for nothing.",
+  "platforms": "Any C++17 compiler.",
+  "deterministic": true,
+  "real_time_safe": true,
+  "migration_guide": "MIGRATION.md",
+  "standalone_test_command": "cmake -S modules/input_capture -B build/input_capture && cmake --build build/input_capture && ctest --test-dir build/input_capture",
+  "summary": "Real-time-safe recorder for a plugin's audio input. Arm, record freely or exactly N bars starting on a bar line, stop, then take the audio as a planar buffer. Sample-accurate and independent of the host block size.",
+  "public_api": [
+    "`Capture::arm(Options)`, `stop()`, `cancel()`, `take()` (control thread)",
+    "`Capture::process(in, channels, frames, Transport)` (audio thread, no allocation)",
+    "`framesForBars(bars, quartersPerBar, bpm, sampleRate)`"
+  ],
+  "limits": [
+    "At most 60 seconds and 100 MB; mono or stereo; sample rate 8 kHz to 384 kHz",
+    "A stop or cancel of a Recording capture takes effect on the next process() call"
+  ],
+  "adapters": [
+    "Your app calls process() from its audio callback with the host's transport and keeps the audio with take()."
+  ],
+  "adapter_notes": "The module never talks to a host, a file or a thread API. Captured audio is plain planar floats.",
+  "removal": "Delete the folder; callers lose input capture only.",
+  "example": "examples/minimal.cpp"
+}

@@ -31,7 +31,7 @@ struct EditorView {
 
 class EditorModel {
  public:
-  enum class Change { View, Evolve, Selection, Seed, Status, Setup, Flags, Extras /* emitted from F01 on */ };
+  enum class Change { View, Evolve, Selection, Seed, Status, Setup, Flags, Capture, Extras /* emitted from F01 on */ };
   struct Listener {
     virtual ~Listener() = default;
     virtual void modelChanged(Change) = 0;
@@ -88,6 +88,7 @@ class EditorModel {
   double activeBpm() const { return proc_.activeBpm.load(); }
   bool embedSource() const { return proc_.embedSource.load(); }
   void setEmbedSource(bool on) { proc_.embedSource = on; }
+  ChopFractalProcessor::CaptureInfo captureInfo() const { return proc_.captureInfo(); }
 
  private:
   void announceSelection();  // status text plus the Selection change, after a rubber-band selection
@@ -115,5 +116,5 @@ class EditorModel {
   chopfractal::evolve::Settings evolve_;
 
   bool flagsPublished_ = false, publishedSourceMissing_ = false, publishedEmbed_ = false;
-  juce::String lastStatusKey_;
+  juce::String lastStatusKey_, lastCaptureKey_;
 };

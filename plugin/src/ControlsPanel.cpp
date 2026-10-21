@@ -1,5 +1,6 @@
 #include "ControlsPanel.h"
 
+#include <algorithm>
 #include <initializer_list>
 
 namespace cf = chopfractal;
@@ -15,6 +16,22 @@ ControlsPanel::ControlsPanel(EditorModel& model, EditorCommands& commands, juce:
   addAndMakeVisible(followHost_);
   addAndMakeVisible(transportHint_);
   addAndMakeVisible(editMode_);
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&recArm_, &recStop_, &recKeep_}) {
+    addAndMakeVisible(*b);
+    b->setTitle(b->getButtonText());
+  }
+  capLen_.addItemList({"Free", "1 bar", "2 bars", "4 bars", "8 bars"}, 1);
+  capLen_.setSelectedId(4);  // 4 bars
+  capLen_.setTitle("Capture length");
+  addAndMakeVisible(capLen_);
+  recArm_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff8b2230));
+  recArm_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+  recArm_.onClick = [this] {
+    static const int kBars[] = {0, 1, 2, 4, 8};
+    cmd_.armCapture(kBars[std::max(0, std::min(4, capLen_.getSelectedId() - 1))]);
+  };
+  recStop_.onClick = [this] { cmd_.stopCapture(); };
+  recKeep_.onClick = [this] { cmd_.keepCapture(); };
   editMode_.setTooltip("Off: drag to select sections. On: drag a hit to move or resize it.");
   editMode_.onClick = [this] { model_.setEditMode(editMode_.getToggleState()); };
   play_.setTitle("Play");
@@ -108,6 +125,9 @@ void ControlsPanel::modelChanged(Change c) {
       if (static_cast<std::uint64_t>(seed_.getText().getLargeIntValue()) != model_.seed())
         seed_.setText(juce::String(static_cast<juce::int64>(model_.seed())), juce::dontSendNotification);
       break;
+    case Change::Capture:
+      updateCaptureControls();
+      break;
     case Change::Flags:
       if (embed_.getToggleState() != model_.embedSource()) embed_.setToggleState(model_.embedSource(), juce::dontSendNotification);
       break;
@@ -122,7 +142,9 @@ void ControlsPanel::resized() {
   play_.setBounds(transport.removeFromLeft(104).reduced(2));
   stop_.setBounds(transport.removeFromLeft(104).reduced(2));
   followHost_.setBounds(transport.removeFromLeft(100).reduced(2));
-  editMode_.setBounds(transport.removeFromRight(180).reduced(2));
+  editMode_.setBounds(transport.removeFromRight(160).reduced(2));
+  for (juce::Button* b : std::initializer_list<juce::Button*>{&recArm_, &recStop_, &recKeep_}) b->setBounds(transport.removeFromLeft(74).reduced(2));
+  capLen_.setBounds(transport.removeFromLeft(80).reduced(2));
   transportHint_.setBounds(transport.reduced(8, 2));
   auto row1 = area.removeFromTop(30);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &generate_, &mutate_, &undo_, &redo_, &zoom_, &collapse_, &lock_})
@@ -148,4 +170,25 @@ void ControlsPanel::resized() {
   for (juce::Button* b : std::initializer_list<juce::Button*>{&enable_.button, &reverse_.button, &pitch_.button, &retrigger_.button}) b->setBounds(toggles.removeFromLeft(100));
   auto toggles2 = sliders.removeFromTop(24);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&filter_.button, &glide_.button, &crunch_.button}) b->setBounds(toggles2.removeFromLeft(110));
+}
+
+// Enables the capture buttons for the current state and shows progress in the hint line.
+void ControlsPanel::updateCaptureControls() {
+  const auto info = model_.captureInfo();
+  using S = cf::capture::State;
+  const bool busy = info.state == S::Armed || info.state == S::Recording;
+  recArm_.setEnabled(!busy);
+  capLen_.setEnabled(!busy);
+  recStop_.setEnabled(busy);
+  recKeep_.setEnabled(info.state == S::Done);
+  juce::String hint = "Load Loop > Detect Chops > Generate > Play";
+  switch (info.state) {
+    case S::Armed: hint = "Armed: waiting for the bar line..."; break;
+    case S::Recording:
+      hint = "Recording " + juce::String(info.seconds, 1) + (info.targetSeconds > 0.0 ? " / " + juce::String(info.targetSeconds, 1) : juce::String()) + " s";
+      break;
+    case S::Done: hint = "Captured " + juce::String(info.seconds, 1) + " s: press Rec Keep"; break;
+    default: break;
+  }
+  if (transportHint_.getText() != hint) transportHint_.setText(hint, juce::dontSendNotification);
 }

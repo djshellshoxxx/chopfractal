@@ -84,6 +84,13 @@ bool EditorModel::refresh(bool force, int waveWidthPx) {
     publishedEmbed_ = embed;
     emit(Change::Flags);
   }
+  // Input capture changes state on the audio thread: publish when the state or the elapsed tenth of a second changes.
+  const auto capture = proc_.captureInfo();
+  const juce::String captureKey = juce::String(static_cast<int>(capture.state)) + "|" + juce::String(capture.seconds, 1) + "|" + juce::String(capture.targetSeconds, 1);
+  if (captureKey != lastCaptureKey_) {
+    lastCaptureKey_ = captureKey;
+    emit(Change::Capture);
+  }
   // Messages arrive from other threads' work too (file loading, Evolve, restore): publish the status when it changes.
   const juce::String statusKey = proc_.statusMessage() + (usedFallbackTempo() ? "|t" : "") + (usedFallbackMeter() ? "|m" : "") + juce::String(manualBpm());
   if (statusKey != lastStatusKey_) {

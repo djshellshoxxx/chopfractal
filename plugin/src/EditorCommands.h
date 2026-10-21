@@ -44,6 +44,10 @@ class EditorCommands {
   void play();
   void stop();
   void followHost();
+  // Input capture: bars = 0 records until stopCapture; keepCapture loads the result as the (embedded) source.
+  void armCapture(int bars);
+  void stopCapture();
+  void keepCapture();
   void chooseFile();
   void locateSource();
   void handleDroppedFiles(const juce::StringArray& files);

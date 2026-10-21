@@ -43,6 +43,20 @@ void EditorCommands::followHost() {
   model_.rebuild();
 }
 
+void EditorCommands::armCapture(int bars) {
+  proc_.armCapture(bars);
+  model_.rebuild();
+}
+
+void EditorCommands::stopCapture() {
+  proc_.stopCapture();
+  model_.rebuild();
+}
+
+void EditorCommands::keepCapture() {
+  if (proc_.keepCapture()) model_.rebuild();
+}
+
 void EditorCommands::chooseFile() {
   chooser_ = std::make_unique<juce::FileChooser>("Choose a loop (WAV or AIFF, up to 60 s)", juce::File(), "*.wav;*.aif;*.aiff");
   chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this](const juce::FileChooser& fc) {

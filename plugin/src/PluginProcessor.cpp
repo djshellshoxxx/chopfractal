@@ -113,6 +113,17 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   hostBeatsPerBar.store(tt.timeSignature.numerator, std::memory_order_relaxed);
   hostBeatUnit.store(tt.timeSignature.denominator, std::memory_order_relaxed);
 
+  // Input capture reads the block BEFORE the renderer overwrites it with output.
+  {
+    cf::capture::Transport ct;
+    ct.playing = tt.block.playing;
+    ct.positionValid = tt.block.positionValid;
+    ct.ppq = tt.block.ppq;
+    ct.bpm = tt.block.bpm;
+    ct.quartersPerBar = static_cast<double>(tt.timeSignature.numerator) * 4.0 / static_cast<double>(std::max(1, tt.timeSignature.denominator));
+    capture_.process(buffer.getArrayOfReadPointers(), juce::jmin(getTotalNumInputChannels(), buffer.getNumChannels()), frames, ct);
+  }
+
   cf::host::ParamValues pv;
   for (std::size_t i = 0; i < cf::host::kParamCount; ++i) pv.v[i] = paramPtrs_[i] ? static_cast<double>(paramPtrs_[i]->load(std::memory_order_relaxed)) : cf::host::parameterManifest()[i].defaultValue;
 
@@ -140,6 +151,73 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   if (lp.boundary) boundaryCount_.fetch_add(1, std::memory_order_relaxed);
   if (lp.midpoint) midpointCount_.fetch_add(1, std::memory_order_relaxed);
   playheadQuarters_.store(lp.playheadQuarters, std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------------------------
+// input capture
+// ---------------------------------------------------------------------------------------------
+
+bool ChopFractalProcessor::armCapture(int bars) {
+  cf::capture::Options o;
+  o.channels = juce::jlimit(1, 2, getTotalNumInputChannels());
+  o.sampleRate = sampleRate_.load(std::memory_order_relaxed);
+  if (bars > 0) {
+    const double quartersPerBar = static_cast<double>(hostBeatsPerBar.load()) * 4.0 / static_cast<double>(std::max(1, hostBeatUnit.load()));
+    o.targetFrames = cf::capture::framesForBars(bars, quartersPerBar, activeBpm.load(), o.sampleRate);
+    if (o.targetFrames == 0) {
+      setStatusMessage("Cannot capture " + juce::String(bars) + " bar(s) at the current tempo and meter.");
+      return false;
+    }
+    o.waitForBar = true;
+  }
+  const cf::Status st = capture_.arm(o);
+  if (!st.ok()) {
+    setStatusMessage(juce::String(st.error().message));
+    return false;
+  }
+  setStatusMessage(bars > 0 ? "Capture armed: recording " + juce::String(bars) + " bar(s) from the next bar line (immediately when no transport is running). Play your audio into the plugin."
+                            : "Capture armed: recording until Rec Stop (at most 60 seconds). Play your audio into the plugin.");
+  return true;
+}
+
+void ChopFractalProcessor::stopCapture() { capture_.stop(); }
+
+void ChopFractalProcessor::cancelCapture() {
+  capture_.cancel();
+  setStatusMessage("Capture discarded.");
+}
+
+bool ChopFractalProcessor::keepCapture() {
+  auto r = capture_.take();
+  if (!r.ok()) {
+    setStatusMessage(juce::String(r.error().message));
+    return false;
+  }
+  auto data = std::make_shared<cf::render::SourceData>();
+  data->channels = r.value().channels;
+  data->sampleRate = r.value().sampleRate;
+  data->frames = r.value().frames;
+  data->samples = std::move(r.value().samples);  // planar, channel-major: the layout file decoding produces
+  const double seconds = static_cast<double>(data->frames) / static_cast<double>(std::max(1, data->sampleRate));
+  ++loadTicket_;  // a file load still in flight must not replace the captured audio
+  cf::Status status;
+  withSession([&](cf::composition::ProjectSession& s) { status = s.loadSource(data, "Captured loop", ""); });
+  if (!status.ok()) {
+    setStatusMessage(juce::String(status.error().message));
+    return false;
+  }
+  embedSource = true;  // there is no file to reload it from, so the project must carry the audio
+  setStatusMessage("Captured " + juce::String(seconds, 2) + " s and loaded it as the source (embedded in the project). Press Detect Chops, then Generate.");
+  return true;
+}
+
+ChopFractalProcessor::CaptureInfo ChopFractalProcessor::captureInfo() const {
+  CaptureInfo info;
+  info.state = capture_.state();
+  const double sr = std::max(1.0, capture_.sampleRate());
+  info.seconds = static_cast<double>(capture_.framesRecorded()) / sr;
+  info.targetSeconds = static_cast<double>(capture_.targetFrames()) / sr;
+  return info;
 }
 
 void ChopFractalProcessor::pollAudioFlags() {
