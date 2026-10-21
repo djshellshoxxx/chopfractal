@@ -2,6 +2,7 @@
 
 #include <CdlFonts.h>
 
+#include <algorithm>
 #include <atomic>
 
 #include "AppPaths.h"
@@ -16,6 +17,7 @@ const Palette kConcrete{rgb(0xD5D9D8), rgb(0xE6E9E8), rgb(0xB3BABB), rgb(0x6D777
                         rgb(0xE6E9E8), rgb(0x00756D), rgb(0x101417), rgb(0x4A5559), rgb(0x12662A), rgb(0x6B5A00), rgb(0xB3261A), rgb(0xF4F6F5), rgb(0xC3C9C8)};
 
 std::atomic<int> gTheme{0};
+std::atomic<float> gUiScale{1.0f};
 juce::File gOverride;
 
 struct Faces {
@@ -46,12 +48,15 @@ const Palette& palette(ThemeId t) { return t == ThemeId::Concrete ? kConcrete : 
 ThemeId currentTheme() { return gTheme.load() == 1 ? ThemeId::Concrete : ThemeId::Night; }
 void setCurrentTheme(ThemeId t) { gTheme = t == ThemeId::Concrete ? 1 : 0; }
 
+float uiScale() { return gUiScale.load(); }
+void setUiScale(float s) { gUiScale = std::clamp(s, 0.5f, 4.0f); }
+
 bool brandFontsLoaded() { return faces().regular != nullptr && faces().mono != nullptr && faces().stencil != nullptr; }
 
 juce::Font font(FontRole role, float s) {
   const auto& f = faces();
   switch (role) {
-    case FontRole::Title: return make(f.stencil, 20.0f * s, 0.06f, false);
+    case FontRole::Title: return make(f.stencil, 17.0f * s, 0.06f, false);
     case FontRole::Section: return make(f.semibold, 11.0f * s, 0.08f, false);
     case FontRole::Label: return make(f.regular, 11.0f * s, 0.08f, false);
     case FontRole::Body: return make(f.regular, 13.0f * s, 0.0f, false);

@@ -48,7 +48,7 @@ void PatternPanel::paint(juce::Graphics& g) {
   const auto& v = model_.view();
   const auto& pattern = v.pattern;
   const auto area = getLocalBounds();
-  g.setFont(cdl::font(cdl::FontRole::Body));
+  g.setFont(cdl::font(cdl::FontRole::Body, cdl::uiScale()));
   g.setColour(editor_theme::background());
   g.fillRect(area);
   // Lanes by chop, numbered so colour is never the only indicator.
@@ -84,7 +84,7 @@ void PatternPanel::paint(juce::Graphics& g) {
     }
     if (rect.getWidth() > 14.0f && rect.getHeight() > 12.0f) {
       g.setColour(cdl::pal().bg);
-      g.setFont(cdl::font(cdl::FontRole::Value, 0.9f));
+      g.setFont(cdl::font(cdl::FontRole::Value, 0.9f * cdl::uiScale()));
       g.drawText(juce::String(r.chopIndex + 1), rect.toNearestInt(), juce::Justification::centred);
     }
   }

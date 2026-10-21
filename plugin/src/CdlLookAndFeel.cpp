@@ -49,7 +49,7 @@ void paintSectionLabel(juce::Graphics& g, const juce::String& text, juce::Rectan
   g.setColour(pal().spray);
   g.fillRect(a.getX(), a.getCentreY() - 6, 3, 13);  // 13 px, not 12
   g.setColour(pal().sprayHi);
-  g.setFont(font(FontRole::Section));
+  g.setFont(font(FontRole::Section, uiScale()));
   g.drawText(text.toUpperCase(), a.withTrimmedLeft(9), juce::Justification::centredLeft, false);
 }
 
@@ -195,12 +195,12 @@ void CdlLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& b, co
   (void)brighten;
 }
 
-juce::Font CdlLookAndFeel::getTextButtonFont(juce::TextButton&, int) { return font(FontRole::Button); }
+juce::Font CdlLookAndFeel::getTextButtonFont(juce::TextButton&, int) { return font(FontRole::Button, uiScale()); }
 
 void CdlLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool, bool) {
   const auto& p = pal();
   const bool primary = static_cast<bool>(b.getProperties()["cdlPrimary"]);
-  g.setFont(primary ? font(FontRole::Button, 1.3f) : getTextButtonFont(b, b.getHeight()));
+  g.setFont(primary ? font(FontRole::Button, 1.3f * uiScale()) : getTextButtonFont(b, b.getHeight()));
   juce::Colour c = primary ? p.onSpray : (b.getToggleState() ? p.sprayHi : p.ink);
   if (!b.isEnabled()) c = p.inkMuted;
   g.setColour(c);
@@ -226,7 +226,7 @@ void CdlLookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, 
     g.strokePath(t, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
   }
   g.setColour(b.isEnabled() ? (on ? p.sprayHi : p.ink) : p.inkMuted);
-  g.setFont(font(FontRole::Body));
+  g.setFont(font(FontRole::Body, uiScale()));
   g.drawText(b.getButtonText(), r.withTrimmedLeft(box + 10.0f), juce::Justification::centredLeft, true);
   if (b.hasKeyboardFocus(false)) {
     g.setColour(p.ink);
@@ -276,7 +276,7 @@ void CdlLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<
   auto col = tc != nullptr ? *tc : p.ink;
   if (!active) col = p.inkMuted;
   g.setColour(col);
-  g.setFont(font(FontRole::Body));
+  g.setFont(font(FontRole::Body, uiScale()));
   auto r = area.reduced(10, 0);
   if (ticked) {
     g.setColour(p.spray);
@@ -317,7 +317,7 @@ void CdlLookAndFeel::drawTextEditorOutline(juce::Graphics& g, int w, int h, juce
 
 juce::Rectangle<int> CdlLookAndFeel::getTooltipBounds(const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent) {
   juce::AttributedString as;
-  as.append(text, font(FontRole::Body));
+  as.append(text, font(FontRole::Body, uiScale()));
   juce::TextLayout tl;
   tl.createLayout(as, 280.0f);
   const int w = static_cast<int>(std::ceil(tl.getWidth())) + 18;
@@ -333,7 +333,7 @@ void CdlLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, in
   g.setColour(p.edgeHi);
   g.drawRoundedRectangle(0.5f, 0.5f, static_cast<float>(w) - 1.0f, static_cast<float>(h) - 1.0f, 4.0f, 1.0f);
   juce::AttributedString as;
-  as.append(text, font(FontRole::Body), p.ink);
+  as.append(text, font(FontRole::Body, uiScale()), p.ink);
   as.draw(g, juce::Rectangle<float>(9.0f, 7.0f, static_cast<float>(w) - 18.0f, static_cast<float>(h) - 14.0f));
 }
 }  // namespace cdl

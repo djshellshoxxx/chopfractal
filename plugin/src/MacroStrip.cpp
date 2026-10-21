@@ -179,19 +179,21 @@ void MacroStrip::resized() {
   // Cells: eight knobs of one unit and the Output cell, which is 1.5 units wide to carry the Match and Limit toggles.
   const int n = static_cast<int>(knobs_.size());
   if (n == 0) return;
-  const float units = static_cast<float>(n) + 0.5f;
-  const int unit = std::clamp(static_cast<int>(static_cast<float>(knobArea_.getWidth()) / units), px(72), px(130));
-  const int total = static_cast<int>(units * static_cast<float>(unit));
+  // The Output cell carries the Match and Limit toggles to the right of its knob.
+  const int togglesFloor = px(78);
+  const float units = static_cast<float>(n);
+  const int unit = std::clamp(static_cast<int>(static_cast<float>(knobArea_.getWidth() - togglesFloor) / units), px(72), px(130));
+  const int total = n * unit + togglesFloor;
   int x = knobArea_.getX() + std::max(0, (knobArea_.getWidth() - total) / 2);
   for (int i = 0; i < n; ++i) {
     const bool output = i == n - 1;
-    const int w = output ? static_cast<int>(1.5f * static_cast<float>(unit)) : unit;
+    const int w = output ? unit + togglesFloor : unit;
     auto cell = juce::Rectangle<int>(x, knobArea_.getY(), w, knobArea_.getHeight());
     if (output) {
-      auto toggles = cell.removeFromRight(unit / 2 + px(14));
+      auto toggles = cell.removeFromRight(togglesFloor);
       knobs_[static_cast<std::size_t>(i)]->setBounds(cell);
       const int h = px(22);
-      toggles = toggles.withSizeKeepingCentre(toggles.getWidth(), 2 * h + px(6)).withY(cell.getY() + px(10));
+      toggles = toggles.withSizeKeepingCentre(toggles.getWidth(), 2 * h + px(6)).withY(cell.getY() + px(18));
       levelMatch_.setBounds(toggles.removeFromTop(h));
       toggles.removeFromTop(px(6));
       limiter_.setBounds(toggles.removeFromTop(h));

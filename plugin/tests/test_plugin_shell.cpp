@@ -326,9 +326,22 @@ CHOP_TEST(editor_constructs_draws_and_reflects_the_session_when_a_display_exists
   CHECK(editor != nullptr);
   if (!editor) return;
   editor->setVisible(true);
+  // CHOPFRACTAL_SNAPSHOT_SIZE=880x560 and CHOPFRACTAL_THEME=concrete render the other sizes and the daylight theme;
+  // CHOPFRACTAL_SNAPSHOT_DRAWER=tools shows a drawer.
+  if (const char* size = std::getenv("CHOPFRACTAL_SNAPSHOT_SIZE")) {
+    int w = 0, h = 0;
+    if (std::sscanf(size, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) editor->setSize(w, h);
+  }
+  if (auto* ed = dynamic_cast<ChopFractalEditor*>(editor.get())) {
+    if (const char* theme = std::getenv("CHOPFRACTAL_THEME")) ed->setTheme(std::string(theme) == "concrete" ? cdl::ThemeId::Concrete : cdl::ThemeId::Night);
+    if (const char* drawer = std::getenv("CHOPFRACTAL_SNAPSHOT_DRAWER")) ed->openDrawer(drawer);
+    if (std::getenv("CHOPFRACTAL_SNAPSHOT_ADVANCED")) ed->setAdvanced(true);
+  }
   juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
   juce::Image img = editor->createComponentSnapshot(editor->getLocalBounds());
   CHECK(img.isValid() && img.getWidth() == editor->getWidth());
+  cdl::settingsFile().deleteFile();  // a snapshot at another size or theme must not leak into later tests
+  cdl::setCurrentTheme(cdl::ThemeId::Night);
   if (const char* out = std::getenv("CHOPFRACTAL_SNAPSHOT")) {
     juce::File f(out);
     f.deleteFile();

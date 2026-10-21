@@ -95,24 +95,24 @@ void ShellChrome::layoutWidgets() {
   auto px = [s](float v) { return static_cast<int>(std::lround(v * s)); };
   const int gap = px(6);
   {
-    auto t = rects_.sourceParts.toolbar.withTrimmedLeft(px(76));
-    load_.setBounds(t.removeFromLeft(px(96)).reduced(0, px(2)));
+    auto t = rects_.sourceParts.toolbar.withTrimmedLeft(px(84));
+    load_.setBounds(t.removeFromLeft(px(104)).reduced(0, px(2)));
     t.removeFromLeft(gap);
-    detect_.setBounds(t.removeFromLeft(px(112)).reduced(0, px(2)));
+    detect_.setBounds(t.removeFromLeft(px(124)).reduced(0, px(2)));
   }
   {
     auto t = rects_.patternParts.header;
     t.removeFromLeft(px(84));
     barsLabel_.setBounds(t.removeFromLeft(px(48)));
-    bars_.setBounds(t.removeFromLeft(px(72)).reduced(0, px(2)));
-    t.removeFromLeft(gap * 2);
+    bars_.setBounds(t.removeFromLeft(px(64)).reduced(0, px(2)));
+    t.removeFromLeft(gap);
     for (juce::Component* c : std::initializer_list<juce::Component*>{&zoom_, &collapse_, &lock_}) {
       c->setVisible(advanced_);
-      c->setBounds(t.removeFromLeft(px(74)).reduced(0, px(2)));
+      c->setBounds(t.removeFromLeft(px(70)).reduced(0, px(2)));
       t.removeFromLeft(gap);
     }
     editMode_.setVisible(advanced_);
-    editMode_.setBounds(t.removeFromLeft(px(160)));
+    editMode_.setBounds(t.removeFromLeft(px(150)));
   }
 }
 
@@ -157,7 +157,7 @@ void ShellChrome::paint(juce::Graphics& g) {
   // ---- source ----
   {
     const auto& sp = rects_.sourceParts;
-    cdl::paintSectionLabel(g, "Source", sp.toolbar.withWidth(static_cast<int>(76 * s)));
+    cdl::paintSectionLabel(g, "Source", sp.toolbar.withWidth(static_cast<int>(84 * s)));
     g.setColour(p.inkMuted);
     g.setFont(cdl::font(cdl::FontRole::Hint, s));
     g.drawText(v.hasSource ? juce::String(v.chops.size()) + (v.chops.size() == 1 ? " chop" : " chops") : juce::String("no sample loaded"), sp.toolbar, juce::Justification::centredRight, false);
@@ -191,7 +191,7 @@ void ShellChrome::paint(juce::Graphics& g) {
       if (cell.getWidth() > 26.0f) {
         g.setColour(p.ink);
         g.setFont(cdl::font(cdl::FontRole::Value, s));
-        g.drawText(juce::String(i + 1) + " " + roleLetter(c.role), cell.toNearestInt().reduced(4, 0), juce::Justification::centredLeft, false);
+        g.drawText(c.role == cf::DrumRole::Unknown ? juce::String(i + 1) : juce::String(i + 1) + " " + roleLetter(c.role), cell.toNearestInt().reduced(4, 0), juce::Justification::centredLeft, false);
       } else if (cell.getWidth() > 10.0f) {
         g.setColour(p.ink);
         g.setFont(cdl::font(cdl::FontRole::Value, 0.9f * s));

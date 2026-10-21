@@ -47,7 +47,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   legacyView_.setScrollBarsShown(true, true);
   legacyView_.setComponentID("ToolsDrawer");
 
-  registerDrawer("tools", "Tools", legacyView_, 560);
+  registerDrawer("tools", "Tools", legacyView_, 420);
   registerDrawer("settings", "Settings", settings_, 300, false);
   settings_.showTheme(cdl::currentTheme());
   settings_.onTheme = [this](cdl::ThemeId t) { setTheme(t); };
@@ -175,6 +175,7 @@ void ChopFractalEditor::resized() {
   // Drawer widths are given at scale 1; the layout scales them with the window.
   const float s0 = shell::scaleFor(getWidth(), getHeight(), uiScale);
   rects_ = shell::computeShellLayout(getWidth(), getHeight(), uiScale, static_cast<int>(std::lround(static_cast<float>(base) * s0)));
+  cdl::setUiScale(rects_.scale);
   chrome_.setBounds(getLocalBounds());
   chrome_.setLayout(rects_, advanced_);
   wave_.setBounds(rects_.sourceParts.wave);

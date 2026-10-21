@@ -21,6 +21,10 @@ constexpr float kNotch = 11.0f;  // hand mark: 11, not 12
 enum class FontRole { Title, Section, Label, Body, Hint, Value, ValueLg, MonoXs, Tag, Button };
 juce::Font font(FontRole role, float scale = 1.0f);
 bool brandFontsLoaded();
+// The shell scale (window size over the 1100 x 720 design size). Widgets that the look and feel sizes by itself (buttons, combo
+// boxes, menus, tooltips) use it; panels that paint their own text pass their scale to font() instead.
+float uiScale();
+void setUiScale(float);
 
 // Per-user settings (not per project): theme, window size, simple/advanced. Stored as JSON next to the presets.
 struct UserSettings {

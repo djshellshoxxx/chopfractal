@@ -86,11 +86,11 @@ void TopBar::resized() {
   const bool narrow = getWidth() < 960;
   auto area = getLocalBounds().reduced(px(12), px(6));
   const int gap = px(6);
-  titleArea_ = area.removeFromLeft(px(narrow ? 150 : 196));
+  titleArea_ = area.removeFromLeft(px(196));
   area.removeFromLeft(gap);
-  play_.setBounds(area.removeFromLeft(px(narrow ? 48 : 56)));
+  play_.setBounds(area.removeFromLeft(px(56)));
   area.removeFromLeft(gap);
-  stop_.setBounds(area.removeFromLeft(px(narrow ? 48 : 56)));
+  stop_.setBounds(area.removeFromLeft(px(56)));
   area.removeFromLeft(gap * 2);
   if (!narrow) {
     bpmArea_ = area.removeFromLeft(px(96));
@@ -98,19 +98,19 @@ void TopBar::resized() {
   } else {
     bpmArea_ = {};
   }
-  undo_.setBounds(area.removeFromLeft(px(narrow ? 48 : 56)));
+  undo_.setBounds(area.removeFromLeft(px(56)));
   area.removeFromLeft(gap);
-  redo_.setBounds(area.removeFromLeft(px(narrow ? 48 : 56)));
+  redo_.setBounds(area.removeFromLeft(px(56)));
   area.removeFromLeft(gap * 2);
   // Right side, from the edge inwards.
-  mode_.setBounds(area.removeFromRight(px(narrow ? 78 : 92)));
+  mode_.setBounds(area.removeFromRight(px(92)));
   area.removeFromRight(gap);
   settings_.setBounds(area.removeFromRight(area.getHeight()).reduced(px(4)));
   area.removeFromRight(gap);
-  theme_.setBounds(area.removeFromRight(px(narrow ? 70 : 84)));
+  theme_.setBounds(area.removeFromRight(px(84)));
   area.removeFromRight(gap);
   for (auto it = drawerButtons_.rbegin(); it != drawerButtons_.rend(); ++it) {
-    it->button->setBounds(area.removeFromRight(px(narrow ? 52 : 64)));
+    it->button->setBounds(area.removeFromRight(px(64)));
     area.removeFromRight(gap);
   }
   presetArea_ = area;

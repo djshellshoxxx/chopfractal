@@ -11,6 +11,8 @@ StatusBar::StatusBar(EditorModel& model, EditorCommands& commands) : EditorPanel
   messages_.setCaretVisible(false);
   messages_.setPopupMenuEnabled(true);
   messages_.setBorder({2, 6, 2, 6});
+  messages_.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+  messages_.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
   messages_.setIndents(0, 0);
   lookAndFeelChanged();
   messages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");

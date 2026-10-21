@@ -15,7 +15,7 @@ void paintTrace(juce::Graphics&, float x0, float x1, float y, float stepAt);
 // Plugin name: stencil title with the spray offset second pass.
 void paintStencilTitle(juce::Graphics&, const juce::String& text, juce::Rectangle<int> area, float scale);
 // Section header: spray bar (13 px tall hand mark) plus uppercase label.
-void paintSectionLabel(juce::Graphics&, const juce::String& text, juce::Rectangle<int> area);
+void paintSectionLabel(juce::Graphics&, const juce::String& text, juce::Rectangle<int> area);  // scaled with cdl::uiScale()
 
 class CdlLookAndFeel : public juce::LookAndFeel_V4 {
  public:
@@ -39,8 +39,8 @@ class CdlLookAndFeel : public juce::LookAndFeel_V4 {
   juce::Rectangle<int> getTooltipBounds(const juce::String&, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override;
   void drawTooltip(juce::Graphics&, const juce::String&, int w, int h) override;
   juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
-  juce::Font getComboBoxFont(juce::ComboBox&) override { return font(FontRole::Body); }
-  juce::Font getLabelFont(juce::Label&) override { return font(FontRole::Body); }
-  juce::Font getPopupMenuFont() override { return font(FontRole::Body); }
+  juce::Font getComboBoxFont(juce::ComboBox&) override { return font(FontRole::Body, uiScale()); }
+  juce::Font getLabelFont(juce::Label&) override { return font(FontRole::Body, uiScale()); }
+  juce::Font getPopupMenuFont() override { return font(FontRole::Body, uiScale()); }
 };
 }  // namespace cdl

@@ -16,7 +16,7 @@ void WavePanel::modelChanged(Change c) {
 void WavePanel::paint(juce::Graphics& g) {
   const auto& v = model_.view();
   const auto area = getLocalBounds();
-  g.setFont(cdl::font(cdl::FontRole::Body));
+  g.setFont(cdl::font(cdl::FontRole::Body, cdl::uiScale()));
   g.setColour(editor_theme::background());
   g.fillRect(area);
   // Chop lanes: each chop's range tinted in its lane colour with a top bar, so waveform, chop strip and pattern lanes read as one.
@@ -59,7 +59,7 @@ void WavePanel::paint(juce::Graphics& g) {
     g.setColour(m.enabled ? editor_theme::accentAmber() : cdl::pal().inkMuted);
     const int x = static_cast<int>(m.x);
     g.drawVerticalLine(x, 0.0f, static_cast<float>(area.getBottom()));
-    g.setFont(cdl::font(cdl::FontRole::Value, 0.9f));
+    g.setFont(cdl::font(cdl::FontRole::Value, 0.9f * cdl::uiScale()));
     g.drawText(juce::String(markerNumber), x + 2, 2, 28, 14, juce::Justification::left);
   }
   if (selecting_) {

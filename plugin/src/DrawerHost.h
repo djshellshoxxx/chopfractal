@@ -36,5 +36,5 @@ class DrawerHost : public juce::Component {
 
   std::vector<Entry> entries_;
   juce::String openId_;
-  juce::TextButton close_{"Close drawer"};
+  juce::TextButton close_{"Close"};
 };
