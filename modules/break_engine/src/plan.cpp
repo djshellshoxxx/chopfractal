@@ -187,7 +187,7 @@ class Planner {
     for (int i = 0; i < 5; ++i) {
       weights[i] = kFillRows[i].weight;
       if (kFillRows[i].g == Gesture::TomRun && !s_.avail.perc) weights[i] = 0.0;
-      if (kFillRows[i].g == Gesture::GateDrop && displaced_) weights[i] = 0.0;
+      if (kFillRows[i].g == Gesture::GateDrop && (displaced_ || slot_ != 3)) weights[i] = 0.0;  // drums-out only at the phrase end (research metric 25)
       total += weights[i];
     }
     if (!(total > 0.0)) return;
@@ -288,6 +288,7 @@ class Planner {
       const GestureRow& row = kGlitchRows[i];
       if ((row.g == Gesture::ReverseSwell && !s_.allow.reverse) || (row.g == Gesture::TapeStop && !s_.allow.glide)) continue;
       if ((row.g == Gesture::Stutter8 || row.g == Gesture::Stutter16 || row.g == Gesture::Stutter32 || row.g == Gesture::SpeedRamp) && !s_.allow.retrigger) continue;
+      if (row.g == Gesture::SpeedRamp && !pi_.glitchProfile) continue;  // 1/64 rolls belong to the glitch profiles only (research metric 13)
       const double p = std::min(0.9, (slot_ == 3 ? row.pPhrase : row.pBar) * gs);
       Rng gr = cellRng(s_, kTagGlitch, static_cast<std::uint64_t>(bar_), static_cast<std::uint64_t>(i));
       const double ug = gr.uniform01(), u1 = gr.uniform01(), u2 = gr.uniform01();
@@ -443,7 +444,7 @@ class Planner {
       }
     for (int st = 0; st < kStepsPerBar; ++st) {
       const StepRow& r = kRows[st];
-      double p = (st % 2 == 0) ? 0.97 : (mode16 ? std::min(0.97, r.hatP * (rolling ? 1.2 : 1.0)) : 0.0);
+      double p = (st % 2 == 0) ? (pi_.glitchProfile ? 0.97 : 1.0) : (mode16 ? std::min(0.97, r.hatP * (rolling ? 1.2 : 1.0)) : 0.0);
       Rng hr = cellRng(s_, kTagHat, static_cast<std::uint64_t>(bar_), static_cast<std::uint64_t>(st));
       const bool present = hr.uniform01() < p;
       const bool closedAfterOpen = openStep >= 0 && st == openStep + 1;

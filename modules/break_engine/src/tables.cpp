@@ -59,10 +59,10 @@ const GestureRow kGlitchRows[6] = {
 // name,              dens,   swing,       ghost fill glitch soft  floor strict pitch glitchProfile
 static const ProfileInfo kProfiles[kProfileCount] = {
     {"Amen / Funk",      6, 10, 0.30, 0.60, 1.0, 0.8, 0.3, false, 1.00, 0.85,  0, false},
-    {"Jungle",           8, 14, 0.00, 0.24, 1.3, 1.0, 1.0, false, 1.00, 0.85,  1, false},
-    {"DnB rolling",     10, 14, 0.00, 0.20, 1.6, 1.0, 0.8, false, 1.00, 0.80,  1, false},
-    {"Breakcore",       10, 18, 0.00, 0.10, 1.0, 1.5, 3.0, true,  0.70, 0.30,  7, true},
-    {"IDM / glitch",     6, 16, 0.00, 0.60, 0.7, 1.2, 3.0, true,  0.50, 0.25, 12, true},
+    {"Jungle",           8, 12, 0.00, 0.24, 1.3, 1.0, 1.0, false, 1.00, 0.85,  1, false},
+    {"DnB rolling",     10, 12, 0.00, 0.20, 1.6, 1.0, 0.8, false, 1.00, 0.80,  1, false},
+    {"Breakcore",       10, 16, 0.00, 0.10, 1.0, 1.5, 3.0, true,  0.70, 0.30,  7, true},
+    {"IDM / glitch",     6, 14, 0.00, 0.60, 0.7, 1.2, 3.0, true,  0.50, 0.25, 12, true},
     {"Hip-hop boom-bap", 5,  8, 0.45, 0.70, 0.8, 0.5, 0.2, false, 1.00, 0.90,  0, false},
 };
 

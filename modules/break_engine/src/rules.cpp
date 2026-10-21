@@ -69,7 +69,8 @@ double densityScale(const PlanSettings& s) {
   // Anchors the profile and mode actually produce (displacement does not change the count), and the share of drawn
   // hits the collision / adjacency / ghost rules throw away again (measured over the profiles, see tests).
   const double anchors = anchorProbability(s.options, false, true) * 0.93 + anchorProbability(s.options, false, false) + anchorProbability(s.options, true, false);
-  const double loss = profileTiming(s.options.profile).ruleLoss;
+  // The share that survives falls as density rises (more hits meet more neighbours), hence the slope around the middle.
+  const double loss = profileTiming(s.options.profile).ruleLoss * (1.0 - 0.4 * (d - 0.5));
   const double scale = mass > 0.0 ? (target - anchors) / (mass * loss) : 1.0;
   return clampd(scale, 0.25, 3.0);
 }
@@ -129,7 +130,7 @@ double cellProbability(const PlanSettings& s, int slot, DrumRole role, int step)
   const double dens = densityScale(s);
   switch (role) {
     case DrumRole::Kick:
-      if (step == 0) return std::min(kMaxCellP, anchorProbability(s.options, false, true) * pt.kick1Mult[slot]);
+      if (step == 0) return std::min(kMaxCellP, anchorProbability(s.options, false, true) * (s.options.anchors == AnchorMode::Strict ? 1.0 : pt.kick1Mult[slot]));
       return std::min(kMaxCellP, rawProbability(s, role, step) * kOtherKickMod[slot] * dens);
     case DrumRole::Snare: {
       const double d = displaceP(s, slot);
