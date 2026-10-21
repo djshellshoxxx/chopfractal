@@ -112,6 +112,10 @@ class EditorCommands {
   void cancelExport();
   juce::File makeDragFile(bool wav, const ExportUi&);
 
+  // ---- diagnostics (settings drawer, status bar) ----
+  juce::String diagnosticsText() const;       // version, host, audio, interface, source, tempo, output and recent notices
+  void copyDiagnostics();                      // puts diagnosticsText on the clipboard and says so in the status bar
+
   // ---- presets ----
   // The live state as a user preset: flat controls, engine v2 and effect parameters, seed, grid, Fractal settings, rules.
   chopfractal::presets::Preset currentPreset(const juce::String& name, const FractalUi&, const EvolveUi&) const;

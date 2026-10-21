@@ -56,6 +56,10 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   cdl::ThemeId theme() const { return cdl::currentTheme(); }
   void setAdvanced(bool);
   bool advanced() const { return advanced_; }
+  void setUiScalePercent(int percent);  // 90, 100, 110 or 125: scales the whole shell, capped so the window still fits it
+  int uiScalePercent() const { return uiScalePercent_; }
+  void setReducedMotion(bool on);
+  SettingsDrawer& settingsDrawer() { return settings_; }
   const shell::ShellRects& shellRects() const { return rects_; }
 
   // Public so tests can drive them without modal dialogs.
@@ -113,6 +117,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
 
   shell::ShellRects rects_;
   bool advanced_ = false;
+  int uiScalePercent_ = 100;
   bool lastPlaying_ = false;
   int stableSizeTicks_ = 0;
   juce::Point<int> savedSize_;

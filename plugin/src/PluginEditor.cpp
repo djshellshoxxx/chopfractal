@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <initializer_list>
 
+#include <chopfractal/plugin_ui_adapter/settings_view.hpp>
+
 #include "ControlHelp.h"
 #include "EditorTheme.h"
 
@@ -32,6 +34,8 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   const auto saved = cdl::loadUserSettings();
   cdl::setCurrentTheme(saved.theme);
   advanced_ = saved.advanced;
+  uiScalePercent_ = saved.uiScalePercent;
+  cdl::setReducedMotion(saved.reducedMotion);
   lnf_.applyTheme();
   setLookAndFeel(&lnf_);
 
@@ -69,6 +73,10 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   settings_.showTheme(cdl::currentTheme());
   settings_.onTheme = [this](cdl::ThemeId t) { setTheme(t); };
   settings_.onResetSize = [this] { setSize(shell::kDefaultW, shell::kDefaultH); };
+  settings_.onScale = [this](int percent) { setUiScalePercent(percent); };
+  settings_.onReducedMotion = [this](bool on) { setReducedMotion(on); };
+  settings_.onCopyDiagnostics = [this] { commands_.copyDiagnostics(); };
+  settings_.showUserSettings(saved);
   drawer_.onChanged = [this] {
     topBar_.setDrawerButtonOn(drawer_.openId());
     resized();
@@ -127,6 +135,26 @@ void ChopFractalEditor::setTheme(cdl::ThemeId t) {
   repaint();
 }
 
+void ChopFractalEditor::setUiScalePercent(int percent) {
+  percent = cf::ui::uiScalePercentAt(cf::ui::uiScaleIndex(percent));
+  uiScalePercent_ = percent;
+  auto s = cdl::loadUserSettings();
+  s.uiScalePercent = percent;
+  cdl::saveUserSettings(s);
+  settings_.showUserSettings(s);
+  resized();
+  repaint();
+}
+
+void ChopFractalEditor::setReducedMotion(bool on) {
+  cdl::setReducedMotion(on);
+  auto s = cdl::loadUserSettings();
+  s.reducedMotion = on;
+  cdl::saveUserSettings(s);
+  settings_.showUserSettings(s);
+  pattern_.setPlaying(pattern_.playing());  // switch between the per-frame and the 10 Hz playhead
+}
+
 void ChopFractalEditor::setAdvanced(bool on) {
   if (advanced_ == on) return;
   advanced_ = on;
@@ -149,6 +177,7 @@ void ChopFractalEditor::timerCallback() {
   const bool playing = model_.playheadQuarters() >= 0.0;
   if (!rebuilt && (playing || lastPlaying_)) orbit_.repaint();  // the Orbit View shows the playhead too
   if (playing != lastPlaying_) pattern_.setPlaying(playing);
+  pattern_.refreshPlayhead();
   lastPlaying_ = playing;
   topBar_.syncTransport();
   status_.refreshReadouts();
@@ -190,7 +219,7 @@ void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) {
 void ChopFractalEditor::paint(juce::Graphics& g) { cdl::paintWindowFrame(g, getLocalBounds()); }
 
 void ChopFractalEditor::resized() {
-  const float uiScale = 1.0f;
+  const float uiScale = static_cast<float>(uiScalePercent_) / 100.0f;
   const int base = drawer_.isOpen() ? drawer_.openPreferredWidth() : 0;
   // Drawer widths are given at scale 1; the layout scales them with the window.
   const float s0 = shell::scaleFor(getWidth(), getHeight(), uiScale);

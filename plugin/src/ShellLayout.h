@@ -24,7 +24,11 @@ struct ShellRects {
 };
 
 inline float scaleFor(int w, int h, float uiScale = 1.0f) {
-  return std::clamp(std::min(static_cast<float>(w) / kDefaultW, static_cast<float>(h) / kDefaultH), 0.8f, 2.0f) * uiScale;
+  const float base = std::clamp(std::min(static_cast<float>(w) / kDefaultW, static_cast<float>(h) / kDefaultH), 0.8f, 2.0f);
+  // The user scale never pushes the content past what the window can hold (the layout needs about 880 x 600 at scale 1).
+  const float fit = std::min(static_cast<float>(w) / kMinW, static_cast<float>(h) / 600.0f);
+  const float want = base * uiScale;
+  return uiScale <= 1.0f ? want : std::max(base, std::min(want, fit));
 }
 
 // drawerWidth is in logical pixels (0 = closed). The drawer sits right of the source and pattern panels; the macro strip keeps the full width.

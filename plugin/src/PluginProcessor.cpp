@@ -9,6 +9,7 @@
 #include <chopfractal/plugin_ui_adapter/capture_view.hpp>
 #include <chopfractal/plugin_ui_adapter/pads_view.hpp>
 
+#include "CdlTheme.h"
 #include "PluginEditor.h"
 
 namespace cf = chopfractal;
@@ -42,6 +43,7 @@ ChopFractalProcessor::ChopFractalProcessor()
     lastGrooveParams_ = {d.get(cf::host::kGrooveEnable), d.get(cf::host::kGrooveTemplate), d.get(cf::host::kGrooveSwing), d.get(cf::host::kGrooveHumTime),
                          d.get(cf::host::kGrooveHumVel)};
   }
+  applyUserAudioDefaults();
   renderer_.prepare(cf::render::Config{});
   session_.attachMailbox(&renderer_.mailbox());
   session_.attachArmMailbox(&renderer_.armMailbox());  // F09: sample-accurate scene switches
@@ -49,6 +51,19 @@ ChopFractalProcessor::ChopFractalProcessor()
   takeBuffer_.reserve(cf::composition::kMaxTakeHits);
   openHit_.fill(-1);
   startTimerHz(30);
+}
+
+// A new instance starts with the limiter and level-match choices from the settings drawer. A restored project then
+// overrides them with its own saved parameters, so existing sessions never change.
+void ChopFractalProcessor::applyUserAudioDefaults() {
+  const auto u = cdl::loadUserSettings();
+  if (!u.audioDefaultsCustom) return;
+  auto set = [this](const char* id, double plain) {
+    if (auto* p = apvts.getParameter(id)) p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(plain)));  // also updates the raw value the audio thread reads
+  };
+  set("limiter_enable", u.defaultLimiter ? 1.0 : 0.0);
+  set("level_match", u.defaultLevelMatch ? 1.0 : 0.0);
+  set("limiter_ceiling_db", u.defaultCeilingDb);
 }
 
 ChopFractalProcessor::~ChopFractalProcessor() {

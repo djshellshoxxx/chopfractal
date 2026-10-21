@@ -48,6 +48,11 @@ const Palette& palette(ThemeId t) { return t == ThemeId::Concrete ? kConcrete : 
 ThemeId currentTheme() { return gTheme.load() == 1 ? ThemeId::Concrete : ThemeId::Night; }
 void setCurrentTheme(ThemeId t) { gTheme = t == ThemeId::Concrete ? 1 : 0; }
 
+namespace {
+std::atomic<bool> gReducedMotion{false};
+}
+bool reducedMotion() { return gReducedMotion.load(); }
+void setReducedMotion(bool on) { gReducedMotion = on; }
 float uiScale() { return gUiScale.load(); }
 void setUiScale(float s) { gUiScale = std::clamp(s, 0.5f, 4.0f); }
 
@@ -83,6 +88,12 @@ UserSettings loadUserSettings() {
   s.width = juce::jlimit(880, 2200, static_cast<int>(v.getProperty("width", 1100)));
   s.height = juce::jlimit(560, 1440, static_cast<int>(v.getProperty("height", 720)));
   s.advanced = static_cast<bool>(v.getProperty("advanced", false));
+  s.uiScalePercent = juce::jlimit(90, 125, static_cast<int>(v.getProperty("uiScalePercent", 100)));
+  s.reducedMotion = static_cast<bool>(v.getProperty("reducedMotion", false));
+  s.audioDefaultsCustom = static_cast<bool>(v.getProperty("audioDefaultsCustom", false));
+  s.defaultLimiter = static_cast<bool>(v.getProperty("defaultLimiter", false));
+  s.defaultLevelMatch = static_cast<bool>(v.getProperty("defaultLevelMatch", false));
+  s.defaultCeilingDb = juce::jlimit(-6.0f, 0.0f, static_cast<float>(static_cast<double>(v.getProperty("defaultCeilingDb", -1.0))));
   return s;
 }
 
@@ -92,6 +103,12 @@ void saveUserSettings(const UserSettings& s) {
   o->setProperty("width", s.width);
   o->setProperty("height", s.height);
   o->setProperty("advanced", s.advanced);
+  o->setProperty("uiScalePercent", s.uiScalePercent);
+  o->setProperty("reducedMotion", s.reducedMotion);
+  o->setProperty("audioDefaultsCustom", s.audioDefaultsCustom);
+  o->setProperty("defaultLimiter", s.defaultLimiter);
+  o->setProperty("defaultLevelMatch", s.defaultLevelMatch);
+  o->setProperty("defaultCeilingDb", static_cast<double>(s.defaultCeilingDb));
   const auto file = settingsFile();
   file.getParentDirectory().createDirectory();
   file.replaceWithText(juce::JSON::toString(juce::var(o)));  // best effort; a read-only profile just loses the preference

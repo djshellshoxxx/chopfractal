@@ -15,6 +15,8 @@ class PatternPanel : public EditorPanelBase {
   void resized() override;
   // Starts / stops the per-frame playhead refresh (VBlank); no repaint source exists while the transport is stopped.
   void setPlaying(bool on);
+  void refreshPlayhead();  // called by the editor timer; repaints only in reduced-motion mode
+  bool playing() const { return playing_; }
 
  private:
   struct PlayheadLayer : juce::Component {
@@ -24,6 +26,7 @@ class PatternPanel : public EditorPanelBase {
   };
   PlayheadLayer playhead_;
   std::unique_ptr<juce::VBlankAttachment> vblank_;
+  bool playing_ = false;
 
   enum class DragMode { None, Move, Resize };
 

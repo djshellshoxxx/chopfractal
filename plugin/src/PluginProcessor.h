@@ -159,6 +159,7 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   static std::shared_ptr<const chopfractal::render::SourceData> decodeFile(const juce::File& file, juce::String& error);
 
  private:
+  void applyUserAudioDefaults();
   void timerCallback() override { pollAudioFlags(); }
   void syncAudioInfo();
   void restoreAudio(const std::string& path, chopfractal::SourceId id, std::uint64_t ticket);

@@ -1,5 +1,7 @@
 #pragma once
-// Settings drawer content: theme choice and a way back to the default window size. Registered as the "settings" drawer.
+// Settings drawer (docs/specs/gui-redesign.md 7.8): theme, interface scale, reduced motion, the output defaults a new
+// plugin instance starts with, window size and Copy diagnostics. Everything here is per user (ui.json), none of it is
+// saved in a project. Registered as the "settings" drawer.
 #include <functional>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -8,39 +10,38 @@
 
 class SettingsDrawer : public juce::Component {
  public:
-  SettingsDrawer() {
-    setComponentID("SettingsDrawer");
-    themeLabel_.setText("Theme", juce::dontSendNotification);
-    addAndMakeVisible(themeLabel_);
-    theme_.addItem("Night", 1);
-    theme_.addItem("Concrete", 2);
-    theme_.setTitle("Theme");
-    theme_.setTooltip("Night is the default, Concrete is the daylight theme");
-    theme_.onChange = [this] {
-      if (onTheme) onTheme(theme_.getSelectedId() == 2 ? cdl::ThemeId::Concrete : cdl::ThemeId::Night);
-    };
-    addAndMakeVisible(theme_);
-    reset_.setTitle("Reset window size");
-    reset_.setTooltip("Return the window to 1100 by 720");
-    reset_.onClick = [this] {
-      if (onResetSize) onResetSize();
-    };
-    addAndMakeVisible(reset_);
-  }
-  void showTheme(cdl::ThemeId t) { theme_.setSelectedId(t == cdl::ThemeId::Concrete ? 2 : 1, juce::dontSendNotification); }
-  void resized() override {
-    auto a = getLocalBounds().reduced(8);
-    auto row = a.removeFromTop(28);
-    themeLabel_.setBounds(row.removeFromLeft(70));
-    theme_.setBounds(row);
-    a.removeFromTop(12);
-    reset_.setBounds(a.removeFromTop(28));
-  }
+  SettingsDrawer();
+  void showTheme(cdl::ThemeId);
+  void showUserSettings(const cdl::UserSettings&);  // re-reads the choices without firing the callbacks
+  void resized() override;
+
+  // Read-only state and drivers for tests.
+  int scalePercent() const;
+  bool reducedMotion() const { return motion_.getToggleState(); }
+  juce::Button& copyButton() { return copy_; }
+
   std::function<void(cdl::ThemeId)> onTheme;
+  std::function<void(int percent)> onScale;
+  std::function<void(bool)> onReducedMotion;
   std::function<void()> onResetSize;
+  std::function<void()> onCopyDiagnostics;
 
  private:
-  juce::Label themeLabel_;
-  juce::ComboBox theme_;
-  juce::TextButton reset_{"Reset window size"};
+  struct Body : juce::Component {
+    SettingsDrawer& owner;
+    explicit Body(SettingsDrawer& o) : owner(o) {}
+    void paint(juce::Graphics& g) override;
+  };
+  void audioChanged();
+  void layoutBody(int width);
+
+  juce::Viewport viewport_;
+  Body body_{*this};
+  juce::Label themeLabel_{{}, "Theme"}, scaleLabel_{{}, "Interface scale"}, ceilingLabel_{{}, "Ceiling"};
+  juce::ComboBox theme_, scale_;
+  juce::ToggleButton motion_{"Reduced motion"}, limiter_{"Limiter on for new instances"}, match_{"Level match on for new instances"};
+  juce::Slider ceiling_;
+  juce::TextButton factory_{"Restore factory output"}, reset_{"Reset window size"}, copy_{"Copy diagnostics"};
+  juce::Rectangle<int> appearanceArea_, audioArea_, windowArea_, diagArea_;
+  bool syncing_ = false;
 };

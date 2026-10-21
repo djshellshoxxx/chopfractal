@@ -32,12 +32,14 @@ struct IsolatedUser {
     dragout::setFolderOverride(root.getChildFile("drag"));
     cdl::setSettingsFileOverride(root.getChildFile("ui.json"));
     cdl::setCurrentTheme(cdl::ThemeId::Night);
+    cdl::setReducedMotion(false);
   }
   ~IsolatedUser() {
     PresetManager::setFolderOverride(juce::File());
     dragout::setFolderOverride(juce::File());
     cdl::setSettingsFileOverride(juce::File());
     cdl::setCurrentTheme(cdl::ThemeId::Night);
+    cdl::setReducedMotion(false);
     root.deleteRecursively();
   }
 };
@@ -47,6 +49,7 @@ struct EditorRig {
   ChopFractalProcessor proc;
   std::unique_ptr<juce::AudioProcessorEditor> base;
   ChopFractalEditor* ed = nullptr;
+  juce::Component& settingsOwner() { return ed->settingsDrawer(); }
   explicit EditorRig(bool generate = true, int w = 1100, int h = 720) {
     prepare(proc);
     if (generate) makeSession(proc);

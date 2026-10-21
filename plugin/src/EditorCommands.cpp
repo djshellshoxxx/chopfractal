@@ -6,7 +6,10 @@
 #include <chopfractal/composition/preset_apply.hpp>
 #include <chopfractal/plugin_ui_adapter/export_view.hpp>
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
+#include <chopfractal/plugin_ui_adapter/settings_view.hpp>
 
+#include "BuildInfo.h"
+#include "CdlTheme.h"
 #include "DragOut.h"
 #include "PresetManager.h"
 
@@ -759,4 +762,53 @@ void EditorCommands::duplicateSelected() {
     if (!ev) return cf::makeError(cf::ErrorCode::NotFound, "that hit no longer exists");
     return cf::pattern::duplicateEvent(p, id, ev->start + std::max<cf::Ticks>(grid, ev->duration));
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// diagnostics
+// ---------------------------------------------------------------------------------------------
+
+juce::String EditorCommands::diagnosticsText() const {
+  cf::ui::DiagnosticsInput d;
+  d.version = cfbuild::kVersionNum;
+  switch (proc_.wrapperType) {
+    case juce::AudioProcessor::wrapperType_VST3: d.format = "VST3"; break;
+    case juce::AudioProcessor::wrapperType_Standalone: d.format = "Standalone"; break;
+    case juce::AudioProcessor::wrapperType_Undefined: d.format = "CLAP or other"; break;
+    default: d.format = "Plugin"; break;
+  }
+  d.host = juce::PluginHostType().getHostDescription();
+  if (d.host == "Unknown") d.host.clear();
+  d.sampleRate = proc_.getSampleRate();
+  d.blockSize = proc_.getBlockSize();
+  d.theme = cdl::currentTheme() == cdl::ThemeId::Concrete ? "Concrete" : "Night";
+  const auto u = cdl::loadUserSettings();
+  d.uiScalePercent = u.uiScalePercent;
+  d.reducedMotion = u.reducedMotion;
+  d.advanced = u.advanced;
+  d.windowWidth = u.width;
+  d.windowHeight = u.height;
+  const auto& v = model_.view();
+  d.hasSource = v.hasSource;
+  d.chops = static_cast<int>(v.chops.size());
+  d.events = static_cast<int>(v.pattern.rects.size());
+  d.bars = v.barCount;
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    if (const auto* m = s.chopMap()) {
+      d.sourceName = m->info().name;
+      d.sourceSeconds = m->info().sampleRate > 0 ? static_cast<double>(m->info().frames) / m->info().sampleRate : 0.0;
+    }
+  });
+  d.bpm = model_.activeBpm();
+  d.localTempo = model_.usedFallbackTempo();
+  const auto pv = proc_.currentParams();
+  d.limiterOn = pv.get(cf::host::kLimiterEnable) >= 0.5;
+  d.levelMatchOn = pv.get(cf::host::kLevelMatch) >= 0.5;
+  d.limiterCeilingDb = pv.get(cf::host::kLimiterCeilingDb);
+  return juce::String(cf::ui::buildDiagnosticsText(d));
+}
+
+void EditorCommands::copyDiagnostics() {
+  juce::SystemClipboard::copyTextToClipboard(diagnosticsText());
+  model_.setStatus("Diagnostics copied to the clipboard.");
 }
