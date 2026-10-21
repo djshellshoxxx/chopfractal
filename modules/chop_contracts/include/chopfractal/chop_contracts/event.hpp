@@ -82,6 +82,9 @@ struct FlatEvent {
   std::uint32_t fadeInFrames = 0;
   std::uint32_t fadeOutFrames = 0;
   std::uint8_t depth = 0;
+  // Renderer hints filled by the composition root for engine v2 patterns; zero/false = legacy behaviour.
+  std::uint8_t chokeGroup = 0;    // 0 none, 1 kick, 2 snare, 3 closed hat (chokes open hats), 4 open hat
+  bool smoothFades = false;       // smoothstep attack/release instead of linear
 };
 using FlatEventList = std::vector<FlatEvent>;
 

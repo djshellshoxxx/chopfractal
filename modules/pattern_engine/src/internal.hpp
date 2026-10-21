@@ -42,4 +42,9 @@ inline void assignDurations(Pattern& p, int bar, const std::unordered_set<std::u
   }
 }
 
+// Engine v2 (generate_v2.cpp).
+Result<Pattern> generateBreak(const ChopSnapshot& chops, const Settings& settings, const ICandidatePolicy* policy, GenerationReport* report);
+Result<Pattern> mutateBreak(const Pattern& pattern, const ChopSnapshot& chops, const MutateOptions& options, const ICandidatePolicy* policy,
+                            GenerationReport* report);
+
 }  // namespace chopfractal::pattern::detail

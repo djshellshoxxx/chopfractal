@@ -7,6 +7,8 @@ namespace {
 constexpr std::size_t kMinBeatBytes = 8 + 2 + 4;
 constexpr std::size_t kMinBarBytes = 8 + 2 + 4 + 4;
 constexpr std::size_t kMinEventBytes = 68;
+constexpr std::size_t kFxBlockBytes = 9;
+constexpr std::size_t kBreakBlockBytes = 1 + 1 + 1 + 1 + 1 + 6 * 8 + 8;  // version, profile, backbeat, anchors, flags, six doubles, tempo hint
 }  // namespace
 
 std::vector<std::uint8_t> serialize(const Pattern& p) {
@@ -53,9 +55,27 @@ std::vector<std::uint8_t> serialize(const Pattern& p) {
   }
   // Optional trailing effect settings: absent unless an effect is enabled, so effect-free patterns
   // keep their exact earlier encoding and old files load unchanged.
-  if (s.allowFilter || s.allowGlide || s.allowCrunch || s.fxIntensity != 0.5) {  // a changed intensity is kept even while the effects are off
+  const bool v2 = p.engineVersion >= kEngineVersionBreak;
+  if (v2 || s.allowFilter || s.allowGlide || s.allowCrunch || s.fxIntensity != 0.5) {  // a changed intensity is kept even while the effects are off
     w.u8(static_cast<std::uint8_t>((s.allowFilter ? 1 : 0) | (s.allowGlide ? 2 : 0) | (s.allowCrunch ? 4 : 0)));
     w.f64(s.fxIntensity);
+  }
+  // Engine v2 settings follow the effect block (always written for v2 so the two blocks cannot be confused).
+  // Legacy patterns never carry it, which keeps their bytes and hashes exactly as before.
+  if (v2) {
+    const breakeng::Options& o = s.brk;
+    w.u8(1);  // block version
+    w.u8(static_cast<std::uint8_t>(o.profile));
+    w.u8(static_cast<std::uint8_t>(o.backbeat));
+    w.u8(static_cast<std::uint8_t>(o.anchors));
+    w.u8(static_cast<std::uint8_t>(o.kickSnareLayer ? 1 : 0));
+    w.f64(o.groove);
+    w.f64(o.humanize);
+    w.f64(o.fill);
+    w.f64(o.glitch);
+    w.f64(o.chaos);
+    w.f64(o.phraseStrictness);
+    w.f64(o.tempoHint);
   }
   return out;
 }
@@ -65,6 +85,7 @@ Result<Pattern> deserialize(const std::uint8_t* data, std::size_t size) {
   Pattern p;
   Settings& s = p.settings;
   p.engineVersion = r.u32();
+  s.engineVersion = p.engineVersion;
   s.bars = r.i32();
   s.timeSignature.numerator = r.i32();
   s.timeSignature.denominator = r.i32();
@@ -116,7 +137,10 @@ Result<Pattern> deserialize(const std::uint8_t* data, std::size_t size) {
     }
     p.bars.push_back(std::move(b));
   }
-  if (r.ok() && r.remaining() == 9) {
+  const bool v2 = p.engineVersion >= kEngineVersionBreak;
+  bool fxRead = false;
+  if (r.ok() && (v2 ? r.remaining() == kFxBlockBytes + kBreakBlockBytes : r.remaining() == kFxBlockBytes)) {
+    fxRead = true;
     const std::uint8_t f = r.u8();
     if (f > 7) return makeError(ErrorCode::Corrupt, "effect settings are invalid");
     s.allowFilter = (f & 1) != 0;
@@ -124,6 +148,25 @@ Result<Pattern> deserialize(const std::uint8_t* data, std::size_t size) {
     s.allowCrunch = (f & 4) != 0;
     s.fxIntensity = r.f64();
     if (!(s.fxIntensity >= 0.0 && s.fxIntensity <= 1.0)) return makeError(ErrorCode::Corrupt, "effect intensity is invalid");
+  }
+  if (v2) {
+    if (!fxRead || r.remaining() != kBreakBlockBytes) return makeError(ErrorCode::Corrupt, "engine v2 settings are missing");
+    breakeng::Options& o = s.brk;
+    if (r.u8() != 1) return makeError(ErrorCode::UnsupportedVersion, "engine v2 settings were written by a newer build");
+    const std::uint8_t prof = r.u8(), back = r.u8(), anch = r.u8(), flags = r.u8();
+    if (prof >= static_cast<std::uint8_t>(breakeng::kProfileCount) || back > 1 || anch > 2 || flags > 1) return makeError(ErrorCode::Corrupt, "engine v2 settings are invalid");
+    o.profile = static_cast<breakeng::Profile>(prof);
+    o.backbeat = static_cast<breakeng::Backbeat>(back);
+    o.anchors = static_cast<breakeng::AnchorMode>(anch);
+    o.kickSnareLayer = flags != 0;
+    o.groove = r.f64();
+    o.humanize = r.f64();
+    o.fill = r.f64();
+    o.glitch = r.f64();
+    o.chaos = r.f64();
+    o.phraseStrictness = r.f64();
+    o.tempoHint = r.f64();
+    if (!r.ok() || !breakeng::valid(o)) return makeError(ErrorCode::Corrupt, "engine v2 settings are invalid");
   }
   if (!r.ok() || r.remaining() != 0) return makeError(ErrorCode::Corrupt, "pattern state has trailing or missing bytes");
   Status v = validate(p);
