@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 
 using editor_theme::laneColour;
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_) {
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_), orbit_(model_, commands_) {
   model_.addListener(this);
   setSize(940, 912);
   setResizable(false, false);
@@ -39,6 +39,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   stop_.onClick = [this] { commands_.stop(); };
   followHost_.onClick = [this] { commands_.followHost(); };
   addAndMakeVisible(status_);
+  addAndMakeVisible(orbit_);
   load_.onClick = [this] { commands_.chooseFile(); };
   detect_.onClick = [this] { commands_.detectChops(static_cast<DetectChoice>(detectMode_.getSelectedId())); };
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
@@ -214,7 +215,7 @@ juce::String ChopFractalEditor::getTooltip() {
     return "Pattern grid: each lane is a chop. Click a hit or drag a rectangle to select sections. Zoom In subdivides selected hits. M toggles selected hits; Delete removes them. Enable Move / resize hits to edit by dragging.";
   if (historyArea_.contains(point))
     return "Variation family tree: click a node to recall it, at the next loop boundary during playback. Right-click for favorite, rename, compare and delete actions. Each Generate, Mutate, Zoom and completed edit adds a branch.";
-  if (orbitArea_.contains(point))
+  if (orbit_.getBounds().contains(point))
     return "Orbit view: concentric rings show chop lanes and their rhythmic positions. The moving line is the playhead. Click a hit to select it in the pattern.";
   return "ChopFractal: load or drop a loop, Detect Chops, Generate and Play. Hover controls for instructions.";
 }
@@ -314,7 +315,7 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   status_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   auto bottom = area.removeFromTop(area.getHeight() - 2);
-  orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
+  orbit_.setBounds(bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2)));
   historyArea_ = bottom.withTrimmedRight(6);
 }
 
@@ -338,7 +339,7 @@ void ChopFractalEditor::refresh(bool force) {
   const bool playing = proc_.playheadQuarters() >= 0.0;
   if (force || rebuilt) repaint();
   else if (playing || lastPlaying_) {  // only the playhead views change while the transport runs
-    repaint(orbitArea_);
+    orbit_.repaint();
     repaint(patternArea_);
   }
   lastPlaying_ = playing;
@@ -499,50 +500,6 @@ void ChopFractalEditor::paint(juce::Graphics& g) {
   }
   g.restoreState();
 
-  // Orbit View: one ring per chop (ring 1 outermost, numbered), the playhead sweeping clockwise from 12 o'clock.
-  g.setColour(editor_theme::canvas());
-  g.fillRect(orbitArea_);
-  if (!model_.view().orbit.arcs.empty()) {
-    const auto c = orbitArea_.getCentre().toFloat();
-    const double R = std::min(orbitArea_.getWidth(), orbitArea_.getHeight()) / 2.0 - 4.0;
-    const double ph = proc_.playheadQuarters();
-    const double posTicks = ph >= 0.0 ? ph * cf::kTicksPerQuarter : -1.0;
-    auto pt = [&](double r, double a) { return juce::Point<float>(c.x + static_cast<float>(r * std::sin(a)), c.y - static_cast<float>(r * std::cos(a))); };
-    g.setColour(juce::Colours::white.withAlpha(0.18f));
-    for (double a : model_.view().orbit.beatAngles) g.drawLine(juce::Line<float>(pt(R * 0.25, a), pt(R, a)), 0.5f);
-    g.setColour(juce::Colours::white.withAlpha(0.45f));
-    for (double a : model_.view().orbit.barAngles) g.drawLine(juce::Line<float>(pt(R * 0.25, a), pt(R + 3.0, a)), 1.2f);
-    for (const auto& a : model_.view().orbit.arcs) {
-      const auto rr = cf::ui::arcRadii(model_.view().orbit, a, R);
-      const double pulse = posTicks >= 0.0 ? cf::ui::hitPulse(a, posTicks, model_.view().orbit.lengthTicks) : 0.0;
-      juce::Path path;
-      path.addCentredArc(c.x, c.y, static_cast<float>((rr.inner + rr.outer) / 2.0), static_cast<float>((rr.inner + rr.outer) / 2.0), 0.0f,
-                         static_cast<float>(a.startAngle), static_cast<float>(a.startAngle + a.sweep), true);
-      g.setColour(laneColour(a.ring).withAlpha(a.childActive ? 0.35f : static_cast<float>(0.45 + 0.4 * std::min(1.0, static_cast<double>(a.level))) ).brighter(static_cast<float>(pulse)));
-      g.strokePath(path, juce::PathStrokeType(static_cast<float>(std::max(2.0, rr.outer - rr.inner)), juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
-      if (a.locked) {
-        g.setColour(editor_theme::accentRed());
-        g.strokePath(path, juce::PathStrokeType(1.0f));
-      }
-      if (a.id == model_.selected()) {
-        g.setColour(juce::Colours::white);
-        g.strokePath(path, juce::PathStrokeType(2.0f));
-      }
-    }
-    g.setColour(juce::Colours::white.withAlpha(0.9f));
-    g.setFont(10.0f);
-    const double ringW = (R - 0.25 * R) / std::max(1, model_.view().orbit.rings);
-    for (int ring = 0; ring < model_.view().orbit.rings; ++ring) g.drawText(juce::String(ring + 1), static_cast<int>(c.x) - 8, static_cast<int>(c.y - R + ring * ringW), 16, 10, juce::Justification::centred);
-    if (posTicks >= 0.0) {
-      const double a = cf::ui::playheadAngle(ph, model_.view().orbit.lengthTicks);
-      g.setColour(editor_theme::accentGreen());
-      g.drawLine(juce::Line<float>(pt(0.0, a), pt(R + 3.0, a)), 1.5f);
-    }
-  } else {
-    g.setColour(juce::Colours::grey);
-    g.drawText("Orbit view", orbitArea_, juce::Justification::centred);
-  }
-
   // Ghost outline of the hit being dragged (the edit is applied on release).
   if (dragMode_ != DragMode::None)
     for (const auto& r : model_.view().pattern.rects)
@@ -621,12 +578,6 @@ void ChopFractalEditor::mouseDown(const juce::MouseEvent& e) {
         return cf::pattern::addEvent(p, pos.bar, chops.chops[static_cast<std::size_t>(lane)].id, pos.startInBar, dur, chops);
       });
     }
-    repaint();
-  } else if (orbitArea_.contains(pt)) {
-    const double R = std::min(orbitArea_.getWidth(), orbitArea_.getHeight()) / 2.0 - 4.0;
-    const auto c = orbitArea_.getCentre();
-    grabKeyboardFocus();
-    model_.select(cf::ui::hitTest(model_.view().orbit, static_cast<double>(pt.x - c.x), static_cast<double>(pt.y - c.y), R));
     repaint();
   } else if (historyArea_.contains(pt)) {
     for (const auto& n : model_.view().tree) {

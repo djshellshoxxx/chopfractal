@@ -12,6 +12,7 @@
 #include "EditorCommands.h"
 #include "EditorModel.h"
 #include "PluginProcessor.h"
+#include "OrbitPanel.h"
 #include "PresetManager.h"
 #include "StatusBar.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
@@ -78,6 +79,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   EditorModel model_;
   EditorCommands commands_;
   StatusBar status_;
+  OrbitPanel orbit_;
   juce::ToggleButton editMode_{"Move / resize hits"};
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
@@ -126,7 +128,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
 
-  juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_;
+  juce::Rectangle<int> waveArea_, patternArea_, historyArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
 };
