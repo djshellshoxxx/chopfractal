@@ -5,6 +5,7 @@
 // pattern, chop or history logic of its own.
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "CdlLookAndFeel.h"
 #include "ControlsPanel.h"
 #include "EditorCommands.h"
 #include "EditorModel.h"
@@ -37,6 +38,9 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void deleteSelectedPreset() { features_.deleteSelectedPreset(); }
   void reloadPresets() { features_.reloadPresets(); }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
+  // Theme (Night / Concrete): applies to the whole editor tree and is remembered per user.
+  void setTheme(cdl::ThemeId);
+  cdl::ThemeId theme() const { return cdl::currentTheme(); }
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
   juce::Rectangle<int> waveformBounds() const { return wave_.getBounds(); }
@@ -51,6 +55,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void syncHelpTree();
 
   // Declaration order is destruction order reversed: the panels (and the attachments they own) go before the model.
+  cdl::CdlLookAndFeel lnf_;  // first member: outlives every component that uses it
   EditorModel model_;
   EditorCommands commands_;
   juce::TooltipWindow tooltip_{this};

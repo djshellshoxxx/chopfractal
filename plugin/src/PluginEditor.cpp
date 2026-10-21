@@ -20,6 +20,12 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       history_(model_, commands_),
       orbit_(model_, commands_),
       status_(model_, commands_) {
+  {
+    const auto saved = cdl::loadUserSettings();
+    cdl::setCurrentTheme(saved.theme);
+    lnf_.applyTheme();
+  }
+  setLookAndFeel(&lnf_);
   for (juce::Component* panel : std::initializer_list<juce::Component*>{&controls_, &features_, &wave_, &pattern_, &history_, &orbit_, &status_}) addAndMakeVisible(*panel);
   setWantsKeyboardFocus(true);
   setSize(940, 912);
@@ -29,7 +35,20 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   startTimerHz(10);
 }
 
-ChopFractalEditor::~ChopFractalEditor() { stopTimer(); }
+ChopFractalEditor::~ChopFractalEditor() {
+  stopTimer();
+  setLookAndFeel(nullptr);
+}
+
+void ChopFractalEditor::setTheme(cdl::ThemeId t) {
+  cdl::setCurrentTheme(t);
+  auto settings = cdl::loadUserSettings();
+  settings.theme = t;
+  cdl::saveUserSettings(settings);
+  lnf_.applyTheme();
+  sendLookAndFeelChange();
+  repaint();
+}
 
 void ChopFractalEditor::syncHelpTree() {
   if (auto* root = getTopLevelComponent(); root != tooltipRoot_) {
@@ -69,9 +88,9 @@ bool ChopFractalEditor::isInterestedInFileDrag(const juce::StringArray& files) {
 void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) { commands_.handleDroppedFiles(files); }
 
 void ChopFractalEditor::paint(juce::Graphics& g) {
-  g.fillAll(editor_theme::background());
-  g.setColour(juce::Colours::white.withAlpha(0.5f));
-  g.setFont(10.0f);
+  cdl::paintWindowFrame(g, getLocalBounds());
+  g.setColour(cdl::pal().inkMuted);
+  g.setFont(cdl::font(cdl::FontRole::MonoXs));
   g.drawText(juce::String("ChopFractal ") + cfbuild::kVersionFull, getLocalBounds().removeFromTop(11).withTrimmedRight(10), juce::Justification::centredRight);
 }
 

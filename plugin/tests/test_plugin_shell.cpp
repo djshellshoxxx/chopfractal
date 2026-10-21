@@ -11,6 +11,7 @@
 #include <string>
 
 #include "BuildInfo.h"
+#include "CdlTheme.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
@@ -778,6 +779,8 @@ CHOP_TEST(version_stamp_matches_VERSION_file) {
 }
 
 int main() {
+  // The editor remembers theme and size per user; keep the tests away from the real profile.
+  cdl::setSettingsFileOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_ui.json"));
   const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
