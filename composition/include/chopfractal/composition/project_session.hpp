@@ -36,7 +36,13 @@
 
 namespace chopfractal::composition {
 
-constexpr std::uint32_t kSessionSchemaVersion = 1;
+// Project session schema (module "composition"). LAZY VERSIONING: saveState writes schema 2 only when something
+// new is persisted (non-default ProjectExtras, an occupied A/B slot, or a feature section); otherwise it writes
+// schema 1 and the exact bytes of the pre-v2 build, so a project that uses none of it still opens in older builds.
+// A v1 payload is a valid v2 payload with no extras, which is why the registered migration is the identity.
+constexpr std::uint32_t kSessionSchemaV1 = 1;
+constexpr std::uint32_t kSessionSchemaVersion = 2;
+constexpr std::uint32_t kSessionAudioSchema = 1;  // module "source_audio" (embedded audio)
 // Default cap on audio embedded in project state: 128 MiB (about 12 minutes of 44.1 kHz stereo float).
 // Decided generous; a session can lower or raise it with setEmbeddedSourceCap(). The codec ceiling
 // (kCodecCeilingBytes) bounds what can ever be saved or loaded.
@@ -84,6 +90,74 @@ struct KitOptions {
   int loops = 1;                // 1..16 repeats of the pattern in pattern.mid
   bool overwrite = false;
   std::string name = "chopfractal";
+};
+
+// ---- project extras (state v2, docs/specs/roadmap/F01-state-v2-and-persistence.md section 4) ----
+// UI and generation choices that used to be lost on save. They live outside the history (no undo step).
+struct ExportUiSettings {
+  int formatIndex = 1;  // 16-bit, 24-bit, 32-bit float
+  int rateIndex = 1;    // 44.1, 48, 88.2, 96 kHz
+  int loopsIndex = 1;   // {1, 2, 4, 8, 16}
+  friend bool operator==(const ExportUiSettings& a, const ExportUiSettings& b) {
+    return a.formatIndex == b.formatIndex && a.rateIndex == b.rateIndex && a.loopsIndex == b.loopsIndex;
+  }
+};
+struct UiPrefs {
+  int viewMode = 1;  // 0 Simple, 1 Advanced
+  int scalePercent = 100;
+  int width = 940, height = 912;
+  bool editHits = false;  // the "Move / resize hits" toggle
+  int markerSnap = 1;     // 0 Off, 1 Transient, 2 ZeroCrossing
+  bool gridSnap = true;
+  int snapDivision = 0;   // 0 = the pattern grid, else {1, 2, 4, 8, 16, 32}
+  bool favoritesOnly = false;
+  std::string search;     // at most 32 bytes
+  friend bool operator==(const UiPrefs& a, const UiPrefs& b) {
+    return a.viewMode == b.viewMode && a.scalePercent == b.scalePercent && a.width == b.width && a.height == b.height && a.editHits == b.editHits &&
+           a.markerSnap == b.markerSnap && a.gridSnap == b.gridSnap && a.snapDivision == b.snapDivision && a.favoritesOnly == b.favoritesOnly && a.search == b.search;
+  }
+};
+struct ProjectExtras {
+  std::uint64_t seed = 1;  // 0..999999999999
+  std::string motif = "x.xx";  // 1..8 chars of x a .
+  int fractalDepth = 2;    // 1..3
+  int roleIndex = 0;       // into roles::builtinRoles()
+  int detectMode = 0;      // 0..3 (= the editor's DetectChoice - 1)
+  int gridDivision = 16;   // generation grid {1, 2, 4, 8, 16, 32}
+  bool gridTriplet = false;
+  double fractalMutation = -1.0;     // -1: derive from Variation, else 0..1
+  double fractalAccentDecay = 0.85;  // (0, 1]
+  ExportUiSettings exportUi;
+  UiPrefs ui;
+  friend bool operator==(const ProjectExtras& a, const ProjectExtras& b) {
+    return a.seed == b.seed && a.motif == b.motif && a.fractalDepth == b.fractalDepth && a.roleIndex == b.roleIndex && a.detectMode == b.detectMode &&
+           a.gridDivision == b.gridDivision && a.gridTriplet == b.gridTriplet && a.fractalMutation == b.fractalMutation &&
+           a.fractalAccentDecay == b.fractalAccentDecay && a.exportUi == b.exportUi && a.ui == b.ui;
+  }
+  friend bool operator!=(const ProjectExtras& a, const ProjectExtras& b) { return !(a == b); }
+};
+// OutOfRange / InvalidArgument per field; the message names the field.
+Status validate(const ProjectExtras&);
+
+// ---- feature sections (the "StateSection" API; tag registry in the F01 spec section 4.4) ----
+// A feature that needs project state owns one tag in 9..31 and a codec for `bytes`; the session stores, saves and
+// restores them opaquely. Unknown tags of 9 and above are kept and written back unchanged.
+struct StateSection {
+  std::uint8_t tag = 0;
+  std::uint16_t schema = 1;
+  std::vector<std::uint8_t> bytes;  // excludes the schema
+};
+// Runs after a project is loaded, for a registered tag that is present. A failure drops only that section and queues
+// the warning "Some <feature> settings could not be restored.".
+using SectionDecoder = std::function<Status(const StateSection&)>;
+constexpr std::uint8_t kFirstFeatureTag = 9, kLastFeatureTag = 31;
+constexpr std::uint8_t kTagFractalTune = 13;  // owned by F01 itself (written from ProjectExtras), refused by setSection
+std::size_t sectionByteCap(std::uint8_t tag);  // the per-tag cap of the registry
+constexpr std::size_t kMaxExtrasBlocks = 32;
+constexpr std::size_t kMaxExtrasBytes = 40u * 1024u * 1024u;
+
+struct LoadOptions {
+  bool deferSourceResolve = false;  // true: never call the resolver and queue no "not found" notice (the caller restores the audio itself)
 };
 
 // Given the saved source description, returns decoded audio, or nullptr when it cannot be found.
@@ -188,13 +262,29 @@ class ProjectSession {
   Result<ExportReport> exportKit(const std::string& directory, const KitOptions& options) const;
 
   // ---- project state ----
+  const ProjectExtras& extras() const { return extras_; }
+  // Validates, stores. No history node, no undo step, no republish.
+  Status setExtras(const ProjectExtras& e);
+  bool hasSnapshot(std::size_t slot) const { return patterns_.hasSnapshot(slot); }
+  // Feature sections (tags 9..31, F13's tag is F01-owned). `bytes.empty()` removes the section; larger than the
+  // per-tag cap is OutOfRange. Empty sections are never written, so an unused feature leaves the bytes unchanged.
+  const StateSection* section(std::uint8_t tag) const;
+  Status setSection(StateSection s);
+  void registerSectionDecoder(std::uint8_t tag, std::string feature, SectionDecoder decoder);
+  // True when saveState would write schema 2 (see the constants above). The plugin wrapper follows it.
+  bool stateUsesSchemaV2() const;
+  const codec::MigrationRegistry& migrations() const { return migrations_; }
   std::size_t embeddedSourceBytes() const;  // estimate shown before the user opts in to embedding
   std::size_t embeddedSourceCap() const { return embeddedCap_; }
   bool wasEmbedded() const { return loadedEmbedded_; }  // the last loaded project carried its audio
   Status setEmbeddedSourceCap(std::size_t bytes);  // 1 .. kCodecCeilingBytes - 64 MiB headroom
   Result<std::vector<std::uint8_t>> saveState(bool embedSource) const;
   // All-or-nothing: on any error the session is left exactly as it was.
-  Status loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver);
+  Status loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) { return loadState(data, size, resolver, LoadOptions{}); }
+  Status loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver, const LoadOptions& options);
+  // Queues the two warnings loadState uses when the audio of a reference-only project cannot be found (wrongAudio
+  // false) or is a different file (true). Used by callers that restored the audio themselves after a deferred load.
+  void reportSourceUnavailable(bool wrongAudio);
   void reset();
 
   std::vector<Notice> takeNotices();
@@ -203,6 +293,7 @@ class ProjectSession {
  private:
   struct Target;
   void notice(Notice::Level level, std::string text);
+  std::map<std::uint8_t, std::vector<std::uint8_t>> extrasBlocks() const;  // the blocks saveState would write (empty = schema 1)
   void noteReport(const pattern::GenerationReport& report);
   std::unique_ptr<roles::GrammarPolicy> makePolicy() const;
   Status finalize(Result<pattern::Pattern> result, const char* historyLabel, const pattern::GenerationReport* report = nullptr);
@@ -229,6 +320,13 @@ class ProjectSession {
   render::Mailbox<render::Playback>* mailbox_ = nullptr;
   std::shared_ptr<const render::Playback> playback_;
   codec::MigrationRegistry migrations_;
+  ProjectExtras extras_;
+  std::map<std::uint8_t, StateSection> sections_;  // tags 9..31 (and unknown tags >= 32), saved in tag order
+  struct SectionDecoderEntry {
+    std::string feature;
+    SectionDecoder decode;
+  };
+  std::map<std::uint8_t, SectionDecoderEntry> sectionDecoders_;
   std::size_t embeddedCap_ = kMaxEmbeddedSourceBytes;
   evolve::Controller evolve_;
   bool loadedEmbedded_ = false;

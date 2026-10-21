@@ -1,6 +1,8 @@
 #include <chopfractal/chop_contracts/bytes.hpp>
 #include <chopfractal/composition/project_session.hpp>
 
+#include "state_wire.hpp"
+
 #include <algorithm>
 #include <cstring>
 
@@ -99,6 +101,13 @@ std::vector<std::uint8_t> barBytes(const pattern::Pattern& p, std::size_t bar) {
   return out;
 }
 
+std::string wrongAudioText(const source::SourceInfo& info) {
+  return "The file for \"" + info.name + "\" is not the audio this project was saved with. Markers and pattern are kept; relink the original file.";
+}
+std::string notFoundText(const source::SourceInfo& info) {
+  return "The source \"" + info.name + "\" was not found" + (info.path.empty() ? "" : " at " + info.path) + ". Markers and pattern are kept; relink the file to hear playback.";
+}
+
 }  // namespace
 
 struct ProjectSession::Target {
@@ -109,7 +118,11 @@ struct ProjectSession::Target {
   bool lockedPath = false;
 };
 
-ProjectSession::ProjectSession() : history_(history::Config{}) {}
+ProjectSession::ProjectSession() : history_(history::Config{}) {
+  // The only registered step so far: a v1 payload is a valid v2 payload with no extras section. Policy for every
+  // future bump: raise the module's schema constant, register one step per version, add a fixture test.
+  migrations_.add(kModSession, kSessionSchemaV1, [](const std::vector<std::uint8_t>& in) -> codec::Result<std::vector<std::uint8_t>> { return in; });
+}
 
 void ProjectSession::notice(Notice::Level level, std::string text) { notices_.push_back({level, std::move(text)}); }
 
@@ -645,7 +658,7 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     w.i32(sourceData_->sampleRate);
     w.i64(sourceData_->frames);
     for (float f : sourceData_->samples) w.f32(f);
-    st.modules[kModAudio] = {1, std::move(payload)};
+    st.modules[kModAudio] = {kSessionAudioSchema, std::move(payload)};
   }
   std::vector<std::uint8_t> meta;
   bytes::Writer mw(meta);
@@ -659,14 +672,26 @@ Result<std::vector<std::uint8_t>> ProjectSession::saveState(bool embedSource) co
     mw.f64(es.rampCeiling);
     mw.u64(es.startSeed);
   }
-  st.modules[kModSession] = {kSessionSchemaVersion, std::move(meta)};
+  std::uint32_t sessionSchema = kSessionSchemaV1;
+  {
+    const statewire::Blocks blocks = extrasBlocks();
+    if (!blocks.empty()) {  // lazy versioning: only a project that uses something new becomes schema 2
+      std::size_t total = 0;
+      for (const auto& kv : blocks) total += kv.second.size() + 5;
+      if (blocks.size() > kMaxExtrasBlocks || total > kMaxExtrasBytes)
+        return makeError(ErrorCode::LimitExceeded, "the project's extra settings are too large to save", static_cast<std::int64_t>(kMaxExtrasBytes));
+      statewire::write(blocks, meta);
+      sessionSchema = kSessionSchemaVersion;
+    }
+  }
+  st.modules[kModSession] = {sessionSchema, std::move(meta)};
   for (const auto& kv : foreignModules_) st.modules.emplace(kv.first, kv.second);  // never overwrites a module this build wrote
   auto enc = codec::encode(st);
   if (!enc.ok()) return convert(enc.error());
   return enc.value();
 }
 
-Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver) {
+Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, const SourceResolver& resolver, const LoadOptions& options) {
   auto dec = codec::decode(data, size);
   if (!dec.ok()) return convert(dec.error());
   codec::ProjectState st = std::move(dec.value());
@@ -690,7 +715,7 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   bool hasSrc = false, hasPat = false, hasRoles = false, hasHist = false, hasAudio = false, hasSession = false;
   for (Status s : {take(kModSource, source::kSchemaVersion, srcBytes, hasSrc), take(kModPattern, pattern::kSchemaVersion, patBytes, hasPat),
                    take(kModRoles, roles::kSchemaVersion, roleBytes, hasRoles), take(kModHistory, history::kSchemaVersion, histBytes, hasHist),
-                   take(kModAudio, 1, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession)})
+                   take(kModAudio, kSessionAudioSchema, audioBytes, hasAudio), take(kModSession, kSessionSchemaVersion, sessionBytes, hasSession)})
     if (!s.ok()) return s;
 
   // ---- build everything in temporaries; the live session is untouched until all of it validates ----
@@ -721,17 +746,16 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
       if (!r.ok()) return makeError(ErrorCode::Corrupt, "the embedded audio contains invalid samples");
       if (idOf(*d) != info.id) return makeError(ErrorCode::Corrupt, "the embedded audio does not match the saved source");
       newData = std::move(d);
-    } else if (resolver) {
+    } else if (resolver && !options.deferSourceResolve) {
       auto found = resolver(info);
       if (found && validSource(found) && idOf(*found) == info.id && found->frames == info.frames) {
         newData = std::move(found);
       } else if (found) {
-        newNotices.push_back({Notice::Level::Warning, "The file for \"" + info.name + "\" is not the audio this project was saved with. Markers and pattern are kept; relink the original file."});
+        newNotices.push_back({Notice::Level::Warning, wrongAudioText(info)});
       }
     }
-    if (!newData && newNotices.empty())
-      newNotices.push_back({Notice::Level::Warning, "The source \"" + info.name + "\" was not found" + (info.path.empty() ? "" : " at " + info.path) +
-                                                        ". Markers and pattern are kept; relink the file to hear playback."});
+    if (!newData && newNotices.empty() && !options.deferSourceResolve)
+      newNotices.push_back({Notice::Level::Warning, notFoundText(info)});
   }
 
   roles::State newRoles;
@@ -776,6 +800,9 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
 
   std::optional<evolve::Settings> newEvolve;
   bool loadedFlag = false;
+  ProjectExtras newExtras;
+  std::map<std::uint8_t, StateSection> newSections;
+  std::array<std::vector<std::uint8_t>, 2> slotBytes;
   if (hasSession && sessionBytes.size() >= 2 + 1) {
     bytes::Reader sr(sessionBytes.data(), sessionBytes.size());
     loadedFlag = sr.boolean();  // embedded flag
@@ -789,6 +816,61 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
       es.enabled = false;  // a project never starts changing by itself
       if (sr.ok() && evolve::valid(es)) newEvolve = es;
     }
+    // The extras section (schema 2) follows the v1 bytes. A malformed one never fails the load: defaults and one warning.
+    if (sr.ok() && sr.remaining() > 0) {
+      const std::uint8_t* rest = sessionBytes.data() + (sessionBytes.size() - sr.remaining());
+      bool good = false;
+      auto blocks = statewire::parse(rest, sr.remaining());
+      if (blocks.ok()) {
+        auto ex = statewire::decodeExtras(blocks.value());
+        good = ex.ok();
+        if (good) newExtras = ex.value();
+        if (good) {
+          auto ab = blocks.value().find(statewire::kTagAB);
+          if (ab != blocks.value().end()) {
+            auto slots = statewire::decodeAB(ab->second);
+            good = slots.ok();
+            if (good) slotBytes = std::move(slots.value());
+          }
+        }
+        for (auto it = blocks.value().begin(); good && it != blocks.value().end(); ++it) {
+          if (!statewire::isFeatureTag(it->first)) continue;
+          if (it->second.size() < 2) {
+            good = false;
+            break;
+          }
+          StateSection sec;
+          sec.tag = it->first;
+          sec.schema = static_cast<std::uint16_t>(it->second[0] | (it->second[1] << 8));
+          sec.bytes.assign(it->second.begin() + 2, it->second.end());
+          newSections.emplace(sec.tag, std::move(sec));
+        }
+      }
+      if (!good) {
+        newExtras = ProjectExtras{};
+        newSections.clear();
+        slotBytes = {};
+        newNotices.push_back({Notice::Level::Warning, "Some editor settings could not be restored."});
+      }
+    }
+  }
+
+  // A/B snapshots must fit the loaded chops; one that does not is dropped on its own.
+  std::array<std::shared_ptr<const pattern::Pattern>, 2> newSlots;
+  for (std::size_t i = 0; i < 2; ++i) {
+    if (slotBytes[i].empty()) continue;
+    bool kept = false;
+    if (newChops && newPattern) {
+      auto p = pattern::deserialize(slotBytes[i].data(), slotBytes[i].size());
+      if (p.ok()) {
+        pattern::Pattern clean = pattern::sanitize(p.value(), *newChops);
+        if (pattern::flatten(clean, *newChops).ok()) {
+          newSlots[i] = std::make_shared<const pattern::Pattern>(std::move(clean));
+          kept = true;
+        }
+      }
+    }
+    if (!kept) newNotices.push_back({Notice::Level::Warning, std::string("Snapshot ") + (i == 0 ? "A" : "B") + " could not be restored and was dropped."});
   }
 
   // ---- commit ----
@@ -808,15 +890,35 @@ Status ProjectSession::loadState(const std::uint8_t* data, std::size_t size, con
   pendingActivation_ = history::kNoNode;
   patterns_.reset();
   if (newPattern) patterns_.restore(std::move(*newPattern));
+  patterns_.restoreSlots(std::move(newSlots));  // after restore(), which clears the slots
+  extras_ = std::move(newExtras);
+  sections_ = std::move(newSections);
   for (Notice& n : newNotices) notices_.push_back(std::move(n));
   publish(newPlayback ? newPlayback : std::make_shared<const render::Playback>());
+  // Feature decoders run last; a failure drops only that section.
+  for (auto it = sections_.begin(); it != sections_.end();) {
+    auto dec = sectionDecoders_.find(it->first);
+    if (dec != sectionDecoders_.end() && !dec->second.decode(it->second).ok()) {
+      notice(Notice::Level::Warning, "Some " + dec->second.feature + " settings could not be restored.");
+      it = sections_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   return {};
+}
+
+void ProjectSession::reportSourceUnavailable(bool wrongAudio) {
+  if (!chopMap_) return;
+  notice(Notice::Level::Warning, wrongAudio ? wrongAudioText(chopMap_->info()) : notFoundText(chopMap_->info()));
 }
 
 void ProjectSession::reset() {
   evolve_.stop();
   clearSource();
   rules_ = roles::RuleSet{};
+  extras_ = ProjectExtras{};
+  sections_.clear();
   notices_.clear();
 }
 
