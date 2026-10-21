@@ -75,7 +75,7 @@ void StatusBar::resized() {
   auto area = getLocalBounds();
   infoArea_ = area.removeFromRight(static_cast<int>(std::min(area.getWidth() / 2, static_cast<int>(420 * scale_))));
   if (cancelExport_.isVisible()) cancelExport_.setBounds(area.removeFromRight(110).removeFromTop(20).reduced(2));
-  messages_.setBounds(area);
+  messages_.setBounds(area.withTrimmedTop(1));
 }
 
 void StatusBar::modelChanged(Change c) {

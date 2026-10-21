@@ -236,7 +236,6 @@ int EvolvePanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(96);
-  heading(s, "Evolve");
   {
     auto r = s.row();
     evolve_.setBounds(r.removeFromLeft(r.getWidth() / 2));

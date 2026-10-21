@@ -181,7 +181,6 @@ int TempoPanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(86);
-  heading(s, "Tempo match");
   labelled(s.row(), loopLabel_, loopLength_, lw);
   labelled(s.row(), sourceLabel_, sourceBpm_, lw);
   {

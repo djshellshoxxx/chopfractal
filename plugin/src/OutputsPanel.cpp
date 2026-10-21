@@ -122,7 +122,6 @@ int OutputsPanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(110);
-  heading(s, "Outputs");
   status_.setBounds(s.row(Stack::scaled(34)));
   labelled(s.row(), modeLabel_, mode_, Stack::scaled(70));
   empty_.setBounds(s.row(empty_.getText().isEmpty() ? Stack::scaled(2) : Stack::scaled(34)));

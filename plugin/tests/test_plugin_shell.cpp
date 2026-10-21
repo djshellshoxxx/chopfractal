@@ -800,6 +800,10 @@ int main() {
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
   juce::MessageManager::getInstance();
+  if (const char* only = std::getenv("CHOP_TEST_FILTER")) {  // run just the cases whose name contains the text
+    auto& cases = chop_test::registry();
+    cases.erase(std::remove_if(cases.begin(), cases.end(), [only](const chop_test::Case& c) { return std::string(c.name).find(only) == std::string::npos; }), cases.end());
+  }
   const int rc = chop_test::runAll();
   gui.reset();
   juce::DeletedAtShutdown::deleteAll();

@@ -298,7 +298,6 @@ int ArrangementPanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(86);
-  heading(s, "Arrangement");
   total_.setBounds(s.row());
   list_.setBounds(s.row(list_.heightFor()));
   labelled(s.row(), sceneLabel_, scene_, lw);

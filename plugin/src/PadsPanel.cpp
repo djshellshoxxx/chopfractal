@@ -305,7 +305,6 @@ int PadsPanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(92);
-  heading(s, "Pads");
   const int gridSize = std::min(width, Stack::scaled(340));
   grid_.setBounds(s.row(gridSize).withWidth(gridSize));
   if (page_c_.isVisible()) labelled(s.row(), pageLabel_, page_c_, lw);

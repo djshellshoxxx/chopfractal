@@ -359,7 +359,6 @@ int ScenesPanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
   const int lw = Stack::scaled(86);
-  heading(s, "Scenes");
   status_.setBounds(s.row());
   strip_.setBounds(s.row(strip_.heightFor(width)));
   selectedText_.setBounds(s.row(Stack::scaled(34)));

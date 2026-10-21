@@ -125,7 +125,6 @@ void CapturePanel::tick() {
 int CapturePanel::layoutBody(int width) {
   beginLayout();
   Stack s(width);
-  heading(s, "Capture");
   state_.setBounds(s.row(Stack::scaled(62)));
   labelled(s.row(), modeLabel_, mode_, Stack::scaled(64));
   {
