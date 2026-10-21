@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** The JUCE editor is a functional first pass: fixed 940 x 912 window, waveform, pattern grid, family tree, Orbit View, feature rows A to D, status log, static tooltips. Built interactions from this spec: click to audition, right-click menu on tree nodes (favorite, rename, compare, delete), locks, direct hit editing. Not built: top-bar preset menu layout as drawn here (presets live in feature row D), meters and clipping indicator (F05), keyboard focus order and accessibility handlers for painted views (F04), resizable layout and the Simple/Advanced split (F04), event context menu and double-click event editor (F02), reset-to-default per control group. The Space-key behavior is decided in F04 (host owns the transport in plugins; Standalone toggles local Play/Stop).
+
+
 ## Design goal
 
 Build a modern, technical interface that makes source chops and generated rhythms understandable at a glance. Visual activity should explain audio behavior, not decorate it. The interface must remain legible at common plugin sizes and must not require color perception for editing.

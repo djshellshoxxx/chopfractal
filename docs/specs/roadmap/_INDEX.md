@@ -27,3 +27,11 @@ Valuable
 
 Platform
 - F15 cross-platform-and-packaging: macOS (arm64 + x86_64 universal) and Windows plugin builds in CI, validator on all three, code signing and notarization steps (documented, secrets via CI), installers (pkg / MSI or Inno), version stamping, release workflow, crash-safe logging, third-party notices bundle, JUCE license gate.
+
+New specs (Wave 4)
+- F16 level-match-and-limiter: usability. Loudness-match the generated output to the source (BS.1770 style measurement on a worker thread), look-ahead true-peak-safe soft limiter, gain-reduction readout, deterministic and bypassable, four host parameters appended to manifest v3, state tag 15 cache. Off by default, bit-exact when off.
+- F17 groove-lab: musicality. Playback-time groove: MPC-style 16th swing 50 to 75 percent, shuffle, per-role push/pull, seeded humanize, accent curve; module groove, state tag 14, five host parameters, golden hashes untouched.
+- F18 arrangement-export: value. Build an 8 to 32 bar arrangement from F09 scenes; one WAV with cue points, one MIDI file with markers, a cue list; deterministic worker job with progress and cancel; state tag 16.
+- F19 command-palette-and-quick-start: ease of use. Ctrl/Cmd+K fuzzy palette over every action and parameter plus a first-run checklist (load, detect, generate, play, export); per-user file, no project state, no parameters.
+- E01 echo: per-event tempo-synced repeats, event flag bit 64, seeded effect pass, five host parameters, state tag 17.
+- E02 tremolo-pan: per-event tremolo and auto-pan, event flag bit 128, shares the effect pass and tag 17, five host parameters.

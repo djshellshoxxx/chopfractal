@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** Fully built and pinned by four golden hashes (`2397844821793184813`, `12084884237330071892`, `13710596758976548913`, `18237151833431327128`). As built: `swing` is 0..1 and delays odd slots of straight 1/8-or-finer grids by `swing * grid / 3`, i.e. 50 % (straight) to 66.7 % (triplet) of the pair; it is applied at generation time and stored in event starts. Per-event effects draw from appended streams (effects spec). The macro `chaos` (pass 3) changes the settings passed to Generate/Mutate/Evolve and is not part of the engine. Groove templates beyond this swing are specified in F17 (a playback-time layer that leaves these hashes untouched).
+
+
 ## Purpose
 
 Generate structured, repeatable patterns from the available chop set. The engine must create variation that is bounded, explainable, and editable. It is not a black-box loop generator.
@@ -43,7 +46,7 @@ Required controls:
 - Grid: straight and triplet options from whole-note through 1/32-note; allow a smaller subdivision only if performance and UI remain clear.
 - Density: target event density with a hard maximum event count.
 - Variation by hierarchy level: phrase, bar, beat, event.
-- Swing: 0–100% applied only to eligible off-grid subdivisions.
+- Swing: 0–100% (parameter range 0 to 1) applied only to odd slots of straight grids of 1/8 or finer; 100 % delays the off-beat by one third of a grid step, which is the triplet position (66.7 % in MPC terms). Larger MPC-style swing (up to 75 %) is a groove template, F17.
 - Seed: integer display with randomize, copy, and restore actions.
 - Locks: event, beat group, bar, or phrase.
 - Reset to source order and clear all locks.

@@ -2,6 +2,9 @@
 
 **Status:** Draft for review
 
+**Implementation (audited 2026-10-20):** Built: 8 voices, scheduler, fixed transform order extended with crunch and filter, lock-free handoff, offline render through the same `Renderer::process`, allocation-free `process()`, output bit-identical across block sizes. No output limiter or loudness matching exists (F16); no MIDI input (F07); one stereo output bus (F11). The renderer prepared-event cap is 4096 after retrigger expansion. Per-event echo and tremolo-pan are specified as E01 and E02.
+
+
 ## Signal flow
 
 ```mermaid

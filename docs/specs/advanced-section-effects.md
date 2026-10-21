@@ -2,6 +2,12 @@
 
 Version 1.0 • 2026-10-13 • Status: proposed, ready for engineering review; not implemented by this document.
 
+**Implementation (audited 2026-10-20):** none of the 23 families is built; the modules `effect_contracts`, `effect_dsp`, `section_effects` and `effect_automation` do not exist. The only effects in the product are the three legacy per-event effects (`effects-filter-glide-crunch.md`). Decisions recorded by the audit:
+- **Two tiers.** The per-event "light" effects that fit the existing `EventFx` model (parameters stored on the event, rendered inside a voice, flag bits in the event flags byte, a few host Allow toggles) are specified separately: **E01 Echo** (a reduced FX01) and **E02 Tremolo-Pan** (a reduced FX14), in `roadmap/`. They claim event flag bits 64 and 128, the last two free bits. The full selection/chain system of this document (assignments, chains, groups, automation lanes, 23 families) is a later program of work; it must not reuse those bits and must treat E01/E02 data as legacy-style per-event effects (section 1 already requires old state to stay on the old path).
+- **Overlap rule.** FX01 and FX14 here are the full-featured versions. When both exist, an event carrying an E01/E02 block and an advanced chain processes the legacy block first (signal order in section 3.2: legacy event transforms, then the advanced insert chain). Converting E01/E02 data into chain items is an explicit, undoable command, like the filter/glide/crunch conversion in section 1.
+- **Host automation.** Section 7's eight "Advanced Macro" parameters are appended after every parameter claimed by F16, E01 and E02 (manifest policy in the roadmap README). Their IDs are `adv_macro_1` to `adv_macro_8`; they do not exist yet.
+- **Baseline facts to re-check before starting** (changed since this document was written): the renderer cap is 4096 prepared events; voices are 8; `preset_store` exists; the flags byte is exhausted by E02; Chaos is generation-time and does not interact with effects.
+
 ## 1. Scope and existing integration baseline
 
 Enable a producer to apply editable, non-destructive effects to one chop, a subregion of a chop, or multiple contiguous/noncontiguous chops. Provide linked editing, independent instances, automation, deterministic randomization, audition and matching export. All 23 effect families specified below are in scope; priorities order delivery rather than removing advanced controls.

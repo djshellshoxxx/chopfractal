@@ -951,3 +951,70 @@ CHOP_TEST(a_changed_effect_intensity_survives_a_round_trip_even_with_all_effects
   CHECK(q.ok());
   if (q.ok()) CHECK(serialize(q.value()).size() + 9 == bytes.size());
 }
+
+CHOP_TEST(mapRegions_scales_nested_regions_and_leaves_hashes_alone) {
+  const ChopSnapshot c = makeChops();
+  Settings s = baseSettings();
+  s.bars = 1;
+  s.density = 1.0;
+  s.variation = {0, 0, 0, 0};
+  const Pattern plain = gen(c, s);
+  const auto twice = [](SampleRange r) { return SampleRange{r.start * 2, r.end * 2}; };
+  // A pattern without regions is returned unchanged, byte for byte (the golden hashes depend on this).
+  auto same = mapRegions(plain, twice);
+  CHECK(same.ok());
+  if (same.ok()) CHECK(serialize(same.value()) == serialize(plain));
+
+  // Two nested levels plus a top-level region.
+  Pattern p = plain;
+  Event* top = nullptr;
+  for (Beat& bt : p.bars[0].beats)
+    if (!bt.events.empty() && !top) top = &bt.events.front();
+  CHECK(top != nullptr);
+  if (!top) return;
+  top->region = {1000, 5000};
+  auto inner = std::make_shared<NestedPattern>();
+  inner->depth = 2;
+  Event leaf;
+  leaf.id = EventId{kDerivedIdBit | 5};
+  leaf.chop = top->chop;
+  leaf.region = {1200, 1700};
+  Event wholeChop = leaf;  // empty region stays empty
+  wholeChop.id = EventId{kDerivedIdBit | 6};
+  wholeChop.region = {};
+  inner->events = {leaf, wholeChop};
+  auto outer = std::make_shared<NestedPattern>();
+  Event mid;
+  mid.id = EventId{kDerivedIdBit | 3};
+  mid.chop = top->chop;
+  mid.region = {1000, 3000};
+  mid.child = inner;
+  outer->events = {mid};
+  top->child = outer;
+
+  auto mapped = mapRegions(p, twice);
+  CHECK(mapped.ok());
+  if (!mapped.ok()) return;
+  const Event* t2 = nullptr;
+  for (const Beat& bt : mapped.value().bars[0].beats)
+    if (!bt.events.empty() && !t2) t2 = &bt.events.front();
+  CHECK(t2 && t2->region == (SampleRange{2000, 10000}));
+  if (!t2 || !t2->child) return;
+  const Event& m2 = t2->child->events[0];
+  CHECK(m2.region == (SampleRange{2000, 6000}));
+  CHECK(m2.child && m2.child->events.size() == 2);
+  if (m2.child && m2.child->events.size() == 2) {
+    CHECK(m2.child->events[0].region == (SampleRange{2400, 3400}));
+    CHECK(m2.child->events[1].region.empty());
+  }
+  // Everything except regions is untouched, and the input pattern was not modified (children are copied).
+  CHECK(top->region == (SampleRange{1000, 5000}));
+  CHECK(mid.region == (SampleRange{1000, 3000}));
+  CHECK(t2->id == top->id && t2->start == top->start && t2->duration == top->duration);
+  // Identity mapping reproduces the serialized bytes of the nested pattern.
+  auto id = mapRegions(p, [](SampleRange r) { return r; });
+  CHECK(id.ok() && serialize(id.value()) == serialize(p));
+  // An invalid mapping is refused.
+  CHECK(!mapRegions(p, [](SampleRange r) { return SampleRange{r.end, r.start}; }).ok());
+  CHECK(!mapRegions(p, nullptr).ok());
+}

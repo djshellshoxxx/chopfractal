@@ -12,6 +12,7 @@
 #include <chopfractal/chop_contracts/time.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -153,6 +154,12 @@ Result<Pattern> collapse(const Pattern& p, EventId id);  // drops the child tree
 Result<Pattern> setChildActive(const Pattern& p, EventId id, bool active);  // keep the tree, toggle parent/child playback
 // Reconcile after marker edits: drops events whose chop vanished, clears sub-regions that left their chop.
 Pattern sanitize(const Pattern& p, const ChopSnapshot& chops);
+
+// Applies `fn` to every non-empty Event::region, recursively through zoomed child trees. Empty regions (whole
+// chop) stay empty; ids, seeds, locks, flags and structure are untouched, so serialize() of a pattern without
+// regions is unchanged. Pure and deterministic. Used to rescale sub-ranges when the source is time-stretched; the
+// caller reconciles the result with sanitize() and validate(). Refuses a mapped range with end < start or start < 0.
+Result<Pattern> mapRegions(const Pattern& p, const std::function<SampleRange(SampleRange)>& fn);
 
 // ---- state ----
 std::vector<std::uint8_t> serialize(const Pattern& p);

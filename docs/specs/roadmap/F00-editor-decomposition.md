@@ -2,8 +2,17 @@
 
 **Status:** Ready for development  **Size:** M (5 engineer-days)  **Depends on:** none  **Blocks:** F01 (UI half), F02, F03, F04, F05, F06 and every later feature that adds editor controls
 
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** `plugin/src/PluginEditor.cpp` is now 1404 lines (header about 150 lines), not 815, because pass 3 (chaos, presets, drag-out, direct hit editing) landed in the monolith before this split. The window is 940 x 912, not 940 x 860. Decisions recorded by the audit:
+- Section 3 geometry below is the **as-built** layout (the old 815-line numbers were replaced). Pixel values must still be re-read from `ChopFractalEditor::resized()` on the day F00 starts; the snapshot comparison in section 7 remains the arbiter.
+- The transport row (Play, Stop, Follow DAW, hint label, "Move / resize hits" toggle), the Chaos slider, Reroll, the preset combo with Save Preset / Delete, and the Drag MIDI / Drag WAV handles are existing widgets and move verbatim: transport row, sliders, Chaos and the edit-mode toggle into ControlsPanel; preset combo, Save Preset, Delete, Reroll and both drag handles into FeaturePanel row D.
+- Direct hit editing (`DragMode`, `dragId_`, `dragStart_`, `nudgeSelected`, `editSelected`, Shift+click add, Alt+drag duplicate, Delete/M/D/arrow keys) moves into PatternPanel (mouse) and stays in the editor shell for `keyPressed` until F04 takes over. Section selection (`selectingSections_`) is split between WavePanel and PatternPanel. `DragOut.h/.cpp` and `PresetManager.h/.cpp` are already separate files and are kept as they are.
+- The status area is a read-only scrolling `juce::TextEditor` ("Status messages", 920 x 70 visible) at the bottom, not a 24 px label. StatusBar owns it. F05 and F04 widget placement that assumed a 920 x 24 bar must use this area plus a new 24 px strip carved from its top (decision: StatusBar becomes 920 x 74 = 24 px widget strip on top of the 50 px scrolling log; F05 section 3 is adjusted accordingly).
+- Any "old lines N-M" reference in this spec points at the 815-line baseline and is historical: locate code by symbol name (`refresh`, `mouseDown`, `resized`, ...), not by line.
+- The Feature-row overflow described below is already fixed in the as-built editor (four rows A to D, the widest is 870 px), so the "known and preserved defect" no longer exists and F04 does not need to re-flow for it.
+
 ## 1. Summary and user value
-`plugin/src/PluginEditor.cpp` is 815 lines and one class (`ChopFractalEditor`) that owns 40+ widgets, view caches, session commands, painting and hit-testing for four canvases. Every later feature would edit that one file. F00 splits it into seven `juce::Component` panels, an `EditorModel` (cached view data, selection, transient UI state) and an `EditorCommands` layer (every action that calls `ProjectSession`), so features land in separate files. Pure refactor: same widgets, same pixels, same strings, same session calls. The user sees no change; developers gain parallel lanes.
+`plugin/src/PluginEditor.cpp` was 815 lines when this spec was written and is 1404 lines at the 2026-10-20 audit; it is one class (`ChopFractalEditor`) that owns 40+ widgets, view caches, session commands, painting and hit-testing for four canvases. Every later feature would edit that one file. F00 splits it into seven `juce::Component` panels, an `EditorModel` (cached view data, selection, transient UI state) and an `EditorCommands` layer (every action that calls `ProjectSession`), so features land in separate files. Pure refactor: same widgets, same pixels, same strings, same session calls. The user sees no change; developers gain parallel lanes.
 
 Note: `_TEMPLATE.md` points to `docs/specs/roadmap/README.md` for panel names; that file does not exist in the repo. The names and responsibilities in section 5 of this spec are the authoritative definition (README should link here).
 
@@ -12,25 +21,25 @@ Note: `_TEMPLATE.md` points to `docs/specs/roadmap/README.md` for panel names; t
 - As a developer I can unit test view building and refusal messages without a window (EditorModel, EditorCommands).
 - As a producer I notice nothing: every button, label, tooltip title, status string and layout position is unchanged.
 
-**In scope:** new files listed in section 9; moving code verbatim; recursive widget lookup in the GUI test helpers; layout identical at 940x860.
-**Non-goals:** new features, behavior changes, resizing, keyboard handling, accessibility changes, fixing the Feature row overflow (section 6), changing any `ProjectSession` or module API, state format changes.
+**In scope:** new files listed in section 9; moving code verbatim; recursive widget lookup in the GUI test helpers; layout identical at 940x912 (as built).
+**Non-goals:** new features, behavior changes, resizing, keyboard handling, accessibility changes, changing any `ProjectSession` or module API, state format changes.
 
 ## 3. UX
-Unchanged. Window 940x860, `setResizable(false,false)`. The panels are laid out by `ChopFractalEditor::resized()` at exactly these bounds (editor-local coordinates; margin 10, derived from the current `resized()` arithmetic):
+Unchanged. Window 940x912 (as built), `setResizable(false,false)`. The panels are laid out by `ChopFractalEditor::resized()` at exactly these bounds (editor-local coordinates; margin 10, derived from the current `resized()` arithmetic):
 
 | Panel | x | y | w | h | Contents (moved verbatim) |
 |---|---|---|---|---|---|
-| ControlsPanel | 10 | 10 | 920 | 172 | row 1 buttons (Load Loop, Detect Chops, Generate, Mutate, Undo, Redo, Zoom In, Collapse, Lock Bar; 96 px pitch, `reduced(2)`), row 2 (Seed label 50, seed editor 110, New Seed 90, Embed toggle 210, bars combo right 90), 5 sliders + 7 toggles block (104 px) |
-| FeaturePanel | 10 | 188 | 920 | 78 | row A: Smart Setup, Accept Roles, Use Tempo, Motif, Depth, Fractal; row B: Evolve, Every, amount slider, Keep, Format, rate, Loops; row C: Export WAV, Export Kit, Locate Source, detection-mode combo, Store/Recall A/B, role combo, Set Role |
-| WavePanel | 10 | 272 | 920 | 120 | waveform, markers, empty-state text |
-| PatternPanel | 10 | 398 | 920 | 230 | lane grid, hits, bar locks |
-| HistoryPanel | 10 | 634 | 724 | 190 | family tree |
-| OrbitPanel | 740 | 634 | 190 | 190 | Orbit View (`min(bottom.h, bottom.w/2)` square, right aligned) |
-| StatusBar | 10 | 836 | 920 | 24 | status line |
+| ControlsPanel | 10 | 10 | 920 | 232 | transport row 36 (Play, Stop, Follow DAW, hint label, "Move / resize hits" toggle), row 1 buttons 30 (Load Loop, Detect Chops, Generate, Mutate, Undo, Redo, Zoom In, Collapse, Lock Bar; 96 px pitch, `reduced(2)`), row 2 26 (Seed label 50, seed editor 110, New Seed 90, Embed toggle 210, bars combo right 90), slider block 128 (left column Density, Swing, Variation, Effect Intensity, Chaos; right column Dry/Source, Output Gain, then two toggle rows: Enable, Reverse, Pitch, Retrigger / Filter, Glide, Crunch), 6 px gaps |
+| FeaturePanel | 10 | 248 | 920 | 104 | row A: Smart Setup, Accept Roles, Use Tempo, Motif, Depth, Fractal; row B: Evolve, Every, amount slider, Keep, Format, rate, Loops; row C: Export WAV, Export Kit, Locate Source, detection-mode combo, Store/Recall A/B; row D: preset combo, Save Preset, Delete, Reroll, role combo, Set Role, Drag MIDI, Drag WAV |
+| WavePanel | 10 | 358 | 920 | 120 | waveform, markers, empty-state text |
+| PatternPanel | 10 | 484 | 920 | 230 | lane grid, hits, bar locks |
+| HistoryPanel | 10 | 720 | 808 | 106 | family tree |
+| OrbitPanel | 824 | 720 | 106 | 106 | Orbit View (`min(bottom.h, bottom.w/2)` square, right aligned) |
+| StatusBar | 10 | 828 | 920 | 74 | scrolling status log (`juce::TextEditor`, read-only, 2 px vertical inset) |
 
 Inside a panel the same `removeFromTop/Left` sequences are used, relative to the panel's own bounds (no extra `reduced(10)`). All painting uses panel-local coordinates; the colour constants, fonts (13 px; 10 px ring numbers), alpha values and strings are copied unchanged, including the three empty-state strings, the `"locked"` bar label and the `"Orbit view"` placeholder.
 
-Known and preserved defect: row C needs 1054 px but the panel is 920 px wide, so `Role` / `Set Role` are partly clipped today. F04 fixes it; F00 must not.
+Former defect, already fixed in the as-built editor: the old third Feature row (1054 px) was split into rows C and D by pass 3; every row now fits 920 px (widest 870 px). Nothing to preserve.
 
 ## 4. Data model and state
 No persisted state, no host parameters, no schema change. `EditorModel` holds only transient UI state that today lives in `ChopFractalEditor` members: seed value, selection, Smart Setup result, status text, `pushedEvolve_`.
@@ -121,8 +130,8 @@ class EditorPanelBase : public juce::Component, protected EditorModel::Listener 
   EditorPanelBase(EditorModel&, EditorCommands&, const char* componentId);        // setComponentID(componentId)
   EditorModel& model_;  EditorCommands& cmd_;
 };
-class WavePanel    : public EditorPanelBase { /* paint, mouseDown (add/Alt-remove marker), mouseDoubleClick (audition) */ };
-class PatternPanel : public EditorPanelBase { /* paint, mouseDown (select hit) */ };
+class WavePanel    : public EditorPanelBase { /* paint, mouseDown (drag-select chops and audition; Shift+click adds a marker; Alt+click removes the nearest marker), mouseDoubleClick (audition) */ };
+class PatternPanel : public EditorPanelBase { /* paint, mouseDown/Drag/Up (select, drag-select sections, move, resize, Alt+drag duplicate, Shift+click on empty space adds a hit; one gesture = one undo step on mouse-up) */ };
 class HistoryPanel : public EditorPanelBase { /* paint, mouseDown (activate / popup menu) */ };
 class OrbitPanel   : public EditorPanelBase { /* paint (reads model.playheadQuarters()), mouseDown (hitTest select) */ };
 class ControlsPanel: public EditorPanelBase { ControlsPanel(EditorModel&, EditorCommands&, juce::AudioProcessorValueTreeState&); /* owns attachments */ };
@@ -131,7 +140,7 @@ class StatusBar    : public EditorPanelBase { /* paint: model.statusLine(); repa
 ```
 Component IDs (used by tests): `"ControlsPanel"`, `"FeaturePanel"`, `"WavePanel"`, `"PatternPanel"`, `"HistoryPanel"`, `"OrbitPanel"`, `"StatusBar"`.
 
-`ChopFractalEditor` keeps: constructor (creates model, commands, seven panels in the order above, `setSize(940, 860)`, `setResizable(false,false)`), `resized()` (table in section 3), `paint()` = `g.fillAll(0xff15181d)` only, the 10 Hz `Timer` and `~ChopFractalEditor`. Timer rule: `model.refresh(false, wavePanel.getWidth())`; on rebuild the model emits `Change::View` and WavePanel/PatternPanel/HistoryPanel/OrbitPanel repaint; if `playheadQuarters() >= 0 || lastPlaying_` only OrbitPanel repaints (the old code repainted the whole editor but only Orbit shows the playhead); StatusBar repaints when its composed line differs from the last painted line.
+`ChopFractalEditor` keeps: constructor (creates model, commands, seven panels in the order above, `setSize(940, 912)`, `setResizable(false,false)`), `resized()` (table in section 3), `paint()` = `g.fillAll(0xff15181d)` only, the 10 Hz `Timer` and `~ChopFractalEditor`. Timer rule: `model.refresh(false, wavePanel.getWidth())`; on rebuild the model emits `Change::View` and WavePanel/PatternPanel/HistoryPanel/OrbitPanel repaint; if `playheadQuarters() >= 0 || lastPlaying_` only OrbitPanel repaints (the old code repainted the whole editor but only Orbit shows the playhead); StatusBar repaints when its composed line differs from the last painted line.
 
 ## 6. Behavior details and edge cases
 - Verbatim move rule: every lambda body, string literal, number and call order is copied; only `this`-member access becomes `model_`/`cmd_`/panel-local access. Exceptions are exactly: coordinate origin (`waveArea_.getX()+x` becomes `x`), `status_` writes become `model_.setStatus(...)`, `selected_` becomes `model_.selected()`.
@@ -148,7 +157,7 @@ Step 0 changes only test infrastructure so the safety net runs before and after 
 - **Test support (step 0):** move `drumLoop`, `FakePlayHead`, `prepare`, `makeSession`, `patternBytes`, `findButton`, `findCombo` from `test_plugin_shell.cpp` into `plugin/tests/shell_test_support.hpp` (inline). Make `findButton`/`findCombo` recursive (`root.findChildWithID` is not enough: iterate `getChildren()` depth-first). Replace the final accessibility loop with a recursive walk over all `juce::Button` descendants. Assertions are untouched. Run against the old editor to prove the helpers are equivalent.
 - **Existing GUI test (the net):** `editor_buttons_drive_the_session` (under xvfb) must pass unchanged after every step. Its clicks: Detect Chops, Mutate (refused, `!hasPattern()`), Generate, Mutate (`m != g`), Undo (`== g`), Redo (`== m`), Store A, Fractal (`f != m`), Recall A (`== m`), Lock Bar with no selection (no bar locked, status contains "Select a hit"), Keep, Smart Setup, Evolve toggle on/off (`evolveRunning()` true/false), Zoom In, Collapse, Set Role, every button has a title.
 - **New `plugin/tests/test_editor_layout.cpp`:**
-  - `editor_panels_have_the_pre_refactor_bounds`: create editor, `setVisible(true)`, pump 60 ms; for each ID in section 3, `findChildWithID(id)->getBounds()` equals the table row exactly; `editor->getWidth()==940 && getHeight()==860`.
+  - `editor_panels_have_the_pre_refactor_bounds`: create editor, `setVisible(true)`, pump 60 ms; for each ID in section 3, `findChildWithID(id)->getBounds()` equals the table row exactly; `editor->getWidth()==940 && getHeight()==912`.
   - `editor_snapshot_is_unchanged_by_the_split`: with `CHOPFRACTAL_SNAPSHOT_REF` set, compare `createComponentSnapshot` to the PNG at that path pixel by pixel (0 differing pixels; skipped if the env var is absent).
 - **New `plugin/tests/test_editor_model.cpp` (no DISPLAY needed):**
   - `model_refresh_builds_views_only_when_the_session_changes`: empty session: `view().hasSource==false`, `refresh(true,920)` returns true; second `refresh(false,920)` returns false; after `loadSource`+`applyChops`+`generate`: `refresh(false,920)` true, `view().markers.size()==chopMap()->markers().size()`, `view().pattern.rects` non-empty and equals `ui::buildPatternView` output size, `view().orbit.arcs.size()==pattern rects with depth 0 + nested`, `view().tree.size()==history().size()`.

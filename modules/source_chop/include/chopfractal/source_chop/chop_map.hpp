@@ -61,6 +61,12 @@ enum class MergeMode { Replace, Merge };
 class ChopMap {
  public:
   static Result<ChopMap> create(SourceInfo info, std::int64_t minRegionFrames = kDefaultMinRegionFrames);
+  // A copy of `from` for a time-stretched source of `newInfo.frames == outFrames` frames (`inFrames` is the old
+  // length). Every marker (enabled or not) keeps its ChopId, flags, label, color and group; positions are scaled
+  // with floor((2*p*out + in) / (2*in)) from the ORIGINAL position (no drift), trims and fades with the same rule.
+  // nextId and minRegionFrames are kept and the undo history starts fresh. Fails with Conflict when markers would
+  // end up closer than the minimum region length (or too close to the end); `hint` is the number of such markers.
+  static Result<ChopMap> rescaled(const ChopMap& from, SourceInfo newInfo, std::int64_t inFrames, std::int64_t outFrames);
 
   const SourceInfo& info() const { return info_; }
   std::int64_t minRegionFrames() const { return minRegion_; }

@@ -248,3 +248,93 @@ CHOP_TEST(state_roundtrips_and_rejects_malformed_input) {
   bad[blob.size() - 3] ^= 0xFF;
   (void)ChopMap::deserialize(bad.data(), bad.size());  // must not crash
 }
+
+// ---- ChopMap::rescaled (time-stretch support) ----
+namespace {
+std::int64_t scaledRef(std::int64_t p, std::int64_t in, std::int64_t out) { return (2 * p * out + in) / (2 * in); }
+}  // namespace
+
+CHOP_TEST(rescaled_preserves_ids_flags_and_scales_trims) {
+  ChopMap m = makeMap(48000);
+  const std::int64_t pos[] = {1000, 5000, 12345, 30001};
+  std::vector<ChopId> ids;
+  for (std::int64_t p : pos) ids.push_back(m.addMarker(p, p != 5000).value());
+  CHECK(m.setLabel(ids[0], "kick").ok());
+  CHECK(m.setColor(ids[1], 0xff8800u).ok());
+  CHECK(m.setGroup(ids[2], 3).ok());
+  CHECK(m.setTrim(ids[2], 100, 200).ok());
+  CHECK(m.setFades(ids[3], 50, 75).ok());
+  CHECK(m.setEnabled(ids[1], false).ok());
+  CHECK(m.canUndo());
+  SourceInfo ni = info(38400);
+  ni.id = SourceId{1234};
+  ni.name = "loop @120.0 BPM";
+  auto r = ChopMap::rescaled(m, ni, 48000, 38400);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  const ChopMap& n = r.value();
+  CHECK_EQ(n.info().frames, 38400);
+  CHECK(n.info().id == SourceId{1234});
+  CHECK_EQ(n.minRegionFrames(), m.minRegionFrames());
+  CHECK(!n.canUndo());
+  CHECK_EQ(n.markers().size(), m.markers().size());
+  for (std::size_t i = 0; i < m.markers().size(); ++i) {
+    const Marker& a = m.markers()[i];
+    const Marker& b = n.markers()[i];
+    CHECK(a.id == b.id);
+    CHECK_EQ(a.manual, b.manual);
+    CHECK_EQ(a.enabled, b.enabled);
+    CHECK(a.label == b.label);
+    CHECK_EQ(a.color, b.color);
+    CHECK_EQ(a.group, b.group);
+    CHECK_EQ(b.position, scaledRef(a.position, 48000, 38400));
+    CHECK_EQ(b.trimStart, static_cast<std::uint32_t>(scaledRef(a.trimStart, 48000, 38400)));
+    CHECK_EQ(b.trimEnd, static_cast<std::uint32_t>(scaledRef(a.trimEnd, 48000, 38400)));
+    CHECK_EQ(b.fadeIn, static_cast<std::uint32_t>(scaledRef(a.fadeIn, 48000, 38400)));
+    CHECK_EQ(b.fadeOut, static_cast<std::uint32_t>(scaledRef(a.fadeOut, 48000, 38400)));
+  }
+  CHECK_EQ(n.find(ids[2])->trimStart, 80u);
+  CHECK_EQ(n.find(ids[2])->trimEnd, 160u);
+  // nextId is preserved: the next new marker gets an id the old map would have used.
+  ChopMap copy = r.value();
+  auto fresh = copy.addMarker(20000, true);
+  CHECK(fresh.ok());
+  auto oldFresh = m.addMarker(25000, true);
+  CHECK(oldFresh.ok());
+  CHECK(fresh.value() == oldFresh.value());
+}
+
+CHOP_TEST(rescaled_rejects_markers_closer_than_min_region_with_count_hint) {
+  ChopMap m = makeMap(48000);
+  for (std::int64_t p : {1000, 1100, 1200, 20000, 47900}) CHECK(m.addMarker(p).ok());
+  // 0.5x: gaps 100 -> 50 (<64): markers 2 and 3 are too close to their predecessor; 47900 -> 23950 leaves 50 frames (<64).
+  SourceInfo ni = info(24000);
+  auto r = ChopMap::rescaled(m, ni, 48000, 24000);
+  CHECK(!r.ok());
+  if (r.ok()) return;
+  CHECK(r.error().code == ErrorCode::Conflict);
+  CHECK_EQ(r.error().hint, 3);
+  // The source map is untouched.
+  CHECK_EQ(m.markers().size(), 5u);
+  CHECK_EQ(m.markers()[1].position, 1100);
+  // Mismatched frame counts are refused.
+  CHECK(!ChopMap::rescaled(m, info(24000), 48000, 25000).ok());
+  CHECK(!ChopMap::rescaled(m, info(24000), 47000, 24000).ok());
+}
+
+CHOP_TEST(rescaled_roundtrips_serialize) {
+  ChopMap m = makeMap(48000);
+  for (std::int64_t p : {2000, 9000, 33000}) CHECK(m.addMarker(p, false).ok());
+  CHECK(m.setLabel(m.markers()[1].id, "snare").ok());
+  auto r = ChopMap::rescaled(m, info(60000), 48000, 60000);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  const auto bytes = r.value().serialize();
+  auto back = ChopMap::deserialize(bytes.data(), bytes.size());
+  CHECK(back.ok());
+  if (!back.ok()) return;
+  CHECK(back.value().serialize() == bytes);
+  CHECK_EQ(back.value().info().frames, 60000);
+  CHECK_EQ(back.value().markers()[2].position, scaledRef(33000, 48000, 60000));
+  CHECK(back.value().markers()[1].label == "snare");
+}

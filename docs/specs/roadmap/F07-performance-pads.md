@@ -1,8 +1,15 @@
 # F07 Performance pads
 
-**Status:** Ready for development  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` StateSection); soft dependency
+**Status:** Ready for development  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` section: extras tag 10); soft dependency
 on F08 (reuses `render::SpscQueue` and `render::LiveInput`; whichever merges second adapts, section 5)  **Blocks:** F11 (shares `processBlock` and bus/MIDI declarations; lands after F07
 per README)
+
+## 0. Implementation status (audited 2026-10-20)
+**Not started.** Nothing in the as-built plugin accepts MIDI (`acceptsMidi` is false) and there is no pad UI. Decisions recorded by the audit:
+- **Manifest:** pass 3 already bumped `kManifestVersion` to 3 and appended `chaos` at index 14. `perf_mode` and `perf_velocity_curve` are appended after `chaos` (indices 15 and 16) with `sinceVersion` 3; the manifest version stays 3 until the first beta tag freezes it (roadmap README section 5, "Manifest policy"). Wherever the body says "set by whichever of F08/F07 merges first" read "already 3".
+- **Project state:** the `pads` section is F01 extras tag 10 (F01 section 4.4), cap 64 KiB.
+- **Gesture plumbing:** F08's gesture engine (CC mapper, `LiveInput`) is still unbuilt and F08 was reduced to gestures only (see F08 section 0). F07 still depends on it only for CC1/CC16/CC17 mapping; without F08 the pads work and CC input is ignored.
+- The PadPanel is a new row-less overlay inside FeaturePanel's free width: it opens from a `Pads` toggle (90 px) in FeaturePanel row E (roadmap README, "FeaturePanel row budget"). Pixel placement is decided at implementation against F00's as-built panel sizes (FeaturePanel 920 x 104).
 
 ## 1. Summary and user value
 Play the chops like a sampler: MIDI notes from the DAW (or a 4x4 grid of on-screen pads) trigger the current chops sample-accurately on top of the running pattern, with velocity,
@@ -49,7 +56,7 @@ after 20 s of playback - informational only).
 ## 4. Data model and state
 **Host parameters (manifest version 3, appended; IDs permanent; positions follow merge order):** `{"perf_mode", "Pad Mode", "", ParamKind::Choice, 0, 2, 0, 1, 0, 3, "Poly|Mono|Gate"}`
 and `{"perf_velocity_curve", "Velocity Curve", "", ParamKind::Choice, 0, 3, 0, 1, 0, 3, "Linear|Soft|Hard|Fixed"}`; enum entries `kPerfMode`, `kPerfVelocityCurve` after the previous
-last entry (`kChaos` if F08 merged first, else `kFxIntensity`). `kManifestVersion` = 3 (set by whichever of F08/F07 merges first). Defaults (0 = Poly, 0 = Linear) are the values a
+last entry, which is `kChaos` (index 14, shipped). `kManifestVersion` is already 3 (pass 3); it is not changed. Defaults (0 = Poly, 0 = Linear) are the values a
 project without these parameters gets.
 ```cpp
 // modules/audio_renderer/include/chopfractal/audio_renderer/pads.hpp  (portable, no JUCE)
@@ -72,7 +79,7 @@ padParams; }`. If F07 merges first it declares `LiveInput` with the pad fields o
 std::uint8_t midiChannel = 0; /*0 omni, 1..16*/ std::uint8_t quantizeDivision = 16; /*0 off, 4, 8, 16, 32*/ bool quantizeTriplet = false; std::uint8_t merge = 0; /*0 add, 1 replace*/
 std::map<std::uint64_t, std::uint8_t> chokeOverride; /*chop id -> 0 off, 1..4; absent = default (role "hat" -> 1, else off)*/ }`.
 
-**StateSection `pads` (schema 1, F01 API):** `u8
+**Extras block `pads` (tag 10, schema 1, F01 section 4.4):** `u8
 baseNote, u8 midiChannel, u8 quantizeDivision, bool triplet, u8 merge, u32 n (<= 256), n x {u64 chop, u8 group}`. Written only if any field differs from the defaults above, so a project
 that never touches pads is byte-identical to the previous build; loader validates ranges (`baseNote <= 111`, `midiChannel <= 16`, division in {0,4,8,16,32}, group <= 4) and fails the
 load with `ErrorCode::Corrupt` otherwise. Pad mode and curve live in the APVTS state. Takes are never saved (transient).
@@ -227,8 +234,7 @@ still work, and the QA note in the manual says so. (8) Open the plugin in the va
 | `docs/specs/audio-engine-and-routing.md`, `docs/BUILD_STATUS.md` | Mod | MIDI input, host notes |
 
 ## 10. Risks and mitigations
-- **Hosts that do not route MIDI to effects (Ableton Live; FL Studio varies).** On-screen pads are the guaranteed path; the manual states it. Product decision (open): ship an additional
-  `VST3_CATEGORIES "Instrument Fx"` variant; not done here because it changes plugin discovery.
+- **Hosts that do not route MIDI to effects (Ableton Live; FL Studio varies).** On-screen pads are the guaranteed path; the manual states it. Decision (audit 2026-10-20): the category stays `Fx` in this release and no `Instrument Fx` variant ships (it changes plugin discovery and would orphan existing projects); revisit only if the F15 host matrix shows Live users cannot work with on-screen pads. Recorded in the roadmap README decisions.
 - **JUCE may expose MIDI CC emulation parameters** (`JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS`) once MIDI input is on, bloating the host parameter list. Check the validator output and
   a host's parameter list in step 1; if present, add `JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0` to `target_compile_definitions`.
 - **Validator behavior change with an event bus.** Do the CMake/`acceptsMidi` change in its own first commit and run the validator before anything else; fallback: revert that commit

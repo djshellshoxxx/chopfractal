@@ -14,6 +14,7 @@ Deterministic hierarchical pattern model (phrase, bar, beat, event), Generate an
 - `serialize()` / `deserialize()` (schema 1, engine version 1)
 - `PatternSession`: undo/redo and two A/B snapshot slots
 - `setEventFx()`, `setBarEvents()` (replace a bar, e.g. a Fractal Rhythm bar), `reserveIds()`; effect settings `allowFilter/allowGlide/allowCrunch/fxIntensity` (optional trailing state, absent when off)
+- `mapRegions(pattern, fn)`: applies a range mapping to every sub-region, recursively through zoom trees (used when a source is time-stretched)
 
 Public headers:
 
