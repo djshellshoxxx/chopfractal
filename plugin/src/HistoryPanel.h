@@ -1,0 +1,14 @@
+#pragma once
+// Variation family tree: click a node to recall it, right-click for the node menu.
+#include "EditorPanels.h"
+
+class HistoryPanel : public EditorPanelBase {
+ public:
+  HistoryPanel(EditorModel&, EditorCommands&);
+  void paint(juce::Graphics&) override;
+  void mouseDown(const juce::MouseEvent&) override;
+
+ private:
+  void modelChanged(Change) override;
+  juce::Point<int> treePos(const chopfractal::ui::TreeNodeView&) const;
+};

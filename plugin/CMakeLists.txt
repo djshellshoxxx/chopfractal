@@ -77,16 +77,22 @@ if(CHOPFRACTAL_BUILD_CLAP)
   endif()
 endif()
 
-target_sources(ChopFractal PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
+# The plugin's own sources, shared by the plugin and the shell tests. A new panel or editor class (src/*Panel.cpp,
+# src/Editor*.cpp) and a new test (tests/test_*.cpp) is picked up on the next configure without editing this file.
+file(GLOB CHOPFRACTAL_PLUGIN_SOURCES CONFIGURE_DEPENDS
+  src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp
+  src/Editor*.cpp src/*Panel.cpp src/StatusBar.cpp)
+file(GLOB CHOPFRACTAL_SHELL_TEST_SOURCES CONFIGURE_DEPENDS tests/test_*.cpp)
+target_sources(ChopFractal PRIVATE ${CHOPFRACTAL_PLUGIN_SOURCES})
 target_include_directories(ChopFractal PRIVATE src)
 # Warnings for our own plugin sources only (JUCE's module sources are compiled into the same target and stay untouched).
-set(CHOPFRACTAL_PLUGIN_SOURCES src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp tests/test_plugin_shell.cpp)
+set(CHOPFRACTAL_WARNING_SOURCES ${CHOPFRACTAL_PLUGIN_SOURCES} ${CHOPFRACTAL_SHELL_TEST_SOURCES})
 if(MSVC)
   set(_cf_warn /W4 $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:/WX>)
 else()
   set(_cf_warn -Wall -Wextra $<$<BOOL:${CHOPFRACTAL_WARNINGS_AS_ERRORS}>:-Werror>)
 endif()
-set_source_files_properties(${CHOPFRACTAL_PLUGIN_SOURCES} PROPERTIES COMPILE_OPTIONS "${_cf_warn}")
+set_source_files_properties(${CHOPFRACTAL_WARNING_SOURCES} PROPERTIES COMPILE_OPTIONS "${_cf_warn}")
 target_compile_definitions(ChopFractal PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
 target_link_libraries(ChopFractal
@@ -110,7 +116,7 @@ endif()
 # host-time translation and audio path.
 if(CHOPFRACTAL_BUILD_TESTS)
   juce_add_console_app(ChopFractalShellTests PRODUCT_NAME "ChopFractalShellTests")
-  target_sources(ChopFractalShellTests PRIVATE tests/test_plugin_shell.cpp src/PluginProcessor.cpp src/PluginEditor.cpp src/PresetManager.cpp src/DragOut.cpp)
+  target_sources(ChopFractalShellTests PRIVATE ${CHOPFRACTAL_SHELL_TEST_SOURCES} ${CHOPFRACTAL_PLUGIN_SOURCES})
   target_include_directories(ChopFractalShellTests PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../modules/chop_contracts/tests)
   target_compile_definitions(ChopFractalShellTests PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
   target_link_libraries(ChopFractalShellTests PRIVATE
