@@ -54,6 +54,10 @@ cmake --build build-plugin --target ChopFractal_VST3
 tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3
 ```
 
+## Wiki and verification
+
+Wiki pages are in [`docs/wiki/`](docs/wiki/Home.md). In a documentation pass, the portable core build above was run with Ninja and `-DCHOPFRACTAL_WARNINGS_AS_ERRORS=ON`: configure and build succeeded, and `ctest` reported 36 of 36 tests passing. The VST3 plugin build was not run in that pass.
+
 ## Reusing a module elsewhere
 
 ```sh
