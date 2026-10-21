@@ -16,6 +16,8 @@
 4. **Apply and Generate defaults to off** (the shipped behavior: a preset only sets controls). The menu item stays, stored as the APVTS property `presetAutoGenerate`, default false.
 5. **Sizes:** HistoryPanel is 808 x 106 in the as-built layout (not 808 x 106); the overlay is positioned 4 px from the top-right edge regardless.
 
+*G3 update (2026-10-21):* the preset format is v2 as built in `docs/specs/gui-redesign.md` section 24 (break-style factory list of 17 replaces the 18-entry plan, the browser is a drawer instead of the ControlsPanel menu, favorites cover presets only). Tree favorites and search are not part of G3.
+
 ## 1. Summary and user value
 Pass 3 shipped six factory presets and plain user presets; what is missing is a richer format (seed, grid, rule templates, categories), a proper menu, favorites and undo. F03 extends the portable `preset_store` module (preset file format v2, 18 deterministic factory presets, a user-folder library), a Presets menu in ControlsPanel (apply, save, rename, delete, favorite, undo), and a favorites filter plus search on the variation tree in HistoryPanel. Producers get a quick start, can keep their own recipes, and can find the good variations in a long family tree.
 

@@ -24,10 +24,11 @@ CHOP_TEST(preset_filter_scope_and_search) {
   const auto jungle = filterPresets(items, PresetScope::All, "JUNGLE");
   CHECK(jungle.size() == 1 && jungle[0] == 1);
   CHECK_EQ(filterPresets(items, PresetScope::All, "amen funk").size(), 1u);   // every word, in the name or the style
-  CHECK_EQ(filterPresets(items, PresetScope::All, "hip hop").size(), 0u);     // "hip" and "hop" are separate words: both must appear
+  CHECK_EQ(filterPresets(items, PresetScope::All, "hip hop").size(), 1u);     // each word is matched on its own, anywhere in the text
+  CHECK_EQ(filterPresets(items, PresetScope::All, "hip jungle").size(), 0u);  // but every word has to be found
   CHECK_EQ(filterPresets(items, PresetScope::All, "hip-hop").size(), 1u);     // found in the description
   CHECK_EQ(filterPresets(items, PresetScope::All, "user").size(), 2u);        // tags match too
-  CHECK_EQ(filterPresets(items, PresetScope::Favorites, "chop").size(), 1u);  // scope and query combine
+  CHECK_EQ(filterPresets(items, PresetScope::Favorites, "my chop").size(), 1u);  // scope and query combine
   CHECK_EQ(filterPresets(items, PresetScope::All, "zzz").size(), 0u);
 }
 

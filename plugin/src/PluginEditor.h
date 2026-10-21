@@ -19,6 +19,7 @@
 #include "MacroStrip.h"
 #include "OrbitPanel.h"
 #include "PatternPanel.h"
+#include "PresetBrowser.h"
 #include "PluginProcessor.h"
 #include "SettingsDrawer.h"
 #include "ShellChrome.h"
@@ -58,14 +59,16 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
 
   // Public so tests can drive them without modal dialogs.
   void doReroll() { features_.reroll(); }
-  void applyPreset(const chopfractal::presets::Preset& p) {
-    features_.applyPreset(p);
+  bool applyPreset(const chopfractal::presets::Preset& p, bool generateAfter = false) {
+    const bool ok = features_.applyPreset(p, generateAfter);
     macro_.resetDriftTicks();
+    return ok;
   }
   chopfractal::presets::Preset currentPreset(const juce::String& name) const { return features_.currentPreset(name); }
-  void savePresetNamed(const juce::String& name, bool overwrite) { features_.savePresetNamed(name, overwrite); }
-  void deleteSelectedPreset() { features_.deleteSelectedPreset(); }
-  void reloadPresets() { features_.reloadPresets(); }
+  bool savePresetNamed(const juce::String& name, bool overwrite) { return presets_.saveCurrent(name, overwrite); }
+  bool deleteSelectedPreset() { return presets_.deleteSelected(); }
+  void reloadPresets() { presets_.reload(); }
+  PresetBrowser& presetBrowser() { return presets_; }
   juce::File makeDragFile(bool wav) { return features_.makeDragFile(wav); }
   // Read-only views for tests and accessibility tooling (editor coordinates).
   juce::Rectangle<int> patternBounds() const { return pattern_.getBounds(); }
@@ -100,6 +103,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   FeaturePanel features_;
   HistoryPanel history_;
   OrbitPanel orbit_;
+  PresetBrowser presets_;
   juce::Viewport legacyView_;
   SettingsDrawer settings_;
   DrawerHost drawer_;

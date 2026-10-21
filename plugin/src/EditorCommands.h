@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "EditorModel.h"
 #include "PluginProcessor.h"
@@ -82,8 +83,14 @@ class EditorCommands {
   juce::File makeDragFile(bool wav, const ExportUi&);
 
   // ---- presets ----
+  // The live state as a user preset: flat controls, engine v2 and effect parameters, seed, grid, Fractal settings, rules.
   chopfractal::presets::Preset currentPreset(const juce::String& name, const FractalUi&, const EvolveUi&) const;
-  void applyPresetParams(const chopfractal::presets::Preset&);  // host parameters plus the status line
+  // Sets the preset's host parameters (with change gestures), replaces seed, motif, depth, grid and rules, keeps one level
+  // of undo and says what happened. Never touches the pattern or the protected output parameters. With `generateAfter`
+  // it runs Generate straight after. Returns false (and changes nothing) for an invalid preset.
+  bool applyPreset(const chopfractal::presets::Preset&, bool generateAfter = false);
+  bool canUndoPreset() const { return presetUndo_.valid; }
+  bool undoPreset();  // restores parameters, extras and rules from before the last applyPreset
   void savePreset(const chopfractal::presets::Preset&, bool overwrite);
   void deletePreset(const juce::File&);
 
@@ -105,4 +112,11 @@ class EditorCommands {
   ChopFractalProcessor& proc_;
   EditorModel& model_;
   std::unique_ptr<juce::FileChooser> chooser_;
+  struct PresetUndo {
+    bool valid = false;
+    std::vector<chopfractal::presets::ParamValue> params;
+    chopfractal::composition::ProjectExtras extras;
+    chopfractal::roles::RuleSet rules;
+  } presetUndo_;
+  void setParamPlain(const std::string& id, double plain);
 };

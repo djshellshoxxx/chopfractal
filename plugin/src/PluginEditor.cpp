@@ -26,7 +26,8 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       controls_(model_, commands_, processor.apvts),
       features_(model_, commands_),
       history_(model_, commands_),
-      orbit_(model_, commands_) {
+      orbit_(model_, commands_),
+      presets_(model_, commands_) {
   const auto saved = cdl::loadUserSettings();
   cdl::setCurrentTheme(saved.theme);
   advanced_ = saved.advanced;
@@ -47,6 +48,20 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   legacyView_.setScrollBarsShown(true, true);
   legacyView_.setComponentID("ToolsDrawer");
 
+  registerDrawer("presets", "Presets", presets_, 380);
+  presets_.onApply = [this](const chopfractal::presets::Preset& p, bool generate) {
+    const bool ok = features_.applyPreset(p, generate);
+    macro_.resetDriftTicks();
+    macro_.setEvolveState(features_.evolveEnabled());
+    return ok;
+  };
+  presets_.onUndo = [this] {
+    const bool ok = features_.undoPreset();
+    macro_.resetDriftTicks();
+    return ok;
+  };
+  presets_.onCapture = [this](const juce::String& name) { return features_.currentPreset(name); };
+  presets_.onApplied = [this](const juce::String& name) { topBar_.setPresetName(name); };
   registerDrawer("tools", "Tools", legacyView_, 420);
   registerDrawer("settings", "Settings", settings_, 300, false);
   settings_.showTheme(cdl::currentTheme());
@@ -61,7 +76,10 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   topBar_.onTheme = [this] { setTheme(cdl::currentTheme() == cdl::ThemeId::Night ? cdl::ThemeId::Concrete : cdl::ThemeId::Night); };
   topBar_.onSettings = [this] { toggleDrawer("settings"); };
   topBar_.onMode = [this] { setAdvanced(!advanced_); };
-  topBar_.onPresetClick = [this] { openDrawer("tools"); };
+  topBar_.onPresetClick = [this] {
+    openDrawer("presets");
+    presets_.focusSearch();
+  };
   macro_.onEvolve = [this](bool on) {
     features_.setEvolveEnabled(on);
     macro_.setEvolveState(features_.evolveEnabled());
@@ -130,7 +148,6 @@ void ChopFractalEditor::timerCallback() {
   if (!rebuilt && (playing || lastPlaying_)) orbit_.repaint();  // the Orbit View shows the playhead too
   if (playing != lastPlaying_) pattern_.setPlaying(playing);
   lastPlaying_ = playing;
-  topBar_.setPresetName(features_.presetName());
   topBar_.syncTransport();
   status_.refreshReadouts();
   // A resize is saved once the size has been stable for a moment, not on every drag step.

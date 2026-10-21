@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <chopfractal/composition/preset_apply.hpp>
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
 #include "DragOut.h"
@@ -437,53 +438,67 @@ juce::File EditorCommands::makeDragFile(bool wav, const ExportUi& ui) {
 // ---------------------------------------------------------------------------------------------
 
 cf::presets::Preset EditorCommands::currentPreset(const juce::String& name, const FractalUi& fractal, const EvolveUi& evolve) const {
-  const cf::host::ParamValues v = proc_.currentParams();
-  cf::presets::Preset p;
-  p.name = name.toStdString();
-  static const int kBars[] = {1, 2, 4, 8};
-  p.bars = kBars[std::max(0, std::min(3, static_cast<int>(std::lround(v.get(cf::host::kPatternBars)))))];
-  p.density = v.get(cf::host::kDensity);
-  p.swing = v.get(cf::host::kSwing);
-  p.variation = v.get(cf::host::kVariationAmount);
-  p.fxIntensity = v.get(cf::host::kFxIntensity);
-  p.chaos = v.get(cf::host::kChaos);
-  p.allowReverse = v.get(cf::host::kAllowReverse) >= 0.5;
-  p.allowPitch = v.get(cf::host::kAllowPitch) >= 0.5;
-  p.allowRetrigger = v.get(cf::host::kAllowRetrigger) >= 0.5;
-  p.allowFilter = v.get(cf::host::kAllowFilter) >= 0.5;
-  p.allowGlide = v.get(cf::host::kAllowGlide) >= 0.5;
-  p.allowCrunch = v.get(cf::host::kAllowCrunch) >= 0.5;
-  p.motif = fractal.motif;
-  p.depth = std::max(1, std::min(3, fractal.depth));
-  p.mutation = fractal.mutation >= 0.0 ? fractal.mutation : v.get(cf::host::kVariationAmount) * 0.5;
-  p.accentDecay = fractal.accent;
+  cf::composition::ProjectExtras extras = model_.extras();
+  extras.motif = fractal.motif;
+  extras.fractalDepth = std::max(1, std::min(3, fractal.depth));
+  extras.fractalMutation = fractal.mutation;
+  extras.fractalAccentDecay = fractal.accent;
+  cf::roles::RuleSet rules;
+  proc_.withSession([&](cf::composition::ProjectSession& s) { rules = s.rules(); });
   static const int kEvery[] = {1, 2, 4, 8, 16};
-  p.evolveEvery = kEvery[std::max(0, std::min(4, evolve.everyIndex))];
-  p.evolveAmount = evolve.amount;
-  return p;
+  return cf::composition::capturePreset(name.toStdString(), proc_.currentParams(), extras, rules, kEvery[std::max(0, std::min(4, evolve.everyIndex))], evolve.amount);
 }
 
-void EditorCommands::applyPresetParams(const cf::presets::Preset& p) {
-  auto setParam = [this](const char* id, double plain) {
-    if (auto* prm = proc_.apvts.getParameter(id)) {
-      prm->beginChangeGesture();  // hosts in touch/latch automation modes expect a gesture around each change
-      prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
-      prm->endChangeGesture();
-    }
-  };
-  setParam("density", p.density);
-  setParam("swing", p.swing);
-  setParam("variation_amount", p.variation);
-  setParam("fx_intensity", p.fxIntensity);
-  setParam("chaos", p.chaos);
-  setParam("allow_reverse", p.allowReverse ? 1.0 : 0.0);
-  setParam("allow_pitch", p.allowPitch ? 1.0 : 0.0);
-  setParam("allow_retrigger", p.allowRetrigger ? 1.0 : 0.0);
-  setParam("allow_filter", p.allowFilter ? 1.0 : 0.0);
-  setParam("allow_glide", p.allowGlide ? 1.0 : 0.0);
-  setParam("allow_crunch", p.allowCrunch ? 1.0 : 0.0);
-  const int barsIdx = p.bars == 1 ? 0 : p.bars == 2 ? 1 : p.bars == 4 ? 2 : 3;
-  setParam("pattern_bars", barsIdx);
+void EditorCommands::setParamPlain(const std::string& id, double plain) {
+  if (auto* prm = proc_.apvts.getParameter(id)) {
+    prm->beginChangeGesture();  // hosts in touch/latch automation modes expect a gesture around each change
+    prm->setValueNotifyingHost(prm->convertTo0to1(static_cast<float>(plain)));
+    prm->endChangeGesture();
+  }
+}
+
+bool EditorCommands::applyPreset(const cf::presets::Preset& p, bool generateAfter) {
+  const cf::Status valid = cf::presets::validate(p);
+  if (!valid.ok()) {
+    model_.setStatus(juce::String(valid.error().message));
+    return false;
+  }
+  const cf::composition::PresetParams pp = cf::composition::presetParams(p);
+  PresetUndo undo;
+  for (const auto& v : pp.values)
+    if (auto* prm = proc_.apvts.getParameter(v.id)) undo.params.push_back({v.id, static_cast<double>(prm->convertFrom0to1(prm->getValue()))});
+  undo.extras = model_.extras();
+  proc_.withSession([&](cf::composition::ProjectSession& s) { undo.rules = s.rules(); });
+  undo.valid = true;
+  for (const auto& v : pp.values) setParamPlain(v.id, v.value);
+  const cf::Status st = run([&p](cf::composition::ProjectSession& s) { return cf::composition::applyPresetToSession(s, p); });
+  if (!st.ok()) {  // all or nothing: put the parameters back
+    for (const auto& v : undo.params) setParamPlain(v.id, v.value);
+    return false;
+  }
+  presetUndo_ = std::move(undo);
+  juce::String msg = "Preset \"" + juce::String(p.name) + "\" applied.";
+  if (pp.ignored > 0) msg = juce::String(pp.ignored) + " setting(s) from a newer version were ignored. " + msg;
+  model_.setStatus(msg);
+  if (generateAfter) {
+    generate();
+    model_.setStatus("Preset \"" + juce::String(p.name) + "\" applied and generated.");
+  }
+  return true;
+}
+
+bool EditorCommands::undoPreset() {
+  if (!presetUndo_.valid) return false;
+  const PresetUndo u = std::move(presetUndo_);
+  presetUndo_ = {};
+  for (const auto& v : u.params) setParamPlain(v.id, v.value);
+  run([&u](cf::composition::ProjectSession& s) {
+    cf::Status st = s.setExtras(u.extras);
+    if (!st.ok()) return st;
+    return s.setRules(u.rules);
+  });
+  model_.setStatus("Preset undone.");
+  return true;
 }
 
 void EditorCommands::savePreset(const cf::presets::Preset& p, bool overwrite) {

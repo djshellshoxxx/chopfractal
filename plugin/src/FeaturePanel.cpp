@@ -96,25 +96,11 @@ FeaturePanel::FeaturePanel(EditorModel& model, EditorCommands& commands) : Edito
   exportLoops_.setSelectedId(model_.extras().exportUi.loopsIndex + 1, juce::dontSendNotification);
   exportLoops_.setTitle("Export loops");
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_})
-    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi = {exportFormat_.getSelectedId() - 1, exportRate_.getSelectedId() - 1, exportLoops_.getSelectedId() - 1}; }); };
+    c->onChange = [this] { model_.setExtras([this](cf::composition::ProjectExtras& e) { e.exportUi.formatIndex = exportFormat_.getSelectedId() - 1;
+      e.exportUi.rateIndex = exportRate_.getSelectedId() - 1;
+      e.exportUi.loopsIndex = exportLoops_.getSelectedId() - 1; }); };
   for (juce::ComboBox* c : std::initializer_list<juce::ComboBox*>{&exportFormat_, &exportRate_, &exportLoops_}) addAndMakeVisible(*c);
 
-  for (juce::Button* b : std::initializer_list<juce::Button*>{&savePreset_, &deletePreset_}) {
-    addAndMakeVisible(*b);
-    b->setTitle(b->getButtonText());
-  }
-  savePreset_.onClick = [this] { askSavePreset(); };
-  deletePreset_.onClick = [this] { deleteSelectedPreset(); };
-  preset_.setTitle("Preset");
-  preset_.setTextWhenNothingSelected("Choose a preset...");
-  preset_.onChange = [this] {
-    const int i = preset_.getSelectedId() - 1;
-    if (i >= 0 && i < static_cast<int>(presets_.size())) applyPreset(presets_[static_cast<std::size_t>(i)].preset);
-    deletePreset_.setEnabled(i >= 0 && i < static_cast<int>(presets_.size()) && !presets_[static_cast<std::size_t>(i)].factory);
-  };
-  addAndMakeVisible(preset_);
-  deletePreset_.setEnabled(false);
-  reloadPresets();
   dragMidi_.setTooltip("Drag the current pattern into your DAW as a MIDI file");
   dragWav_.setTooltip("Drag the current pattern into your DAW as a WAV file");
   addAndMakeVisible(dragMidi_);
@@ -138,11 +124,6 @@ ExportUi FeaturePanel::exportUi() const { return {exportFormat_.getSelectedId() 
 void FeaturePanel::setEvolveEnabled(bool on) {
   evolve_.setToggleState(on, juce::dontSendNotification);
   pushEvolve();
-}
-
-juce::String FeaturePanel::presetName() const {
-  const int i = preset_.getSelectedId() - 1;
-  return i >= 0 && i < static_cast<int>(presets_.size()) ? preset_.getText() : juce::String();
 }
 
 void FeaturePanel::pushEvolve() {
@@ -234,10 +215,6 @@ void FeaturePanel::resized() {
   featC.removeFromLeft(16);
   for (juce::Button* b : std::initializer_list<juce::Button*>{&storeA_, &recallA_, &storeB_, &recallB_}) b->setBounds(featC.removeFromLeft(78).reduced(2));
   auto featD = area.removeFromTop(26);
-  preset_.setBounds(featD.removeFromLeft(190).reduced(2));
-  savePreset_.setBounds(featD.removeFromLeft(90).reduced(2));
-  deletePreset_.setBounds(featD.removeFromLeft(70).reduced(2));
-  featD.removeFromLeft(16);
   role_.setBounds(featD.removeFromLeft(110).reduced(2));
   setRole_.setBounds(featD.removeFromLeft(80).reduced(2));
   featD.removeFromLeft(16);
@@ -251,65 +228,30 @@ void FeaturePanel::resized() {
 
 cf::presets::Preset FeaturePanel::currentPreset(const juce::String& name) const { return cmd_.currentPreset(name, fractalUi(), evolveUi()); }
 
-void FeaturePanel::applyPreset(const cf::presets::Preset& p) {
-  cmd_.applyPresetParams(p);
-  motif_.setText(juce::String(p.motif), juce::dontSendNotification);
-  depth_.setSelectedId(std::max(1, std::min(3, p.depth)), juce::dontSendNotification);
-  model_.setExtras([&p](cf::composition::ProjectExtras& e) {  // the widgets above were set silently, so the persisted copy follows here
-    e.motif = p.motif;
-    e.fractalDepth = std::max(1, std::min(3, p.depth));
-    e.fractalMutation = p.mutation;
-    e.fractalAccentDecay = p.accentDecay;
-  });
+bool FeaturePanel::applyPreset(const cf::presets::Preset& p, bool generateAfter) {
+  if (evolve_.getToggleState()) {  // a running Evolve would pick up the new cadence mid-loop: stop it first
+    setEvolveEnabled(false);
+    cmd_.say("Evolve stopped to apply the preset.");
+  }
+  const int prevEvery = every_.getSelectedId() - 1;
+  const double prevAmount = evolveAmount_.getValue();
+  if (!cmd_.applyPreset(p, generateAfter)) return false;
+  undoEvery_ = prevEvery;
+  undoAmount_ = prevAmount;
+  setEvolveValues(p.evolveEvery, p.evolveAmount);  // the motif and depth widgets follow the Extras change
+  return true;
+}
+
+void FeaturePanel::setEvolveValues(int everyLoops, double amount) {
   static const int kEvery[] = {1, 2, 4, 8, 16};
   for (int i = 0; i < 5; ++i)
-    if (kEvery[i] == p.evolveEvery) every_.setSelectedId(i + 1, juce::dontSendNotification);
-  evolveAmount_.setValue(p.evolveAmount, juce::dontSendNotification);
-  cmd_.say("Preset \"" + juce::String(p.name) + "\" loaded; press Generate to use it.");
+    if (kEvery[i] == everyLoops) every_.setSelectedId(i + 1, juce::dontSendNotification);
+  evolveAmount_.setValue(amount, juce::dontSendNotification);
 }
 
-void FeaturePanel::reloadPresets() {
-  int skipped = 0;
-  presets_ = PresetManager::list(&skipped);
-  preset_.clear(juce::dontSendNotification);
-  for (std::size_t i = 0; i < presets_.size(); ++i) preset_.addItem(presets_[i].label, static_cast<int>(i) + 1);
-  if (skipped > 0) cmd_.say(juce::String(skipped) + " preset file(s) could not be read and were skipped.");
-}
-
-void FeaturePanel::savePresetNamed(const juce::String& name, bool overwrite) {
-  cmd_.savePreset(currentPreset(name.trim()), overwrite);
-  reloadPresets();
-}
-
-void FeaturePanel::askSavePreset() {
-  auto* editor = findParentComponentOfClass<juce::AudioProcessorEditor>();
-  auto* w = new juce::AlertWindow("Save preset", "Name for this preset:", juce::MessageBoxIconType::NoIcon, editor);
-  w->addTextEditor("name", "My preset");
-  w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
-  w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
-  juce::Component::SafePointer<FeaturePanel> self(this);
-  juce::Component::SafePointer<juce::Component> owner(editor);
-  w->enterModalState(true, juce::ModalCallbackFunction::create([self, w, owner](int result) {
-    if (result != 1 || !self) return;
-    const juce::String name = w->getTextEditorContents("name").trim();
-    if (name.isEmpty()) return;
-    bool exists = false;
-    for (const auto& e : self->presets_) exists = exists || (!e.factory && e.label.equalsIgnoreCase(name));
-    if (!exists) {
-      self->savePresetNamed(name, false);
-      return;
-    }
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions().withIconType(juce::MessageBoxIconType::QuestionIcon).withTitle("Replace preset?").withMessage("A preset named \"" + name + "\" exists. Replace it?").withButton("Replace").withButton("Cancel").withAssociatedComponent(owner.getComponent()),
-                                 [self, name](int r) {
-                                   if (r == 1 && self) self->savePresetNamed(name, true);
-                                 });
-  }), true);
-}
-
-void FeaturePanel::deleteSelectedPreset() {
-  const int i = preset_.getSelectedId() - 1;
-  if (i < 0 || i >= static_cast<int>(presets_.size()) || presets_[static_cast<std::size_t>(i)].factory) return;
-  cmd_.deletePreset(presets_[static_cast<std::size_t>(i)].file);
-  reloadPresets();
-  deletePreset_.setEnabled(false);
+bool FeaturePanel::undoPreset() {
+  if (!cmd_.undoPreset()) return false;
+  every_.setSelectedId(undoEvery_ + 1, juce::dontSendNotification);
+  evolveAmount_.setValue(undoAmount_, juce::dontSendNotification);
+  return true;
 }

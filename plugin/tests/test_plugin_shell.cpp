@@ -1,5 +1,9 @@
 // Headless tests of the real JUCE processor: no host and no window, but the real parameter tree, host-time
 // translation, audio path, project-state round trip and file decoding.
+// The JUCE checkout used for local builds deprecates AudioFormat::createWriterFor; the tests only write small fixtures with it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <algorithm>
 #include <memory>
 #include <chopfractal/chop_contracts/rng.hpp>
