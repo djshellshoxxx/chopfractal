@@ -1,0 +1,138 @@
+name: Release beta
+
+# Builds every platform package, runs the tests, and publishes a GitHub PRERELEASE.
+#   - push a tag like v0.2.0-beta.1, or
+#   - run this workflow manually with the tag as input (the tag is created at the chosen commit when published).
+# The tag must equal "v" + the contents of VERSION. The release stays a DRAFT until every asset is uploaded and its
+# checksum verified against the uploaded bytes; only then is it published (as a prerelease, never "latest").
+on:
+  push:
+    tags: ["v*-beta.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.2.0-beta.1 (must match VERSION)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-beta-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: gate (version, repository checks, portable tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      version: ${{ steps.t.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tag against VERSION
+        id: t
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "::error::tag '$tag' must look like v1.2.3-beta.4"; exit 1; }
+          version=$(python3 tools/check_version.py --tag "$tag")
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.tag_name==\"$tag\" and .draft==false)] | length")
+          [ "$existing" = "0" ] || { echo "::error::a published release for $tag already exists; bump VERSION and use a new tag"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: python3 tools/check_modules.py
+      - run: python3 tools/gen_module_docs.py --check
+      - run: python3 tools/check_includes.py
+      - name: Portable module tests
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHOPFRACTAL_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+
+  build:
+    needs: gate
+    uses: ./.github/workflows/build-packages.yml
+    with:
+      release: true
+      retention-days: 30
+    secrets: inherit
+
+  publish:
+    name: publish (draft, verify, prerelease)
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.gate.outputs.tag }}
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ChopFractal-*
+          merge-multiple: true
+          path: assets
+      - name: Verify the built archives
+        run: |
+          set -euo pipefail
+          cd assets
+          shopt -s nullglob
+          platforms="windows-x64 linux-x86_64 macos-arm64 macos-x86_64 macos-universal"
+          for p in $platforms; do
+            for f in standalone vst3 clap; do
+              found=(ChopFractal-"$VERSION"-"$p"-"$f".zip ChopFractal-"$VERSION"-"$p"-"$f".tar.gz)
+              [ "${#found[@]}" = "1" ] || { echo "::error::missing archive for $p $f"; exit 1; }
+            done
+          done
+          for z in *.zip; do unzip -tq "$z"; done
+          for t in *.tar.gz; do tar tzf "$t" >/dev/null; done
+          for s in *.sha256; do sha256sum -c "$s"; done
+          ls *.zip *.tar.gz | sort | xargs sha256sum > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+          [ "$(ls *.zip *.tar.gz | wc -l)" = "15" ]
+          # Contents sanity: every archive carries the license, notices, install steps and the stamped version.
+          for z in *.zip; do unzip -l "$z" | grep -q README-INSTALL.txt && unzip -l "$z" | grep -q THIRD_PARTY_NOTICES.md && unzip -l "$z" | grep -q LICENSE; done
+          for t in *.tar.gz; do tar tzf "$t" | grep -q README-INSTALL.txt && tar tzf "$t" | grep -q THIRD_PARTY_NOTICES.md; done
+      - name: Release notes
+        run: python3 tools/make_release_notes.py --version "$VERSION" --tag "$TAG" --assets assets > notes.md
+      - name: Create draft prerelease and upload every asset
+        run: |
+          set -euo pipefail
+          # A leftover draft from an earlier failed attempt is replaced; a published release was already ruled out.
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true) | .id"); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          gh release create "$TAG" --draft --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "ChopFractal $VERSION" --notes-file notes.md
+          gh release upload "$TAG" assets/* --clobber
+      - name: Verify the uploaded assets against local checksums
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name==\"$TAG\" and .draft==true)" > release.json
+          [ -s release.json ]
+          expected=$(ls assets | wc -l)
+          actual=$(jq '.assets | length' release.json)
+          [ "$expected" = "$actual" ] || { echo "::error::expected $expected assets, release has $actual"; exit 1; }
+          jq -e '.assets | all(.state == "uploaded")' release.json >/dev/null
+          mkdir verify
+          jq -r '.assets[] | "\(.id) \(.name)"' release.json | while read -r id name; do
+            gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "verify/$name"
+          done
+          (cd verify && sha256sum -c SHA256SUMS.txt && for s in *.sha256; do sha256sum -c "$s"; done)
+          diff <(cd assets && sha256sum * | sort) <(cd verify && sha256sum * | sort)
+      - name: Publish as prerelease
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --json isDraft,isPrerelease,url --jq '"draft=\(.isDraft) prerelease=\(.isPrerelease) \(.url)"'

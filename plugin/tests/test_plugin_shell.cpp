@@ -7,7 +7,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <string>
 
+#include "BuildInfo.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
@@ -750,6 +753,17 @@ CHOP_TEST(audio_stays_finite_under_hostile_host_timing_and_block_sizes) {
   }
   p.setPlayHead(nullptr);
   CHECK(finite);
+}
+
+CHOP_TEST(version_stamp_matches_VERSION_file) {
+  std::ifstream in(CHOPFRACTAL_VERSION_FILE);
+  CHECK(in.good());
+  std::string line;
+  std::getline(in, line);
+  while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+  CHECK(!line.empty());
+  CHECK(line == cfbuild::kVersionFull);
+  CHECK(line.rfind(cfbuild::kVersionNum, 0) == 0);  // numeric part is the prefix of the full version
 }
 
 int main() {

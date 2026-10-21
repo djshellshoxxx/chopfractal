@@ -1,0 +1,249 @@
+name: Build packages
+
+# Reusable: builds Standalone + VST3 + CLAP for Windows x64, Linux x86_64, macOS arm64 and macOS x86_64 (plus a macOS
+# universal merge), runs the plugin shell tests on each, and uploads one workflow artifact per platform and format
+# (zip/tar.gz with LICENSE, THIRD_PARTY_NOTICES.md, README-INSTALL.txt and a .sha256 file).
+# Called from ci.yml (every push and pull request) and release-beta.yml (tagged betas).
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: "true for release builds: file names carry only the version, with no commit suffix"
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: windows-x64, os: windows-2022}
+          - {platform: linux-x86_64, os: ubuntu-24.04}
+          - {platform: macos-arm64, os: macos-14, arch: arm64}
+          - {platform: macos-x86_64, os: macos-15-intel, arch: x86_64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Optional signing material. Without these secrets every signing step is skipped (macOS still ad-hoc signs).
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY_SECRET: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      WIN_CERT_PFX_BASE64: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+      WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version and file-name suffix
+        id: ver
+        run: |
+          version=$(python tools/check_version.py)
+          suffix=""
+          if [ "${{ inputs.release }}" != "true" ]; then suffix="-${GITHUB_SHA::8}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "version_num=$(python -c "import re,sys;print(re.match(r'\d+\.\d+\.\d+',sys.argv[1]).group(0))" "$version")" >> "$GITHUB_OUTPUT"
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libgl1-mesa-dev libfreetype-dev libfontconfig1-dev libgtk-3-dev libgtkmm-3.0-dev
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: ~/.cache/chopfractal-vst3sdk
+          key: vst3-validator-${{ runner.os }}-${{ hashFiles('tools/validate_vst3.sh') }}
+      - name: Configure
+        run: |
+          flags="-DCHOPFRACTAL_BUILD_PLUGIN=ON -DCHOPFRACTAL_BUILD_CLAP=ON -DCHOPFRACTAL_BUILD_STANDALONE=ON -DCHOPFRACTAL_BUILD_NUMBER=${{ github.run_number }}"
+          case "${{ matrix.platform }}" in
+            windows-x64) cmake -S . -B build-plugin -G "Visual Studio 17 2022" -A x64 $flags -DCHOPFRACTAL_WARNINGS_AS_ERRORS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ;;
+            linux-x86_64) cmake -S . -B build-plugin -G Ninja -DCMAKE_BUILD_TYPE=Release $flags ;;
+            macos-*) cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release $flags -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 ;;
+          esac
+      - name: Build Standalone, VST3, CLAP and shell tests
+        run: cmake --build build-plugin --config Release --parallel --target ChopFractal_Standalone ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
+      - name: Shell tests (headless)
+        run: |
+          t=build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+          [ "$RUNNER_OS" = "Windows" ] && t="$t.exe"
+          if [ "$RUNNER_OS" = "Linux" ]; then env -u DISPLAY "./$t"; else "./$t"; fi
+      - name: Shell tests with a virtual display (Linux, includes the editor tests)
+        if: runner.os == 'Linux'
+        run: CHOPFRACTAL_REQUIRE_DISPLAY=1 xvfb-run -a ./build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
+      - name: VST3 validator (Linux)
+        if: runner.os == 'Linux'
+        run: tools/validate_vst3.sh build-plugin/plugin/ChopFractal_artefacts/Release/VST3/ChopFractal.vst3
+
+      # ---- signing (each step is skipped when its secrets are absent) ----
+      - name: Import Developer ID certificate (macOS; skipped without MACOS_CERT_P12_BASE64)
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12_BASE64 != '' && env.MACOS_SIGN_IDENTITY_SECRET != ''
+        run: |
+          kc="$RUNNER_TEMP/build.keychain-db"
+          pw=$(openssl rand -base64 24)
+          echo "::add-mask::$pw"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          echo "MACOS_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY_SECRET" >> "$GITHUB_ENV"
+      - name: Sign macOS bundles (Developer ID if imported, otherwise ad-hoc so Apple silicon will run them)
+        if: runner.os == 'macOS'
+        run: |
+          a=build-plugin/plugin/ChopFractal_artefacts/Release
+          tools/sign_macos.sh "$a/VST3/ChopFractal.vst3" "$a/CLAP/ChopFractal.clap" "$a/Standalone/ChopFractal.app"
+      - name: Sign Windows binaries (skipped without WIN_CERT_PFX_BASE64)
+        if: runner.os == 'Windows' && env.WIN_CERT_PFX_BASE64 != ''
+        run: |
+          echo "$WIN_CERT_PFX_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.pfx"
+          signtool=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -ipath '*x64*' -name signtool.exe | sort | tail -1)
+          a=build-plugin/plugin/ChopFractal_artefacts/Release
+          for f in "$a/VST3/ChopFractal.vst3/Contents/x86_64-win/ChopFractal.vst3" "$a/CLAP/ChopFractal.clap" "$a/Standalone/ChopFractal.exe"; do
+            "$signtool" sign /f "$(cygpath -w "$RUNNER_TEMP/cert.pfx")" /p "$WIN_CERT_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "$(cygpath -w "$f")"
+          done
+          rm -f "$RUNNER_TEMP/cert.pfx"
+
+      - name: Verify architecture and version stamp (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          a=build-plugin/plugin/ChopFractal_artefacts/Release
+          for b in "$a/VST3/ChopFractal.vst3" "$a/CLAP/ChopFractal.clap" "$a/Standalone/ChopFractal.app"; do
+            archs=$(lipo -archs "$b/Contents/MacOS/ChopFractal")
+            echo "$b: $archs"
+            [ "$archs" = "${{ matrix.arch }}" ]
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$b/Contents/Info.plist")
+            echo "CFBundleShortVersionString=$v"
+            [ "$v" = "${{ steps.ver.outputs.version_num }}" ]
+          done
+      - name: Package
+        run: |
+          python tools/package_artifacts.py --platform ${{ matrix.platform }} --artefacts build-plugin/plugin/ChopFractal_artefacts/Release \
+            --out dist --version "${{ steps.ver.outputs.version }}" --suffix="${{ steps.ver.outputs.suffix }}"
+          ls -l dist
+      - name: Keep the raw macOS build for the universal merge
+        if: runner.os == 'macOS'
+        run: tar -C build-plugin/plugin/ChopFractal_artefacts/Release -czf raw-${{ matrix.platform }}.tar.gz Standalone VST3 CLAP
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: raw-${{ matrix.platform }}
+          path: raw-${{ matrix.platform }}.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-${{ matrix.platform }}-standalone
+          path: dist/*-standalone.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-${{ matrix.platform }}-vst3
+          path: dist/*-vst3.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-${{ matrix.platform }}-clap
+          path: dist/*-clap.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+  macos-universal:
+    name: build (macos-universal)
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY_SECRET: ${{ secrets.MACOS_SIGN_IDENTITY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: raw-macos-*
+          path: raw
+      - name: Version and file-name suffix
+        id: ver
+        run: |
+          version=$(python tools/check_version.py)
+          suffix=""
+          if [ "${{ inputs.release }}" != "true" ]; then suffix="-${GITHUB_SHA::8}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+      - name: Merge with lipo
+        run: |
+          mkdir arm x86
+          tar -C arm -xzf raw/raw-macos-arm64/raw-macos-arm64.tar.gz
+          tar -C x86 -xzf raw/raw-macos-x86_64/raw-macos-x86_64.tar.gz
+          tools/make_universal_macos.sh arm x86 universal
+      - name: Import Developer ID certificate (skipped without MACOS_CERT_P12_BASE64)
+        if: env.MACOS_CERT_P12_BASE64 != '' && env.MACOS_SIGN_IDENTITY_SECRET != ''
+        run: |
+          kc="$RUNNER_TEMP/build.keychain-db"
+          pw=$(openssl rand -base64 24)
+          echo "::add-mask::$pw"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          echo "MACOS_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY_SECRET" >> "$GITHUB_ENV"
+      - name: Sign and verify
+        run: |
+          tools/sign_macos.sh universal/VST3/ChopFractal.vst3 universal/CLAP/ChopFractal.clap universal/Standalone/ChopFractal.app
+          for b in universal/VST3/ChopFractal.vst3 universal/CLAP/ChopFractal.clap universal/Standalone/ChopFractal.app; do
+            archs=$(lipo -archs "$b/Contents/MacOS/ChopFractal" | tr ' ' '\n' | sort | tr '\n' ' ')
+            echo "$b: $archs"
+            [ "$archs" = "arm64 x86_64 " ]
+          done
+      - name: Package
+        run: |
+          python tools/package_artifacts.py --platform macos-universal --artefacts universal --out dist \
+            --version "${{ steps.ver.outputs.version }}" --suffix="${{ steps.ver.outputs.suffix }}"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-macos-universal-standalone
+          path: dist/*-standalone.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-macos-universal-vst3
+          path: dist/*-vst3.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChopFractal-${{ steps.ver.outputs.version }}${{ steps.ver.outputs.suffix }}-macos-universal-clap
+          path: dist/*-clap.*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error

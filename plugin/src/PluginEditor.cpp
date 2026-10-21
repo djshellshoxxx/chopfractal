@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "BuildInfo.h"
 
 #include <algorithm>
 #include <initializer_list>
@@ -66,6 +67,13 @@ bool ChopFractalEditor::isInterestedInFileDrag(const juce::StringArray& files) {
 }
 
 void ChopFractalEditor::filesDropped(const juce::StringArray& files, int, int) { commands_.handleDroppedFiles(files); }
+
+void ChopFractalEditor::paint(juce::Graphics& g) {
+  g.fillAll(editor_theme::background());
+  g.setColour(juce::Colours::white.withAlpha(0.5f));
+  g.setFont(10.0f);
+  g.drawText(juce::String("ChopFractal ") + cfbuild::kVersionFull, getLocalBounds().removeFromTop(11).withTrimmedRight(10), juce::Justification::centredRight);
+}
 
 void ChopFractalEditor::resized() {
   auto area = getLocalBounds().reduced(10);

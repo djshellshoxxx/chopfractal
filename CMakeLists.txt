@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
-project(ChopFractal VERSION 0.1.0 LANGUAGES CXX)
+# VERSION (repo root) is the single source of truth: MAJOR.MINOR.PATCH with an optional -beta.N / -rc.N suffix.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" CHOPFRACTAL_VERSION_FULL LIMIT_COUNT 1)
+string(STRIP "${CHOPFRACTAL_VERSION_FULL}" CHOPFRACTAL_VERSION_FULL)
+if(NOT CHOPFRACTAL_VERSION_FULL MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-(alpha|beta|rc)\\.[0-9]+)?$")
+  message(FATAL_ERROR "VERSION must look like 1.2.3 or 1.2.3-beta.4, got '${CHOPFRACTAL_VERSION_FULL}'")
+endif()
+set(CHOPFRACTAL_VERSION_NUM "${CMAKE_MATCH_1}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+project(ChopFractal VERSION ${CHOPFRACTAL_VERSION_NUM} LANGUAGES CXX)
+set(CHOPFRACTAL_BUILD_NUMBER "0" CACHE STRING "CI build number stamped into BuildInfo")
 
 # The portable modules need 3.20; the JUCE plugin (juce_add_plugin, FetchContent options) needs 3.22.
 if(CHOPFRACTAL_BUILD_PLUGIN AND CMAKE_VERSION VERSION_LESS 3.22)
