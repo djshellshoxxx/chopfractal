@@ -13,6 +13,7 @@
 #include "EditorModel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
+#include "StatusBar.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
 class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer, private EditorModel::Listener {
@@ -76,12 +77,12 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   ChopFractalProcessor& proc_;
   EditorModel model_;
   EditorCommands commands_;
+  StatusBar status_;
   juce::ToggleButton editMode_{"Move / resize hits"};
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
 
   juce::TextButton play_{"Play"}, stop_{"Stop"}, followHost_{"Follow DAW"};
-  juce::TextEditor statusMessages_;
   juce::Label transportHint_{{}, "Load Loop > Detect Chops > Generate > Play"};
   juce::TextButton load_{"Load Loop"}, detect_{"Detect Chops"}, generate_{"Generate"}, mutate_{"Mutate"}, undo_{"Undo"}, redo_{"Redo"},
       zoom_{"Zoom In"}, collapse_{"Collapse"}, lock_{"Lock Bar"}, dice_{"New Seed"};
@@ -125,7 +126,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
 
-  juce::String lastStatusLine_;
   juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)

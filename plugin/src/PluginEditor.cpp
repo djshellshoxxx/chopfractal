@@ -11,7 +11,7 @@ namespace cf = chopfractal;
 
 using editor_theme::laneColour;
 
-ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_) {
+ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioProcessorEditor(&processor), proc_(processor), model_(processor), commands_(processor, model_), status_(model_, commands_) {
   model_.addListener(this);
   setSize(940, 912);
   setResizable(false, false);
@@ -38,16 +38,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor) : AudioPro
   play_.onClick = [this] { commands_.play(); };
   stop_.onClick = [this] { commands_.stop(); };
   followHost_.onClick = [this] { commands_.followHost(); };
-  statusMessages_.setTitle("Status messages");
-  statusMessages_.setMultiLine(true, true);
-  statusMessages_.setReadOnly(true);
-  statusMessages_.setScrollbarsShown(true);
-  statusMessages_.setCaretVisible(false);
-  statusMessages_.setPopupMenuEnabled(true);
-  statusMessages_.setColour(juce::TextEditor::backgroundColourId, editor_theme::canvas());
-  statusMessages_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
-  statusMessages_.setTooltip("Full status message. Scroll to read long messages; select text to copy it.");
-  addAndMakeVisible(statusMessages_);
+  addAndMakeVisible(status_);
   load_.onClick = [this] { commands_.chooseFile(); };
   detect_.onClick = [this] { commands_.detectChops(static_cast<DetectChoice>(detectMode_.getSelectedId())); };
   detectMode_.addItemList({"Transients (replace)", "Transients (keep my markers)", "Even grid 1/8", "Even grid 1/16"}, 1);
@@ -321,7 +312,7 @@ void ChopFractalEditor::resized() {
   area.removeFromTop(6);
   patternArea_ = area.removeFromTop(230);
   area.removeFromTop(6);
-  statusMessages_.setBounds(area.removeFromBottom(74).reduced(0, 2));
+  status_.setBounds(area.removeFromBottom(74).reduced(0, 2));
   auto bottom = area.removeFromTop(area.getHeight() - 2);
   orbitArea_ = bottom.removeFromRight(std::min(bottom.getHeight(), bottom.getWidth() / 2));
   historyArea_ = bottom.withTrimmedRight(6);
@@ -392,15 +383,6 @@ void ChopFractalEditor::modelChanged(EditorModel::Change change) {
       if (static_cast<std::uint64_t>(seed_.getText().getLargeIntValue()) != model_.seed())
         seed_.setText(juce::String(static_cast<juce::int64>(model_.seed())), juce::dontSendNotification);
       break;
-    case Change::Status: {
-      const juce::String line = model_.statusLine();
-      if (line != lastStatusLine_) {
-        lastStatusLine_ = line;
-        statusMessages_.setText(line, false);
-        statusMessages_.moveCaretToTop(false);
-      }
-      break;
-    }
     case Change::Selection:
       repaint();
       break;
