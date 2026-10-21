@@ -22,6 +22,7 @@ Public headers:
 - `include/chopfractal/plugin_ui_adapter/views.hpp`
 - `include/chopfractal/plugin_ui_adapter/preset_browser.hpp`
 - `include/chopfractal/plugin_ui_adapter/export_view.hpp`
+- `include/chopfractal/plugin_ui_adapter/settings_view.hpp`
 - `include/chopfractal/plugin_ui_adapter/orbit.hpp`
 - `include/chopfractal/plugin_ui_adapter/hit_edit.hpp`
 - `include/chopfractal/plugin_ui_adapter/session_views.hpp`

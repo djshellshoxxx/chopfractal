@@ -1,5 +1,7 @@
 #include "chopfractal/plugin_ui_adapter/settings_view.hpp"
 
+#include <cstddef>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

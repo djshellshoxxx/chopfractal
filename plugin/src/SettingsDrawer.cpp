@@ -1,5 +1,9 @@
 #include "SettingsDrawer.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <initializer_list>
+
 #include <chopfractal/plugin_ui_adapter/settings_view.hpp>
 
 #include "CdlLookAndFeel.h"
