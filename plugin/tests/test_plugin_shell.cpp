@@ -24,6 +24,7 @@
 
 #include "CdlTheme.h"
 #include "PluginEditor.h"
+#include "QuickStartTracker.h"
 #include "PluginProcessor.h"
 #include "chop_test.hpp"
 #include "shell_test_support.hpp"
@@ -814,6 +815,9 @@ CHOP_TEST(version_stamp_matches_VERSION_file) {
 int main() {
   // The editor remembers theme and size per user; keep the tests away from the real profile.
   cdl::setSettingsFileOverride(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_ui.json"));
+  const auto quickStartFile = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("chopfractal_shell_tests_quickstart.json");
+  quickStartFile.deleteFile();  // every run starts with a fresh first-run checklist
+  QuickStartTracker::setFileOverride(quickStartFile);
   const bool display = haveDisplay();
   std::unique_ptr<juce::ScopedJuceInitialiser_GUI> gui;
   if (display) gui = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
@@ -821,6 +825,21 @@ int main() {
   if (const char* only = std::getenv("CHOP_TEST_FILTER")) {  // run just the cases whose name contains the text
     auto& cases = chop_test::registry();
     cases.erase(std::remove_if(cases.begin(), cases.end(), [only](const chop_test::Case& c) { return std::string(c.name).find(only) == std::string::npos; }), cases.end());
+  }
+  if (const char* skip = std::getenv("CHOP_TEST_SKIP")) {  // drop the cases whose name contains any of the comma separated texts (bisecting order-dependent failures)
+    auto& cases = chop_test::registry();
+    const std::string list(skip);
+    cases.erase(std::remove_if(cases.begin(), cases.end(), [&list](const chop_test::Case& c) {
+      std::size_t from = 0;
+      while (from <= list.size()) {
+        const auto comma = list.find(',', from);
+        const std::string part = list.substr(from, comma == std::string::npos ? std::string::npos : comma - from);
+        if (!part.empty() && std::string(c.name).find(part) != std::string::npos) return true;
+        if (comma == std::string::npos) break;
+        from = comma + 1;
+      }
+      return false;
+    }), cases.end());
   }
   const int rc = chop_test::runAll();
   gui.reset();

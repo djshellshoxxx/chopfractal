@@ -11,8 +11,10 @@
 namespace shelltest {
 // Points every per-user file at a fresh temp folder for the life of the object.
 struct IsolatedUser {
-  juce::File root;
+  juce::File root, previousSettings, previousQuickStart;  // restored on exit: main() points both at temp files
   IsolatedUser() {
+    previousSettings = cdl::settingsFile();
+    previousQuickStart = QuickStartTracker::defaultFile();
     root = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cf_g3_" + juce::String(juce::Random::getSystemRandom().nextInt()));
     root.createDirectory();
     PresetManager::setFolderOverride(root.getChildFile("presets"));
@@ -25,8 +27,8 @@ struct IsolatedUser {
   ~IsolatedUser() {
     PresetManager::setFolderOverride(juce::File());
     dragout::setFolderOverride(juce::File());
-    cdl::setSettingsFileOverride(juce::File());
-    QuickStartTracker::setFileOverride(juce::File());
+    cdl::setSettingsFileOverride(previousSettings);
+    QuickStartTracker::setFileOverride(previousQuickStart);
     cdl::setCurrentTheme(cdl::ThemeId::Night);
     cdl::setReducedMotion(false);
     root.deleteRecursively();
