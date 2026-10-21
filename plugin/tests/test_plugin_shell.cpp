@@ -1022,8 +1022,11 @@ CHOP_TEST(four_essential_workflows_then_35_seconds_of_randomized_qa) {
     const auto rects = editor.hitRects();
     CHECK(!rects.empty());
     if (rects.empty()) return;
-    a = hitPoint(editor, rects.front(), 0.5);
-    sim.click(a);
+    for (const auto& r : rects) {  // the first hit may be too short or covered to click: take the first one that selects
+      sim.click(hitPoint(editor, r, 0.5));
+      if (!editor.selectedHits().empty()) break;
+    }
+    CHECK(!editor.selectedHits().empty());
     if (auto* button = findButton(editor, "Zoom In")) button->onClick();
     CHECK(patternBytes(p) != unchanged);
 
