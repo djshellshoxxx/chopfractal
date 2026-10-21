@@ -31,6 +31,17 @@ void* operator new(std::size_t n) {
 }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+// Every form is replaced together (std::stable_sort uses the nothrow form), or sanitizers report a new / free mismatch.
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+  if (gCount) ++gAllocs;
+  return std::malloc(n ? n : 1);
+}
+void* operator new[](std::size_t n) { return operator new(n); }
+void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return operator new(n, std::nothrow); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
 
 CHOP_TEST(swing_delay_ticks_match_the_published_values) {
   CHECK_EQ(swingDelayTicks(50.f, 240), 0);
