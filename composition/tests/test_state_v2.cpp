@@ -48,12 +48,6 @@ CHOP_TEST(default_session_state_bytes_are_unchanged_from_v1) {
   CHECK(saved.ok());
   CHECK_EQ(statefix::fnv1a64(saved.value()), v1fixture::kV1FixtureHash);
   CHECK(saved.value() == v1Bytes());
-  if (saved.value() != v1Bytes()) {  // DIAG
-    const auto exp = v1Bytes();
-    std::size_t i = 0;
-    while (i < exp.size() && i < saved.value().size() && exp[i] == saved.value()[i]) ++i;
-    std::fprintf(stderr, "DIAG v1 mismatch: got %zu bytes, want %zu, first diff at %zu\n", saved.value().size(), exp.size(), i);
-  }
   CHECK_EQ(compositionSchema(saved.value()), 1u);
 }
 

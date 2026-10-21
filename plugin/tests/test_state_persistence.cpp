@@ -1,6 +1,5 @@
 // F01 shell tests: persisted extras and A/B through the real processor, worker restore of reference-only audio, and
 // export on a worker thread with progress and cancel. Message-loop helpers: waitFor / waitForRestore (shell_test_support).
-#include <cstdio>
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -289,7 +288,6 @@ CHOP_TEST(export_runs_on_a_worker_reports_progress_and_cancels) {
   const double c0 = juce::Time::getMillisecondCounterHiRes();
   p.cancelExport();
   CHECK(waitFor([&] { return stateIs(p, ExportStatus::State::Cancelled); }, 3000));
-  std::fprintf(stderr, "DIAG export state=%d frac=%f msg=%s\n", static_cast<int>(p.exportStatus().state), p.exportStatus().fraction, p.statusMessage().toRawUTF8());
   CHECK(juce::Time::getMillisecondCounterHiRes() - c0 < 1500.0);  // the worker stops within about a second
   CHECK(!target.exists());
   CHECK(!dir.getChildFile("second.wav").exists());
