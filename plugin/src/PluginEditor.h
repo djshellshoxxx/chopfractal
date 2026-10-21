@@ -9,11 +9,12 @@
 #include <memory>
 
 #include "DragOut.h"
+#include "EditorModel.h"
 #include "PluginProcessor.h"
 #include "PresetManager.h"
 #include <chopfractal/plugin_ui_adapter/hit_edit.hpp>
 
-class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer {
+class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, public juce::TooltipClient, private juce::Timer, private EditorModel::Listener {
  public:
   explicit ChopFractalEditor(ChopFractalProcessor& processor);
   ~ChopFractalEditor() override;
@@ -39,11 +40,11 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::File makeDragFile(bool wav);
   // Read-only views for tests and accessibility tooling.
   juce::Rectangle<int> patternBounds() const { return patternArea_; }
-  const std::vector<chopfractal::ui::EventRect>& hitRects() const { return pattern_.rects; }
-  int laneCount() const { return static_cast<int>(chops_.size()); }
-  chopfractal::EventId selectedHit() const { return selected_; }
-  const std::vector<chopfractal::EventId>& selectedHits() const { return selectedHits_; }
-  const std::vector<chopfractal::ChopId>& selectedChops() const { return selectedChops_; }
+  const std::vector<chopfractal::ui::EventRect>& hitRects() const { return model_.view().pattern.rects; }
+  int laneCount() const { return static_cast<int>(model_.view().chops.size()); }
+  chopfractal::EventId selectedHit() const { return model_.selected(); }
+  const std::vector<chopfractal::EventId>& selectedHits() const { return model_.selectedHits(); }
+  const std::vector<chopfractal::ChopId>& selectedChops() const { return model_.selectedChops(); }
   juce::Rectangle<int> waveformBounds() const { return waveArea_; }
 
  private:
@@ -74,17 +75,16 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void doEvolve();
   void doExportWav();
   void doExportKit();
-  int selectedBar() const;
   void askSavePreset();
   juce::Point<int> treePos(const chopfractal::ui::TreeNodeView& n) const;
   void nudgeSelected(int cells, bool resize);
   void editSelected(const std::function<chopfractal::Result<chopfractal::pattern::Pattern>(const chopfractal::pattern::Pattern&, const chopfractal::ChopSnapshot&)>& fn);
 
   void updateSectionSelection(juce::Point<int> point);
+  void modelChanged(EditorModel::Change) override;
   ChopFractalProcessor& proc_;
+  EditorModel model_;
   juce::ToggleButton editMode_{"Move / resize hits"};
-  std::vector<chopfractal::EventId> selectedHits_;
-  std::vector<chopfractal::ChopId> selectedChops_;
   bool selectingSections_ = false, selectingWave_ = false;
   juce::Point<int> selectionStart_, selectionEnd_;
 
@@ -116,10 +116,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Point<int> dragStart_, dragNow_;
   int dragLane_ = 0;
   bool dragCopy_ = false;
-  std::int64_t barTicks_ = 0, gridTicks_ = 0;
-  int barCount_ = 0;
-  int treeCols_ = 0, treeRows_ = 0;
-  juce::String lastStatusKey_;
   juce::TooltipWindow tooltip_{this};
   juce::Component* tooltipRoot_ = nullptr;  // root changes when the standalone wrapper attaches the editor
 
@@ -133,29 +129,13 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   juce::Label motifLabel_{{}, "Motif"}, depthLabel_{{}, "Depth"}, everyLabel_{{}, "Every"}, fmtLabel_{{}, "Format"}, loopsLabel_{{}, "Loops"};
   juce::TextEditor motif_;
   juce::ComboBox detectMode_;
-  const void* peaksSource_ = nullptr;
-  int peaksWidth_ = 0;
   bool lastPlaying_ = false;
   chopfractal::evolve::Settings pushedEvolve_;  // the settings the editor last sent; a different session value (a restored project) is shown
-  bool sourceMissing_ = false;
   juce::ComboBox depth_, every_, exportFormat_, exportRate_, exportLoops_;
   juce::Slider evolveAmount_;
-  chopfractal::composition::SetupSuggestion setup_;
-  bool haveSetup_ = false;
   std::unique_ptr<juce::FileChooser> chooser_;
 
-  // View state, rebuilt only when the session's published state changes.
-  juce::String signature_;
-  chopfractal::ui::PeakBins peaks_;
-  std::int64_t sourceFrames_ = 0;
-  std::vector<chopfractal::ui::MarkerView> markers_;
-  std::vector<chopfractal::ChopInfo> chops_;
-  chopfractal::ui::PatternView pattern_;
-  chopfractal::ui::OrbitView orbit_;
-  std::vector<chopfractal::ui::TreeNodeView> tree_;
-  chopfractal::EventId selected_;
-  juce::String status_;
-
+  juce::String lastStatusLine_;
   juce::Rectangle<int> waveArea_, patternArea_, historyArea_, orbitArea_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChopFractalEditor)
