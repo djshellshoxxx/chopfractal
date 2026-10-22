@@ -98,6 +98,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   registerDrawer("settings", "Settings", settings_, 300, false);
   perform_.registerAll([this](const juce::String& id, const juce::String& title, juce::Component& c, int w) { registerMenuDrawer(id, title, c, w); });
   registerMenuDrawer("orbit", "Orbit", orbit_, 320);
+  orbit_.onEditHit = [this](chopfractal::EventId) { openDrawer("inspector"); };
   features_.attachEvolve(&perform_.evolve());
   perform_.commands().openDrawer = [this](const juce::String& id) { openDrawer(id); };
   topBar_.onMenuChoice = [this](const juce::String& id) { toggleDrawer(id); };
