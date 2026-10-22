@@ -30,6 +30,7 @@
 #include "PresetBrowser.h"
 #include "PerformDrawers.h"
 #include "RulesPanel.h"
+#include "GesturePanel.h"
 #include "SoundPanel.h"
 #include "PluginProcessor.h"
 #include "QuickStartCard.h"
@@ -83,6 +84,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void setReducedMotion(bool on);
   SettingsDrawer& settingsDrawer() { return settings_; }
   SoundPanel& soundPanel() { return sound_; }
+  GesturePanel& gesturePanel() { return gestures_; }
   const shell::ShellRects& shellRects() const { return rects_; }
 
   // Public so tests can drive them without modal dialogs.
@@ -174,6 +176,7 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   FxRackPanel fxRack_;
   RulesPanel rules_;
   SoundPanel sound_;
+  GesturePanel gestures_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
   PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model

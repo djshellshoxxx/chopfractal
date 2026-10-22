@@ -2,6 +2,7 @@
 // Performance pads (F07): MIDI notes (or on-screen pads) trigger chops on top of the running pattern. These are the
 // portable types; the voices live in the renderer. Notes map to chops through an immutable PadBank that the composition
 // root publishes through Renderer::padMailbox().
+#include <chopfractal/audio_renderer/gestures.hpp>
 #include <chopfractal/chop_contracts/chop.hpp>
 
 #include <array>
@@ -46,6 +47,9 @@ struct LiveInput {
   const PadEvent* pads = nullptr;
   int numPads = 0;
   PadParams padParams;
+  const GestureEvent* gestures = nullptr;  // F08, sorted by frame
+  int numGestures = 0;
+  GestureParams gestureParams;
 };
 
 }  // namespace chopfractal::render

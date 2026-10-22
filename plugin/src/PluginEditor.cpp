@@ -39,6 +39,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       fxRack_(model_, commands_),
       rules_(model_, commands_),
       sound_(processor.apvts),
+      gestures_(processor),
       perform_(processor, model_, commands_),
       registry_(*this),
       quickCard_(model_, commands_, quickStartTracker_),
@@ -90,6 +91,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   registerMenuDrawer("fx", "Effects", fxRack_, 340);
   registerMenuDrawer("rules", "Rules", rules_, 420);
   registerMenuDrawer("sound", "Sound", sound_, 360);
+  registerMenuDrawer("gestures", "Gestures", gestures_, 360);
   registerMenuDrawer("history", "History", historyDrawer_, 440);
   inspector_.onOpenFx = [this] { openDrawer("fx"); };
   pattern_.onEditHit = [this](chopfractal::EventId) { openDrawer("inspector"); };

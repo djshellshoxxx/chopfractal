@@ -149,6 +149,15 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   // Any thread. The press reaches the audio thread through a fixed-size queue and sounds one block later; a full queue drops it.
   void padTrigger(int note, int velocity, bool on);
   void padAllNotesOff();
+
+  // Live gestures (F08): momentary moves for the UI (any thread). Stutter, Reverse and Tape Stop act on the next block;
+  // releaseAllGestures lets go of whatever is held. The three settings are saved with the project like manualBpm.
+  void setGesture(chopfractal::render::GestureKind kind, bool on);
+  void releaseAllGestures();
+  bool gestureActive(chopfractal::render::GestureKind kind) const { return renderer_.gestureActive(kind); }
+  std::atomic<int> gestureStutterRate{1};       // 0 = 1/8, 1 = 1/16, 2 = 1/32
+  std::atomic<float> gestureTapeStopMs{400.f};  // 20..4000
+  std::atomic<float> gestureSpinUpMs{150.f};    // 20..4000
   // Project-level pad choices (base note, MIDI channel, quantize, merge); republishes the note bank.
   chopfractal::Status setPadSettings(const chopfractal::composition::PadSettings& settings);
   chopfractal::Status setChokeGroup(chopfractal::ChopId chop, std::uint8_t group);
@@ -203,6 +212,12 @@ class ChopFractalProcessor : public juce::AudioProcessor, private juce::Timer {
   chopfractal::render::SpscQueue<TakeEvent, 1024> takeQueue_;  // audio thread -> message thread
   std::array<chopfractal::render::PadEvent, chopfractal::render::kMaxPadEventsPerBlock> padEvents_{};  // audio thread
   std::array<std::atomic<std::uint32_t>, 4> padActivity_{};
+  struct UiGesture {
+    std::uint8_t kind = 0;  // chopfractal::render::GestureKind
+    bool on = false;
+  };
+  chopfractal::render::SpscQueue<UiGesture, 64> uiGestureQueue_;  // any thread -> audio thread
+  std::array<chopfractal::render::GestureEvent, chopfractal::render::kMaxGestureEventsPerBlock> gestureEvents_{};  // audio thread
   std::atomic<int> padChannel_{0};
   std::atomic<bool> recordArmed_{false};
   std::atomic<std::uint64_t> padInputDropped_{0};

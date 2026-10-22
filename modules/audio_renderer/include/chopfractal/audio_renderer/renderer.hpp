@@ -192,6 +192,7 @@ class Renderer {
               int numChannels, int frames, const AuxOutputs& aux);
   // Which MIDI note plays which chop. Publish from a non-RT thread; the audio thread acquires it once per block.
   Mailbox<PadBank>& padMailbox();
+  bool gestureActive(GestureKind kind) const;  // mirrors the held gestures for the UI (relaxed, once per block)
   std::uint64_t padDropped() const;  // pad events beyond kMaxPadEventsPerBlock in one block (dropped)
   std::uint64_t padUnmapped() const; // note-ons that matched no chop
   int activePadVoices() const;       // sounding pad voices, published once per block (any thread)
