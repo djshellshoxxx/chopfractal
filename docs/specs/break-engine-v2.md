@@ -1,6 +1,6 @@
 # Break engine v2
 
-Status: implemented. Sources: `docs/research/BREAK_ENGINE_RESEARCH.md` (sections 5, 6, 10, 12) and
+Status: implemented, with every parameter reachable in the Sound drawer (Break engine section) and covered by `every_host_parameter_has_a_control_in_the_editor`. Sources: `docs/research/BREAK_ENGINE_RESEARCH.md` (sections 5, 6, 10, 12) and
 `docs/research/BREAK_ANALYSIS.md`.
 
 ## Why

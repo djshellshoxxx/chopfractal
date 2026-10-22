@@ -1,6 +1,6 @@
 # E03 Stutter (buffer repeat)
 
-**Status:** renderer, codec, pass, host parameters and tests built (RND). UI call-out and state section not built.
+**Status:** Implemented (renderer, codec, pass, host parameters, Sound drawer rows, tests). The Sound drawer replaces the planned call-out.
 
 **What it does.** A hit repeats the start of itself on a note grid, like a buffer-repeat or stutter effect. Per event block `StutterFx` {rate, rateEnd, gate, tail, decay, pitch, probability, pan}, serialized in bit 1 of the event extension byte (the old has-child byte; bits 3 to 7 are reserved and rejected on read).
 

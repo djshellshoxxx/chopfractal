@@ -1,6 +1,6 @@
 # F03 Presets and favorites
 
-**Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (ControlsPanel, HistoryPanel), F01 (`ProjectExtras` incl. grid and tree-filter prefs, `setExtras`)  **Blocks:** F09 (scenes reuse the preset apply path), F10
+**Status:** Implemented (Presets drawer: factory and user presets, categories, favorites, search, undo)  **Size:** M (6 engineer-days)  **Depends on:** F00 (ControlsPanel, HistoryPanel), F01 (`ProjectExtras` incl. grid and tree-filter prefs, `setExtras`)  **Blocks:** F09 (scenes reuse the preset apply path), F10
 
 ## 0. Implementation status (audited 2026-10-20)
 **Partly built by pass 3 (presets); favorites, search, categories, rules and undo are not started.**

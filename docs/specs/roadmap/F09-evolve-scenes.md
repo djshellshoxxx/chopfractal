@@ -1,6 +1,6 @@
 # F09 Evolve scenes
 
-**Status:** Ready for development  **Size:** L (6 engineer-days; README budgets 4 for the list/UI, the extra 2 are the sample-accurate loop-boundary switch in the renderer)  **Depends
+**Status:** Implemented (Scenes drawer)  **Size:** L (6 engineer-days; README budgets 4 for the list/UI, the extra 2 are the sample-accurate loop-boundary switch in the renderer)  **Depends
 on:** F00 (ScenePanel, FeaturePanel, command layer), F01 (the `scenes` section, extras tag 11)  **Blocks:** none
 
 ## 0. Implementation status (audited 2026-10-20)

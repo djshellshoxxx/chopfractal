@@ -1,6 +1,6 @@
 # ChopFractal build status
 
-Last audited 2026-10-20 against the code on `main` (after pass 3 and audit rounds 4 and 5); the specs in `docs/specs` carry a per-spec implementation status. Counts below were taken from the tree on that date.
+Last audited 2026-10-21 on `feat/AUD-audit` (a full spec-by-spec wiring audit on top of `main`); the specs in `docs/specs` carry a per-spec implementation status. Counts below were taken from the tree on that date.
 
 ## Where the build stands
 
@@ -20,34 +20,40 @@ Modular plan: Stages A to D are complete; Stage E (portability and release) is c
 
 ## What exists
 
-Eighteen portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`, one 1400-line `PluginEditor.cpp`, split planned in F00). `ctest` lists 34 targets.
+Twenty-two portable C++17 modules (no JUCE, no host types), a headless composition root (`composition/`), and a JUCE shell (`plugin/`: the editor is split into panels and drawers on the drawer registration API). `ctest` lists 48 targets; the shell suite has 205 cases.
 
 | Module | Role | Test cases |
 |---|---|---|
-| `chop_contracts` | typed IDs, ticks, results, byte codec, RNG, nested events (with per-event effects) + `flatten`, policy interface | 10 |
-| `state_codec` | versioned project container, CRC, migrations | 6 |
+| `chop_contracts` | typed IDs, ticks, results, byte codec, RNG, nested events (with per-event effects) + `flatten`, policy interface | 15 |
+| `state_codec` | versioned project container, CRC, migrations | 8 |
 | `variation_history` | generic branch graph with protected pruning | 8 |
 | `source_chop` | markers, undo, proposals, transient and grid analysis, `rescaled` for stretched sources | 17 |
-| `pattern_engine` | generate, mutate, locks, edits, effects, `setBarEvents`, flatten, state, session | 25 |
+| `pattern_engine` | generate, mutate, locks, edits, effects, `setBarEvents`, flatten, state, session | 74 |
 | `recursive_hit_zoom` | nested child patterns inside a hit's time and source bounds | 12 |
-| `chop_roles_grammar` | roles, serializable rules, explainable policy | 9 |
-| `wav_export` | deterministic WAV encode/decode, dither, normalize, atomic file write | 7 |
-| `midi_export` | deterministic Standard MIDI File encode/decode | 6 |
+| `chop_roles_grammar` | roles, serializable rules, explainable policy | 12 |
+| `wav_export` | deterministic WAV encode/decode, dither, normalize, atomic file write | 11 |
+| `midi_export` | deterministic Standard MIDI File encode/decode | 9 |
 | `evolve` | Evolve scheduler (cadence, seeds, ramp, failure stop) | 4 |
 | `fractal_rhythm` | self-similar motif groove as nested events | 8 |
 | `chop_insight` | chop features, role suggestions, loop/tempo suggestions | 4 |
-| `preset_store` | preset records, versioned checksummed file format, six factory presets, file-name sanitizing | 5 |
-| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, slice-quality stage, Echo/Tremolo-Pan/Stutter/Roll, match gain and true-peak safety limiter, lock-free handoff, latency-compensated offline render; `fx_audition` tool writes one WAV per effect | 70 |
+| `preset_store` | preset records, versioned checksummed file format, six factory presets, file-name sanitizing | 9 |
+| `audio_renderer` | scheduler, voices, transforms, filter/glide/crunch, slice-quality stage, Echo/Tremolo-Pan/Stutter/Roll, performance pads, live gestures (Stutter, Reverse, Tape Stop), match gain and true-peak safety limiter with gain-reduction telemetry, lock-free handoff, latency-compensated offline render; `fx_audition` tool writes one WAV per effect | 139 |
 | `level_match` | BS.1770-4 loudness measurement and match-gain computation | 9 |
 | `time_stretch` | offline WSOLA time stretch (Draft/Standard/High), chop-anchored regions, exact marker scaling, progress/cancel (no third-party code) | 16 |
-| `plugin_host_adapter` | parameter manifest (version 3: 54 parameters; `chaos`, then the engine v2 and Groove Lab rows, then the F16, E01, E02, Stutter, Roll and slice-polish rows), host-time validation, bus rules | 8 |
-| `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 9 |
-| `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 30 |
-| `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 28 |
+| `plugin_host_adapter` | parameter manifest (version 3: 54 parameters; `chaos`, then the engine v2 and Groove Lab rows, then the F16, E01, E02, Stutter, Roll and slice-polish rows), host-time validation, bus rules | 12 |
+| `plugin_ui_adapter` | headless view models including the Orbit View, hit-edit geometry | 93 |
+| `composition` | `ProjectSession`: the end-to-end flow, Fractal, Evolve, Smart Setup, exports | 201 |
+| `break_engine` | Break Engine v2: profiles, backbeat, anchors, humanize, fill, glitch, quality scoring | 59 |
+| `groove` | Groove Lab templates, swing, humanize and accent curves | 17 |
+| `input_capture` | armed, synced and free input capture, chop-after-keep | 18 |
+| `scenes` | scene list, chain, armed switch bookkeeping, A/B morph | 10 |
+| `plugin/` (JUCE) | processor, editor, state glue, preset files, drag-out (shell tests, not ctest cases of a module) | 205 |
 
 Features added in the second round (each has a spec in `docs/specs/`): **Fractal Rhythm** (unique), **Evolve** (fun), **Producer Kit + WAV export** (valuable), **Smart Setup** (usable), **Orbit View** (visual), and three effects (**Filter, Tape Glide, Crunch**).
 
 ## Verification that was actually run
+
+- 2026-10-21 audit: core ctest 48/48, the shell suite 205/205 under xvfb, `tools/check_modules.py` and `tools/check_includes.py` clean, golden pattern hashes unchanged.
 
 - Full tree builds and passes under **GCC 13** and **Clang 18** with warnings as errors (34 ctest targets as of the 2026-10-20 audit).
 - **AddressSanitizer + UBSan** over everything, including corruption and hostile-state sweeps. Clean.
@@ -120,7 +126,7 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 
 - **Multiple outputs** are routed in the Outputs drawer (Panels menu); the session API behind it is in the F11 spec section 12.
 - **Input capture** is operated from the Capture drawer (Panels menu); the engine, session API and view-model are in the F12 spec section 12.
-- **Editor polish:** (Done in G2: marker dragging, snap controls, detection preview and Merge dialog, hit drag, lane scrolling, and the Inspector, Effects, Rules and History drawers with favorites, rename, compare, A/B and morph.) Still open: resizable layout and full keyboard navigation. (Done: A/B snapshot buttons, a role setter for the selected hit's chop, and a right-click menu on history nodes for favorite, rename, compare and delete.) The view models and session API for all of these exist and are tested; the JUCE controls do not.
+- **Editor polish:** the editor is resizable and keyboard operable; the screenshot sweep at 1100x720 and 880x560 for every drawer fixed the Tools drawer width (it now follows the drawer), the compact status bar below 1200 px and the wrapped Outputs hint. Gestures are not host parameters by design, so they cannot be recorded to host automation (MIDI CC 20 to 22 drive them instead).
 - Not run: real DAW hosts (REAPER, FL Studio, Live, Cubase), macOS and Windows *plugin* builds, MSVC `/W4` warnings-as-errors (warnings are reported but not fatal there), installers and signing, performance thresholds on a reference machine, long-duration soak tests, mono-host behavior in a real host.
 - Direct MIDI output from the plugin is out of scope (the Producer Kit writes a MIDI *file*).
 - The Orbit View, Smart Setup, Fractal, Evolve and export controls are functional but basic (export progress is shown as a percentage in the status line with a Cancel Export button; the Fractal accent decay and mutation can only be changed through presets, and are saved with the project).
@@ -133,30 +139,35 @@ Open: the family tree is not moved by Undo/Redo; Mutate can break "at most N" gr
 - **Restore** of a reference-only project no longer decodes on the calling thread: the session is usable at once and the audio arrives from a worker (`Restoring audio from <file>...`, then `Restored audio: <file>`).
 - **Export** (WAV and Producer Kit) runs on a worker thread with a percentage in the status line and a Cancel Export button; a cancelled export leaves no new files.
 
-## Roadmap status (audited 2026-10-20)
+## Roadmap status (audited 2026-10-21)
 
-Specs live in `docs/specs/roadmap/`; each carries a section 0 with what is built and which contradictions the audit settled.
+Specs live in `docs/specs/roadmap/`; each carries a status line and a section 0 with what is built. "Done" means model, session API, host parameter where specified, a UI control with a tooltip, state save and restore, and tests.
 
 | ID | Feature | State |
 |---|---|---|
-| F00 | Editor decomposition | Not started (editor is 1404 lines, window 940 x 912) |
-| F01 | State v2 and persistence | **Done**: session schema 2 with lazy versioning, StateSection API, migration registry wired, extras and A/B persisted, worker restore, export on a worker with progress and cancel (see "Project state v2" below) |
-| F02 | Direct editing | Partly built in pass 3: hit move, resize, duplicate, delete, mute, add; Shift+click markers; marker dragging, zoom, menus not built |
-| F03 | Presets and favorites | Partly built in pass 3: six factory presets, user presets, combo; categories, rules, favorites, undo not built |
-| F04 | Keyboard and layout | Built in the G3 shell: key map, hit navigation, focus order and ring, accessibility names and announcements, resizing and Simple view; not built: `describeParam` tooltips, waveform zoom keys, marker undo |
-| F05 | Meters and feedback | Built in G3: output meter with latched CLIP chip, voice box, sync box, severity notice log, pending-activation ring, drag-and-drop with the replace confirmation (see gui-redesign.md section 24) |
-| F06 | Rule editor | Not started |
-| F11 | Multi-output stems | Renderer, host buses, session routing (state tag 9), processor and view model built and tested; the Outputs section is pending (command list in the F11 spec, section 12) |
-| F07 | Performance pads | Renderer, parameters, session, processor and view model built and tested; PadPanel pending (command list in the F07 spec, section 12) |
-| F08 | Chaos and gestures | Chaos macro built in pass 3 (generation-time); gestures not started; overlay design shelved as F08b |
-| F09 | Evolve scenes | **Done** (Scenes drawer; logic and session API): `scenes` module, armed loop-boundary switch in the renderer (`armed_switch.hpp`), state tag 11, export; commands in spec section 12 |
+| F00 | Editor decomposition | **Done**: panels, drawers, command layer (`EditorCommands`, `PerformCommands`) |
+| F01 | State v2 and persistence | **Done**: lazy versioning, StateSection API, extras, A/B, worker restore, export on a worker |
+| F02 | Direct editing | **Mostly done**: hit move, resize, duplicate, delete, mute, add, lock, reset, marker editing with undo, waveform zoom keys, Orbit drag with ghost and hit menu. Not done: the event editor popup is the Inspector drawer instead (by design) |
+| F03 | Presets and favorites | **Done**: factory and user presets with categories, favorites, search, Apply and generate, undo |
+| F04 | Keyboard and layout | **Done**: key map including waveform zoom (`+`, `-`, Home) and marker undo (Ctrl+Z, Ctrl+Y on the waveform), focus order, accessibility names, `describeParam` tooltips on every parameter control, resizing and Simple view |
+| F05 | Meters and feedback | **Done**: output meter with CLIP latch and gain-reduction readout, voice box, sync box, notice log |
+| F06 | Rule editor | **Done** (Rules drawer: templates, validation, Apply, Why, Roles tab, unapplied-changes flag in the status bar) |
+| F07 | Performance pads | **Done** (Pads drawer) |
+| F08 | Chaos and gestures | **Done**: Chaos macro (generation time) and live gestures (Stutter, Reverse, Tape Stop: renderer, SPSC queue, MIDI CC 20 to 22, Gestures drawer, saved settings). The playback overlay design is shelved as F08b |
+| F09 | Evolve scenes | **Done** (Scenes drawer, armed loop-boundary switch) |
 | F10 | A/B morph | **Done** (morph row of the Scenes drawer) |
-| F14 | Tempo match | Not started |
-| F13 | MIDI drag-out | **Done** (logic and session API; GUI wiring pending): settings, per-variation export, Producer Kit |
-| F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built |
-| F18 | Arrangement export | **Done** (Arrangement drawer): `arrangement` model and tag 16, `ArrangementJob` worker, `wav_export` cue chunk, `midi_export` markers; commands in spec section 12 |
-| F16, F17, E01, E02 | Level Match and Safety Limiter, Groove Lab, Echo, Tremolo-Pan | Specified 2026-10-20, not started |
-| F19 | Command Palette and Quick Start | Built in the G3 shell (palette over actions, every parameter and presets; quick start card and per-user checklist); the matcher is in plugin_ui_adapter, not a `fuzzy_match` module |
+| F11 | Multi-output stems | **Done** (Outputs drawer) |
+| F12 | Input capture | **Done** (Capture drawer) |
+| F13 | MIDI drag-out | **Done**: pattern drag handles, Drag Kit, history node drag (MIDI, Alt for WAV) and per-variation export in the node menu |
+| F14 | Tempo match | **Done** (Tempo drawer: detect, stretch job, undo) |
+| F15 | Cross-platform and packaging | Partly built: unsigned CI builds on three OSes, CLAP, Windows Standalone, alpha pre-release; installers and signing not built (need maintainer certificates) |
+| F16 | Level match and safety limiter | **Done**: Sound drawer controls, Match and Limit toggles, gain-reduction readout in the meter |
+| F17 | Groove Lab | **Done** (Sound drawer section) |
+| F18 | Arrangement export | **Done** (Arrange drawer only; the duplicate section in the Export drawer was removed) |
+| F19 | Command Palette and Quick Start | **Done** (palette over actions, every parameter and presets; quick start card and checklist) |
+| E01 to E04 | Echo, Tremolo-Pan, Stutter, Roll | **Done**: renderer, host parameters, state, Sound drawer rows, tests |
+| Break Engine v2 | Profiles, backbeat, anchors, humanize, fill, glitch | **Done**: Sound drawer "Break engine" section |
 
+Every host parameter has a control reachable in the editor (Macro strip, Tools, Pads, Sound or a toggle), pinned by the test `every_host_parameter_has_a_control_in_the_editor`.
 
-GUI wave two (G4): the Panels menu opens drawers for Capture, Tempo, Pads, Scenes (with the A/B morph row), Evolve (motif presets, depth, accent decay, Smart Setup suggestions), Outputs and Arrangement; the Orbit View has its own drawer. Panel tests live in plugin/tests/test_perform_*.cpp; CHOPFRACTAL_PERFORM_SNAPS=<folder> renders every drawer at 1100x720 and 880x560.
+GUI wave two (G4): the Panels menu opens drawers for Capture, Tempo, Pads, Scenes (with the A/B morph row), Evolve (motif presets, depth, accent decay, Smart Setup suggestions), Outputs and Arrangement; the Orbit View has its own drawer. The audit added Sound (break engine, Groove Lab, Stutter, Roll, Echo, Tremolo-Pan, output) and Gestures. Panel tests live in plugin/tests/test_perform_*.cpp; CHOPFRACTAL_PERFORM_SNAPS=<folder> renders every drawer at 1100x720 and 880x560.

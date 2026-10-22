@@ -1,6 +1,6 @@
 # F12 Input capture
 
-**Status:** Engine, composition, processor and view model implemented on `feat/AIO-audio-io`; the capture strip in the editor is wired by the GUI rewrite from section 12  **Size:** L (8 engineer-days)  **Depends on:** F00 (WavePanel, StatusBar), F01 only for the shared UI-pref trailing block (optional)  **Blocks:** F14 (capture + stretch workflow is a documented combination, not a code dependency)
+**Status:** Implemented (Capture drawer)  **Size:** L (8 engineer-days)  **Depends on:** F00 (WavePanel, StatusBar), F01 only for the shared UI-pref trailing block (optional)  **Blocks:** F14 (capture + stretch workflow is a documented combination, not a code dependency)
 
 ## 0. Implementation status
 **Implemented (AIO branch, 2026-10-21):** `modules/input_capture` (engine, 18 unit tests incl. allocation and threaded tests, TSan step in CI), `ProjectSession::loadCapturedSource` and the pathless-source embed rule (`sourceNeedsEmbed` already existed from F14, `SourceReplaceUndo` is reused), processor wiring (`armCapture`, `startCapture`, `stopCapture`, `discardCapture`, `keepCaptureAsync`, `undoKeep`, `clearUndoKeep`, `captureUiInput`, forced embed in `getStateInformation`, offline guard, `onPrepare`), the portable view model `plugin_ui_adapter/capture_view.hpp`, and the shell tests in `plugin/tests/test_capture_shell.cpp`. **Not built here:** the WavePanel strip itself (the GUI is being rewritten; section 12 is the contract it wires).

@@ -1,6 +1,6 @@
 # F19 Command Palette and Quick Start
 
-**Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F04 (shortcut table and focus order; F19 reuses its action registry), F00 (editor split, so the palette can address panels). Soft: F03 (presets as palette entries), F05 (notices for checklist hints), F07/F08/F16/F17/F18/E01/E02 (their actions register themselves)  **Blocks:** none
+**Status:** Implemented (palette over actions, parameters and presets; quick start card and checklist)  **Size:** M (6 engineer-days)  **Depends on:** F04 (shortcut table and focus order; F19 reuses its action registry), F00 (editor split, so the palette can address panels). Soft: F03 (presets as palette entries), F05 (notices for checklist hints), F07/F08/F16/F17/F18/E01/E02 (their actions register themselves)  **Blocks:** none
 **Category:** ease of use. No audio, pattern, state-file or manifest changes.
 
 ## 1. Summary and user value

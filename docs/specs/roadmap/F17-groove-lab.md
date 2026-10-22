@@ -1,6 +1,6 @@
 # F17 Groove Lab
 
-**Status:** Ready for development  **Size:** M-L (8 engineer-days)  **Depends on:** F01 (extras tag 14, parameters mirrored), F00 soft (row E / call-out host). Soft: F02 (hit-edit coexistence), F18 (renders with the groove), F16 (accent curve is part of the level-match key)  **Blocks:** none
+**Status:** Implemented (Sound drawer Groove Lab section)  **Size:** M-L (8 engineer-days)  **Depends on:** F01 (extras tag 14, parameters mirrored), F00 soft (row E / call-out host). Soft: F02 (hit-edit coexistence), F18 (renders with the groove), F16 (accent curve is part of the level-match key)  **Blocks:** none
 **Category:** musicality. Playback-time layer: it changes where and how loud already-generated events play, never what the generator produces.
 
 ## 1. Summary and user value

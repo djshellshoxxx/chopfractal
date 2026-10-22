@@ -1,6 +1,6 @@
 # F06 Rule editor
 
-**Status:** Ready for development  **Size:** M (5 engineer-days)  **Depends on:** F00 (panel classes, EditorModel, command layer, recursive `findButton` test helper)  **Blocks:** none
+**Status:** Implemented (Rules drawer)  **Size:** M (5 engineer-days)  **Depends on:** F00 (panel classes, EditorModel, command layer, recursive `findButton` test helper)  **Blocks:** none
 (F03 factory presets reuse `roles::describe` and the template builders)
 
 ## 0. Implementation status (audited 2026-10-20)

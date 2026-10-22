@@ -1,6 +1,6 @@
 # F04 Keyboard and layout
 
-**Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (panels, StatusBar), F01 (`ProjectExtras::ui` persistence), F02 (Delete / Duplicate commands)  **Blocks:** F05 (StatusBar widths), F06 (editor space)
+**Status:** Implemented (key map, focus order, accessibility names, `describeParam` tooltips, waveform zoom keys, marker undo shortcuts)  **Size:** M (6 engineer-days)  **Depends on:** F00 (panels, StatusBar), F01 (`ProjectExtras::ui` persistence), F02 (Delete / Duplicate commands)  **Blocks:** F05 (StatusBar widths), F06 (editor space)
 
 ## 0. Implementation status (audited 2026-10-20)
 **Partly built (keys and tooltips only); layout, scale, focus order, accessibility and the Simple/Advanced split are not started.**

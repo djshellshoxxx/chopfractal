@@ -1,6 +1,6 @@
 # F10 A/B morph
 
-**Status:** Ready for development  **Size:** M (4 engineer-days)  **Depends on:** F00 (FeaturePanel, EditorModel `displayPattern`), F01 (persisted A/B slots, `ab` section; morph itself
+**Status:** Implemented (morph row of the Scenes drawer)  **Size:** M (4 engineer-days)  **Depends on:** F00 (FeaturePanel, EditorModel `displayPattern`), F01 (persisted A/B slots, `ab` section; morph itself
 works without it but the slots would not survive a reload)  **Blocks:** none
 
 ## 0. Implementation status (audited 2026-10-20)

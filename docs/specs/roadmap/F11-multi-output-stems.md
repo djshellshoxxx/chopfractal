@@ -1,6 +1,6 @@
 # F11 Multi-output stems
 
-**Status:** Renderer, host parameters, composition, processor and view model implemented on `feat/AIO-audio-io`; the Outputs section is wired by the GUI rewrite from section 12  **Size:** L (9 engineer-days)  **Depends on:** F00 (ControlsPanel/StatusBar split), F01 (state v2, trailing-block registry)  **Blocks:** none (F07/F08 only need the routing fields to stay append-only)
+**Status:** Implemented (Outputs drawer)  **Size:** L (9 engineer-days)  **Depends on:** F00 (ControlsPanel/StatusBar split), F01 (state v2, trailing-block registry)  **Blocks:** none (F07/F08 only need the routing fields to stay append-only)
 
 ## 0. Implementation status
 **Implemented (AIO branch, 2026-10-21):** `audio_renderer` aux buses (`BusRouting`, `Playback::eventBus`, `Config::auxBuses`, `AuxOutputs`, the `process` overloads, `OfflineStems` and `renderOfflineStems`), the bus layout rules in `plugin_host_adapter`, `ProjectSession` routing (`OutputRouting`, state section tag 9, `setOutputRouting`, `autoRouteByRole`, `autoRouteByChop`, `outputBusOf`), the processor buses ("Main" plus disabled "Out 2" .. "Out 9"), and the portable view model `plugin_ui_adapter/outputs_view.hpp`. Tests: `modules/audio_renderer/tests/test_buses.cpp`, `composition/tests/test_routing.cpp`, `modules/plugin_host_adapter/tests/test_host_adapter.cpp`, `modules/plugin_ui_adapter/tests/test_outputs_view.cpp`, `plugin/tests/test_outputs_shell.cpp`.

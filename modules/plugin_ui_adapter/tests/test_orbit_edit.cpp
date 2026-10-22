@@ -2,6 +2,7 @@
 #include <chopfractal/plugin_ui_adapter/orbit.hpp>
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 #include "chop_test.hpp"
