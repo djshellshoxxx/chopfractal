@@ -44,7 +44,7 @@ juce::String MacroKnob::formatNumber(const host::ParamDef& d, double v) {
 }
 
 MacroKnob::MacroKnob(juce::AudioProcessorValueTreeState& apvts, const char* paramId, const juce::String& label, const juce::String& tip)
-    : apvts_(apvts), def_(host::findParam(paramId)), label_(label) {
+    : apvts_(apvts), def_(host::findParam(paramId)), label_(label), tip_(apvts) {
   slider_.setSliderStyle(juce::Slider::RotaryVerticalDrag);
   slider_.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
   slider_.setVelocityBasedMode(false);
@@ -53,20 +53,28 @@ MacroKnob::MacroKnob(juce::AudioProcessorValueTreeState& apvts, const char* para
   slider_.setRotaryParameters(juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
   slider_.setTitle(label + " macro");  // not the bare name: the help catalog would replace the one-clause tip
   slider_.setTooltip(tip);
+  tip_.bind(slider_, paramId, tip);
   slider_.onValueChange = [this] { repaint(); };
   if (std::strcmp(paramId, "stutter_amount") == 0) {
-    // The Stutter amount only reaches the pattern while "Allow Stutter" is on; turning the macro up must not be silent.
+    // The Stutter amount only reaches the pattern while "Allow Stutter" is on; turning the macro up must not be silent. Only a
+    // change the person makes counts: the attachment's first update, automation and a preset load must not switch the effect on
+    // (opening the editor used to do that, so the audio depended on whether the window was open).
     slider_.onValueChange = [this] {
       repaint();
-      if (slider_.getValue() > 0.0)
-        if (auto* allow = apvts_.getParameter("allow_stutter"))
-          if (allow->getValue() < 0.5f) allow->setValueNotifyingHost(1.0f);
+      if (ready_ && (slider_.isMouseOverOrDragging() || slider_.hasKeyboardFocus(true))) enableStutterIfRaised();
     };
   }
   addAndMakeVisible(slider_);
   if (apvts_.getParameter(paramId) != nullptr) attachment_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts_, paramId, slider_);
   if (def_ != nullptr) slider_.setDoubleClickReturnValue(true, def_->defaultValue);  // double-click resets to the manifest default
   setDriftFromParameter();
+  ready_ = true;
+}
+
+void MacroKnob::enableStutterIfRaised() {
+  if (slider_.getValue() <= 0.0) return;
+  if (auto* allow = apvts_.getParameter("allow_stutter"))
+    if (allow->getValue() < 0.5f) allow->setValueNotifyingHost(1.0f);
 }
 
 void MacroKnob::setDriftFromParameter() {
@@ -112,7 +120,7 @@ void MacroKnob::paint(juce::Graphics& g) {
 }
 
 MacroStrip::MacroStrip(EditorModel& model, EditorCommands& commands, juce::AudioProcessorValueTreeState& apvts)
-    : EditorPanelBase(model, commands, "MacroStrip"), apvts_(apvts) {
+    : EditorPanelBase(model, commands, "MacroStrip"), apvts_(apvts), tips_(apvts) {
   generate_.getProperties().set("cdlPrimary", true);
   generate_.setTitle("Generate");
   generate_.onClick = [this] { cmd_.generate(); };
@@ -133,6 +141,9 @@ MacroStrip::MacroStrip(EditorModel& model, EditorCommands& commands, juce::Audio
   }
   levelMatch_.setTitle("Level match");
   levelMatch_.setTooltip("Match the rendered level to the source loop");
+  tips_.bind(levelMatch_, "level_match", "Match the rendered level to the source loop");
+  tips_.bind(limiter_, "limiter_enable", "Catch peaks above the ceiling");
+  tips_.bind(profile_, "break_profile", "Style of break the generator imitates");
   limiterAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts_, "limiter_enable", limiter_);
   matchAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts_, "level_match", levelMatch_);
   limiter_.setTitle("Safety limiter");

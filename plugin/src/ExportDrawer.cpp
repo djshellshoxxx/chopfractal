@@ -8,7 +8,7 @@
 namespace cf = chopfractal;
 
 namespace {
-constexpr int kBodyHeight = 786;
+constexpr int kBodyHeight = 560;
 // A disabled control keeps its description and gains the reason, as one clause without a final period.
 juce::String clause(const std::string& t) { return juce::String(t).trimEnd().trimCharactersAtEnd("."); }
 juce::String withReason(const char* base, bool enabled, const std::string& reason) {
@@ -45,7 +45,7 @@ ExportDrawer::ExportDrawer(EditorModel& m, EditorCommands& c) : EditorPanelBase(
   normalize_.setTooltip("Scale the export so its loudest peak sits at minus 1 dB");
   normalize_.onClick = [this] { pushFormat(); };
   body_.addAndMakeVisible(normalize_);
-  for (auto* l : {&formatLabel_, &rateLabel_, &loopsLabel_, &baseNoteLabel_, &curveLabel_, &fixedLabel_, &midiLoopsLabel_, &channelLabel_, &sceneLabel_, &barsLabel_, &repeatsLabel_, &transitionLabel_}) {
+  for (auto* l : {&formatLabel_, &rateLabel_, &loopsLabel_, &baseNoteLabel_, &curveLabel_, &fixedLabel_, &midiLoopsLabel_, &channelLabel_}) {
     l->setMinimumHorizontalScale(0.8f);
     body_.addAndMakeVisible(*l);
   }
@@ -87,104 +87,6 @@ ExportDrawer::ExportDrawer(EditorModel& m, EditorCommands& c) : EditorPanelBase(
   dragKit_.setTitle("Drag Kit");
   for (auto* d : {&dragMidi_, &dragWav_, &dragKit_}) body_.addAndMakeVisible(*d);
 
-  list_.setRowHeight(24);
-  tip(list_, "Arrangement sections", "Sections of the arrangement, each plays a scene for a number of bars");
-  list_.setTooltip("Arrangement sections, each plays a scene for a number of bars");
-  body_.addAndMakeVisible(list_);
-  tip(scene_, "Scene to add", "Scene the Add button appends as a new section");
-  tip(sectionBars_, "Section bars", "Bars of the selected section");
-  tip(repeats_, "Section repeats", "Times the selected section repeats");
-  tip(transition_, "Arrangement transition", "How one section blends into the next");
-  for (const char* n : {"Cut", "Crossfade 10%", "Crossfade 50%"}) transition_.addItem(n, transition_.getNumItems() + 1);
-  for (int r = 1; r <= 8; ++r) repeats_.addItem(juce::String(r), r);
-  for (auto* b : {&add_, &remove_, &up_, &down_, &chain_, &autoFill_, &exportArr_}) b->setTitle(b->getButtonText());
-  add_.setTooltip("Append the chosen scene as a new section");
-  remove_.setTooltip("Remove the selected section from the arrangement");
-  up_.setTooltip("Move the selected section earlier");
-  down_.setTooltip("Move the selected section later");
-  chain_.setTooltip("Fill the arrangement from the scene chain");
-  autoFill_.setTooltip("Fill about 16 bars from the scenes in turn");
-  exportArr_.setTooltip("Render the arrangement to a WAV, MIDI and cue list");
-  add_.onClick = [this] {
-    const int i = scene_.getSelectedId() - 1;
-    if (i < 0 || i >= static_cast<int>(arrState_.scenes.size())) return;
-    const auto id = arrState_.scenes[static_cast<std::size_t>(i)].first;
-    cmd_.editArrangement([id](cf::composition::Arrangement& a) {
-      cf::composition::ArrangementSection s;
-      s.sceneId = id;
-      s.bars = 4;
-      s.repeats = 1;
-      a.sections.push_back(s);
-    });
-    syncArrangement();
-    list_.selectRow(static_cast<int>(arrState_.arrangement.sections.size()) - 1);
-  };
-  remove_.onClick = [this] {
-    const int r = list_.getSelectedRow();
-    if (r < 0) return;
-    cmd_.editArrangement([r](cf::composition::Arrangement& a) {
-      if (r < static_cast<int>(a.sections.size())) a.sections.erase(a.sections.begin() + r);
-    });
-    syncArrangement();
-  };
-  up_.onClick = [this] {
-    const int r = list_.getSelectedRow();
-    if (r <= 0) return;
-    cmd_.editArrangement([r](cf::composition::Arrangement& a) { std::swap(a.sections[static_cast<std::size_t>(r)], a.sections[static_cast<std::size_t>(r - 1)]); });
-    syncArrangement();
-    list_.selectRow(r - 1);
-  };
-  down_.onClick = [this] {
-    const int r = list_.getSelectedRow();
-    if (r < 0) return;
-    cmd_.editArrangement([r](cf::composition::Arrangement& a) {
-      if (r + 1 < static_cast<int>(a.sections.size())) std::swap(a.sections[static_cast<std::size_t>(r)], a.sections[static_cast<std::size_t>(r + 1)]);
-    });
-    syncArrangement();
-    list_.selectRow(r + 1);
-  };
-  chain_.onClick = [this] {
-    cmd_.arrangementFromChain();
-    syncArrangement();
-  };
-  autoFill_.onClick = [this] {
-    cmd_.autoFillArrangement();
-    syncArrangement();
-  };
-  exportArr_.onClick = [this] { cmd_.exportArrangement(); };
-  sectionBars_.onChange = [this] {
-    if (syncing_) return;
-    const int bars = sectionBars_.getText().getIntValue();
-    editSelectedSection([bars](cf::composition::ArrangementSection& s) { s.bars = static_cast<std::uint8_t>(bars); });
-  };
-  repeats_.onChange = [this] {
-    if (syncing_) return;
-    const int n = repeats_.getSelectedId();
-    editSelectedSection([n](cf::composition::ArrangementSection& s) { s.repeats = static_cast<std::uint8_t>(n); });
-  };
-  transition_.onChange = [this] {
-    if (syncing_) return;
-    const int t = transition_.getSelectedId() - 1;
-    cmd_.editArrangement([t](cf::composition::Arrangement& a) { a.transition = static_cast<cf::composition::Transition>(t); });
-    syncArrangement();
-  };
-  auto toggleHook = [this](juce::ToggleButton& b, const char* title, const char* tooltip, bool cf::composition::Arrangement::*field) {
-    tip(b, title, tooltip);
-    b.onClick = [this, &b, field] {
-      if (syncing_) return;
-      const bool on = b.getToggleState();
-      cmd_.editArrangement([on, field](cf::composition::Arrangement& a) { a.*field = on; });
-      syncArrangement();
-    };
-    body_.addAndMakeVisible(b);
-  };
-  toggleHook(fadeOut_, "Fade out", "End with a cosine fade over the last bar", &cf::composition::Arrangement::fadeOut);
-  toggleHook(tail_, "Tail", "Append the decay of the last hit after the last bar", &cf::composition::Arrangement::tail);
-  toggleHook(midi_, "Write MIDI", "Also write a MIDI file of the arrangement", &cf::composition::Arrangement::writeMidi);
-  toggleHook(markers_, "Write markers", "Write section markers to the WAV, MIDI and a cue list", &cf::composition::Arrangement::writeMarkers);
-  for (juce::Component* c : std::initializer_list<juce::Component*>{&scene_, &sectionBars_, &repeats_, &transition_, &add_, &remove_, &up_, &down_, &chain_, &autoFill_, &exportArr_})
-    body_.addAndMakeVisible(*c);
-
   cancel_.setTitle("Cancel export");
   cancel_.setTooltip("Stop the running export and remove its partial files");
   cancel_.onClick = [this] { cancelAny(); };
@@ -204,10 +106,7 @@ void ExportDrawer::modelChanged(Change c) {
   else if (c == Change::Flags || c == Change::View) syncWidgets(false);
 }
 
-void ExportDrawer::refresh() {
-  syncWidgets(true);
-  syncArrangement();
-}
+void ExportDrawer::refresh() { syncWidgets(true); }
 
 void ExportDrawer::pushFormat() {
   cmd_.setExportUi({format_.getSelectedId() - 1, rate_.getSelectedId() - 1, loops_.getSelectedId() - 1, normalize_.getToggleState()});
@@ -265,7 +164,6 @@ void ExportDrawer::syncWidgets(bool settings) {
   in.hasPattern = v.hasPattern;
   in.sourceMissing = model_.sourceMissing();
   in.exporting = model_.exportRunning();
-  in.arrangementRunning = arrState_.running;
   in.bars = std::max(1, v.barCount);
   in.bpm = model_.activeBpm();
   in.formatIndex = e.exportUi.formatIndex;
@@ -299,150 +197,24 @@ void ExportDrawer::syncWidgets(bool settings) {
   repaint();
 }
 
-void ExportDrawer::syncArrangement() {
-  const bool wasSyncing = syncing_;
-  syncing_ = true;
-  arrState_ = cmd_.arrangementState();
-  cf::ui::ArrangementViewInput in;
-  for (const auto& r : arrState_.rows) {
-    cf::ui::ArrangementRowInput ri;
-    ri.sceneNumber = r.sceneNumber;
-    ri.sceneName = r.sceneName;
-    ri.patternBars = r.patternBars;
-    ri.bars = r.bars;
-    ri.repeats = r.repeats;
-    ri.deleted = r.deleted;
-    ri.fits = r.fits;
-    in.rows.push_back(ri);
-  }
-  in.selected = list_.getSelectedRow();
-  in.totalBars = arrState_.arrangement.totalBars();
-  in.bpm = model_.activeBpm();
-  in.sceneCount = static_cast<int>(arrState_.scenes.size());
-  in.hasSource = arrState_.hasSource;
-  in.running = arrState_.running;
-  in.jobSection = arrState_.jobSection;
-  in.jobSections = arrState_.jobSections;
-  in.jobFraction = arrState_.jobFraction;
-  in.fadeOut = arrState_.arrangement.fadeOut;
-  arrangementView_ = cf::ui::buildArrangementView(in);
-  list_.updateContent();
-  list_.repaint();
-  const int keep = scene_.getSelectedId();
-  scene_.clear(juce::dontSendNotification);
-  for (std::size_t i = 0; i < arrState_.scenes.size(); ++i) scene_.addItem(juce::String(arrState_.scenes[i].second), static_cast<int>(i) + 1);
-  scene_.setSelectedId(keep > 0 && keep <= scene_.getNumItems() ? keep : (scene_.getNumItems() > 0 ? 1 : 0), juce::dontSendNotification);
-  transition_.setSelectedId(static_cast<int>(arrState_.arrangement.transition) + 1, juce::dontSendNotification);
-  fadeOut_.setToggleState(arrState_.arrangement.fadeOut, juce::dontSendNotification);
-  tail_.setToggleState(arrState_.arrangement.tail, juce::dontSendNotification);
-  midi_.setToggleState(arrState_.arrangement.writeMidi, juce::dontSendNotification);
-  markers_.setToggleState(arrState_.arrangement.writeMarkers, juce::dontSendNotification);
-  totalText_ = juce::String(arrangementView_.totalText);
-  juce::String notes = juce::String(arrangementView_.statusText);
-  for (const auto& n : arrangementView_.notes) notes << (notes.isEmpty() ? "" : "\n") << juce::String(n);
-  notesText_ = notes;
-  syncing_ = wasSyncing;
-  updateArrangementButtons();
-  repaint();
-}
-
-void ExportDrawer::updateArrangementButtons() {
-  const bool wasSyncing = syncing_;
-  syncing_ = true;
-  const int row = list_.getSelectedRow();
-  cf::ui::ArrangementViewInput in;
-  for (const auto& r : arrState_.rows) {
-    cf::ui::ArrangementRowInput ri;
-    ri.sceneNumber = r.sceneNumber;
-    ri.patternBars = r.patternBars;
-    ri.bars = r.bars;
-    ri.deleted = r.deleted;
-    ri.fits = r.fits;
-    in.rows.push_back(ri);
-  }
-  in.selected = row;
-  in.totalBars = arrState_.arrangement.totalBars();
-  in.sceneCount = static_cast<int>(arrState_.scenes.size());
-  in.hasSource = arrState_.hasSource;
-  in.running = arrState_.running;
-  arrangementView_ = cf::ui::buildArrangementView(in);
-  add_.setEnabled(arrangementView_.addEnabled);
-  remove_.setEnabled(arrangementView_.removeEnabled);
-  up_.setEnabled(arrangementView_.moveUpEnabled);
-  down_.setEnabled(arrangementView_.moveDownEnabled);
-  chain_.setEnabled(arrangementView_.useChainEnabled);
-  autoFill_.setEnabled(arrangementView_.autoFillEnabled);
-  exportArr_.setEnabled(arrangementView_.exportEnabled);
-  exportArr_.setTooltip(arrangementView_.exportEnabled ? "Render the arrangement to a WAV, MIDI and cue list" : withReason("Render the arrangement to a WAV, MIDI and cue list", false, arrangementView_.exportTooltip));
-  scene_.setEnabled(arrangementView_.addEnabled || !arrState_.scenes.empty());
-  const bool sel = row >= 0 && row < static_cast<int>(arrState_.arrangement.sections.size());
-  sectionBars_.setEnabled(sel && arrangementView_.editable);
-  repeats_.setEnabled(sel && arrangementView_.editable);
-  for (auto* t : {&fadeOut_, &tail_, &midi_, &markers_}) t->setEnabled(arrangementView_.editable);
-  transition_.setEnabled(arrangementView_.editable);
-  sectionBars_.clear(juce::dontSendNotification);
-  if (sel) {
-    const auto& r = arrState_.rows[static_cast<std::size_t>(row)];
-    for (int b : cf::ui::arrangementBarChoices(r.patternBars)) sectionBars_.addItem(juce::String(b), sectionBars_.getNumItems() + 1);
-    for (int i = 0; i < sectionBars_.getNumItems(); ++i)
-      if (sectionBars_.getItemText(i).getIntValue() == r.bars) sectionBars_.setSelectedItemIndex(i, juce::dontSendNotification);
-    repeats_.setSelectedId(r.repeats, juce::dontSendNotification);
-  }
-  syncing_ = wasSyncing;
-}
-
-void ExportDrawer::editSelectedSection(const std::function<void(cf::composition::ArrangementSection&)>& edit) {
-  const int row = list_.getSelectedRow();
-  if (row < 0) return;
-  cmd_.editArrangement([&](cf::composition::Arrangement& a) {
-    if (row < static_cast<int>(a.sections.size())) edit(a.sections[static_cast<std::size_t>(row)]);
-  });
-  syncArrangement();
-}
-
 void ExportDrawer::cancelAny() {
   if (model_.exportRunning()) cmd_.cancelExport();
-  if (arrState_.running) cmd_.cancelArrangement();
 }
 
 void ExportDrawer::tick() {
-  const bool arrWas = arrState_.running;
-  const bool arrNow = cmd_.pollArrangement();
-  if (arrNow || arrWas) {
-    arrState_ = cmd_.arrangementState();
-    if (arrNow != arrWas) syncArrangement();
-  }
   const bool exporting = model_.exportRunning();
-  const bool any = exporting || arrNow;
-  if (any) {
-    progressValue_ = exporting ? static_cast<double>(model_.exportFraction()) : arrState_.jobFraction;
-    progressText_ = exporting ? "Exporting" : juce::String(cf::ui::arrangementProgressMessage(std::max(1, arrState_.jobSection), std::max(1, arrState_.jobSections), arrState_.jobFraction));
+  if (exporting) {
+    progressValue_ = static_cast<double>(model_.exportFraction());
+    progressText_ = "Exporting";
   }
-  if (cancel_.isVisible() != any) {
-    cancel_.setVisible(any);
-    progressBar_.setVisible(any);
+  if (cancel_.isVisible() != exporting) {
+    cancel_.setVisible(exporting);
+    progressBar_.setVisible(exporting);
     resized();
     syncWidgets(false);
   }
-  if (any) progressBar_.repaint();
+  if (exporting) progressBar_.repaint();
 }
-
-// ---- list ----
-void ExportDrawer::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) {
-  if (row < 0 || row >= static_cast<int>(arrangementView_.rows.size())) return;
-  const auto& p = cdl::pal();
-  if (selected) {
-    g.setColour(p.spray.withAlpha(0.20f));
-    g.fillRect(0, 0, w, h);
-    g.setColour(p.spray);
-    g.fillRect(0, 0, 2, h);
-  }
-  g.setColour(p.ink);
-  g.setFont(cdl::font(cdl::FontRole::Hint, cdl::uiScale()));
-  g.drawText(juce::String(arrangementView_.rows[static_cast<std::size_t>(row)]), 8, 0, w - 12, h, juce::Justification::centredLeft, true);
-}
-
-juce::String ExportDrawer::getNameForRow(int row) { return row >= 0 && row < static_cast<int>(arrangementView_.rows.size()) ? juce::String(arrangementView_.rows[static_cast<std::size_t>(row)]) : juce::String(); }
 
 // ---- layout ----
 void ExportDrawer::paintBody(juce::Graphics& g) {
@@ -451,14 +223,11 @@ void ExportDrawer::paintBody(juce::Graphics& g) {
   section(formatArea_, "WAV");
   section(midiArea_, "MIDI");
   section(dragArea_, "Drag out");
-  section(arrArea_, "Arrangement");
   g.setColour(p.inkMuted);
   g.setFont(cdl::font(cdl::FontRole::Hint, cdl::uiScale()));
   g.drawText(estimateText_, estimateArea_, juce::Justification::centredLeft, true);
   g.drawText(tempoText_, tempoArea_, juce::Justification::centredLeft, true);
-  g.drawText(totalText_, totalArea_, juce::Justification::centredLeft, true);
   g.drawFittedText(hintText_, dragArea_.withTrimmedTop(54), juce::Justification::topLeft, 2);
-  g.drawFittedText(notesText_, arrArea_.withTrimmedTop(arrArea_.getHeight() - 86).withTrimmedBottom(36), juce::Justification::topLeft, 3);
 }
 
 void ExportDrawer::layoutBody(int width) {
@@ -537,61 +306,6 @@ void ExportDrawer::layoutBody(int width) {
     dragKit_.setBounds(r);
   }
   y = dragArea_.getBottom() + 8;
-  // Arrangement
-  arrArea_ = {0, y, width, 380};
-  y += 22;
-  list_.setBounds(pad, y, width - 2 * pad, 96);
-  y += 96 + gap;
-  {
-    auto r = row();
-    sceneLabel_.setBounds(r.removeFromLeft(78));
-    scene_.setBounds(r.removeFromLeft(r.getWidth() - 56));
-    r.removeFromLeft(4);
-    add_.setBounds(r);
-  }
-  {
-    auto r = row();
-    const int w = (r.getWidth() - 8) / 3;
-    remove_.setBounds(r.removeFromLeft(w));
-    r.removeFromLeft(4);
-    up_.setBounds(r.removeFromLeft(w));
-    r.removeFromLeft(4);
-    down_.setBounds(r);
-  }
-  {
-    auto r = row();
-    barsLabel_.setBounds(r.removeFromLeft(78));
-    sectionBars_.setBounds(r.removeFromLeft(60));
-    r.removeFromLeft(8);
-    repeatsLabel_.setBounds(r.removeFromLeft(56));
-    repeats_.setBounds(r.removeFromLeft(60));
-  }
-  {
-    auto r = row();
-    transitionLabel_.setBounds(r.removeFromLeft(78));
-    transition_.setBounds(r.removeFromLeft(130));
-  }
-  {
-    auto r = row();
-    fadeOut_.setBounds(r.removeFromLeft(r.getWidth() / 2));
-    tail_.setBounds(r);
-  }
-  {
-    auto r = row();
-    midi_.setBounds(r.removeFromLeft(r.getWidth() / 2));
-    markers_.setBounds(r);
-  }
-  {
-    auto r = row();
-    chain_.setBounds(r.removeFromLeft(r.getWidth() / 2 - 2));
-    r.removeFromLeft(4);
-    autoFill_.setBounds(r);
-  }
-  totalArea_ = row(18);
-  y += 40;  // the notes block
-  exportArr_.setBounds(pad, y, width - 2 * pad, 28);
-  y += 36;
-  arrArea_.setHeight(y - arrArea_.getY());
   body_.setSize(width, y);
 }
 

@@ -1,6 +1,6 @@
 # F05 Meters and feedback
 
-**Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (StatusBar, HistoryPanel, WavePanel, EditorCommands), F04 for final StatusBar widths (can land before it; see section 3)  **Blocks:** F07 (voice display for pads), F11 (per-bus meters reuse `OutputMeter`)
+**Status:** Implemented (meters, CLIP latch, gain-reduction readout, voice and sync boxes, notice log)  **Size:** M (6 engineer-days)  **Depends on:** F00 (StatusBar, HistoryPanel, WavePanel, EditorCommands), F04 for final StatusBar widths (can land before it; see section 3)  **Blocks:** F07 (voice display for pads), F11 (per-bus meters reuse `OutputMeter`)
 
 ## 0. Implementation status (audited 2026-10-20)
 **Mostly not started; one story is partly built.**

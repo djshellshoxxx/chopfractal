@@ -427,7 +427,16 @@ void RulesPanel::refreshFooter() {
   revert_.setEnabled(draft_.dirty());
   applyMutate_.setEnabled(!draft_.dirty() || can);
   why_.setEnabled(model_.hasSelection());
+  updateStatusSuffix();
 }
+
+void RulesPanel::setDrawerOpen(bool open) {
+  drawerOpen_ = open;
+  updateStatusSuffix();
+}
+
+// The drawer shows its own Apply and Revert; once it is closed the status bar keeps the reminder.
+void RulesPanel::updateStatusSuffix() { model_.setStatusSuffix(draft_.dirty() && !drawerOpen_ ? juce::String("Unapplied rule changes") : juce::String()); }
 
 void RulesPanel::selectRule(std::uint32_t id) {
   selectedRule_ = id;

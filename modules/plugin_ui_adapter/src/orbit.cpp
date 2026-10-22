@@ -106,4 +106,26 @@ EventId hitTest(const OrbitView& view, double x, double y, double radius) {
   return best ? best->id : EventId{};
 }
 
+double pointerAngle(double x, double y) {
+  if (!std::isfinite(x) || !std::isfinite(y) || (x == 0.0 && y == 0.0)) return 0.0;
+  double a = std::atan2(x, -y);
+  if (a < 0) a += kTwoPi;
+  return a >= kTwoPi ? 0.0 : a;
+}
+
+int ringAt(const OrbitView& view, double x, double y, double radius) {
+  if (!std::isfinite(x) || !std::isfinite(y) || !(radius > 0.0) || view.rings <= 0) return -1;
+  const double hole = 0.25 * radius, w = (radius - hole) / view.rings;
+  const int ring = static_cast<int>(std::floor((radius - std::hypot(x, y)) / w));
+  return std::min(view.rings - 1, std::max(0, ring));
+}
+
+std::int64_t angleToTick(double angle, std::int64_t lengthTicks) {
+  if (!std::isfinite(angle) || lengthTicks <= 0) return 0;
+  double t = std::round(angle / kTwoPi * static_cast<double>(lengthTicks));
+  t = std::fmod(t, static_cast<double>(lengthTicks));
+  if (t < 0) t += static_cast<double>(lengthTicks);
+  return static_cast<std::int64_t>(t);
+}
+
 }  // namespace chopfractal::ui

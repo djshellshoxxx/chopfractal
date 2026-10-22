@@ -6,6 +6,7 @@ using namespace perform_ui;
 OutputsPanel::OutputsPanel(EditorModel& m, EditorCommands& c, PerformCommands& perform) : DrawerPanel(m, c, "OutputsPanel", 10), perform_(perform) {
   styleLabel(status_, "", false);
   status_.setJustificationType(juce::Justification::topLeft);
+  status_.setMinimumHorizontalScale(1.0f);  // wrap onto the second line instead of running past the drawer edge
   styleLabel(modeLabel_, "Routing");
   styleLabel(empty_, "");
   empty_.setJustificationType(juce::Justification::topLeft);

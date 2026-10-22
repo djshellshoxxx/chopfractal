@@ -1,6 +1,6 @@
 # F13 MIDI drag-out
 
-**Status:** Ready for development  **Size:** M (6 engineer-days)  **Depends on:** F00 (HistoryPanel, FeaturePanel, StatusBar), F01 (export-settings persistence, optional; see section 4)  **Blocks:** none
+**Status:** Implemented (drag handles, Drag Kit, history node drag-out and per-variation export)  **Size:** M (6 engineer-days)  **Depends on:** F00 (HistoryPanel, FeaturePanel, StatusBar), F01 (export-settings persistence, optional; see section 4)  **Blocks:** none
 
 ## 0. Implementation status (audited 2026-10-20)
 **Partly built by pass 3 (drag-out of the current groove); everything about variations, the kit, settings and menus is not started.**
@@ -176,3 +176,6 @@ A history node must activate on mouse-up with less than `DragHandle::kDragThresh
 7. FeaturePanel handles and MIDI options, state properties; shell tests.
 8. HistoryPanel node drag, click-vs-drag, context-menu exports; GUI tests.
 9. Manual QA across the DAW matrix; update docs.
+
+## As built addendum (audit 2026-10-21)
+A family-tree node is also a drag source: pressing a node and moving past `DragHandle::kDragThresholdPx` renders that variation's MIDI (Alt: WAV) with `EditorCommands::makeVariationDragFile` and starts an external file drag without recalling the node; a click without a drag still recalls it. The node context menu gained "Export MIDI..." and "Export WAV..." (`exportVariation`). Test: `history_node_drag_exports_that_variation_and_a_click_still_recalls_it`.

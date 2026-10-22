@@ -90,6 +90,8 @@ CommandRegistry::CommandRegistry(ChopFractalEditor& ed) : ed_(ed) {
     edp->openDrawer("presets");
     edp->presetBrowser().askSave();
   });
+  act("gestures", "Open live gestures", "", {"stutter", "reverse", "tape", "stop", "hold", "perform", "cc"}, nullptr, [edp] { edp->openDrawer("gestures"); });
+  act("sound", "Open sound settings", "", {"engine", "groove", "stutter", "roll", "echo", "tremolo", "pan", "limiter", "match", "break"}, nullptr, [edp] { edp->openDrawer("sound"); });
   act("tools", "Open tools", "", {"groove", "outputs", "pads", "capture", "history"}, nullptr, [edp] { edp->openDrawer("tools"); });
   act("settings", "Open settings", "", {"scale", "motion", "defaults", "preferences"}, nullptr, [edp] { edp->openDrawer("settings"); });
   act("theme", "Switch theme", "", {"night", "concrete", "dark", "light"}, nullptr, [edp] { edp->setTheme(cdl::currentTheme() == cdl::ThemeId::Night ? cdl::ThemeId::Concrete : cdl::ThemeId::Night); });

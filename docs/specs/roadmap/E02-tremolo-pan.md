@@ -1,6 +1,6 @@
 # E02 Tremolo-Pan (per-event amplitude and pan motion)
 
-**Status:** Ready for development  **Size:** S-M (4 engineer-days)  **Depends on:** E01 (defines the effect pass module, the `fx` extras section tag 17 and the event extension rules). Soft: F01, F04, F00  **Blocks:** none
+**Status:** Implemented (renderer, host parameters, state, Sound drawer rows, tests)  **Size:** S-M (4 engineer-days)  **Depends on:** E01 (defines the effect pass module, the `fx` extras section tag 17 and the event extension rules). Soft: F01, F04, F00  **Blocks:** none
 **Family:** FX14 "Tremolo / auto-pan" of `docs/specs/advanced-section-effects.md`, per-event model of `docs/specs/effects-filter-glide-crunch.md`.
 
 ## 1. Summary and user value

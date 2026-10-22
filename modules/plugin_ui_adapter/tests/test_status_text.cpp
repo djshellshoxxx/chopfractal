@@ -76,3 +76,31 @@ CHOP_TEST(meter_ballistics_attack_release_hold_and_latch) {
   CHECK_NEAR(r.db[0], -20.0, 0.01);
   CHECK(meterTooltip(r).find("CLIP lights when the output exceeds 0 dBFS") != std::string::npos);
 }
+
+CHOP_TEST(meter_shows_limiter_gain_reduction_as_text_with_instant_attack_and_a_20_db_per_second_release) {
+  MeterState s;
+  MeterInput in;
+  CHECK(grText(s.grDb).empty());
+  CHECK(!updateMeter(s, in, 0.033));  // nothing moved
+  in.grDb = -4.0f;
+  CHECK(updateMeter(s, in, 0.033));
+  CHECK_NEAR(s.grDb, -4.0, 1e-4);  // instant attack
+  CHECK(grText(s.grDb) == "GR " + dbText(-4.0f));
+  CHECK(meterTooltip(s).find("Limiter gain reduction") != std::string::npos);
+  in.grDb = 0.f;
+  for (int i = 0; i < 6; ++i) updateMeter(s, in, 1.0 / 30.0);  // 0.2 s: 4 dB of release
+  CHECK_NEAR(s.grDb, 0.0, 1e-4);
+  CHECK(grText(s.grDb).empty());
+  CHECK(meterTooltip(s).find("Limiter") == std::string::npos);
+  in.grDb = -6.0f;
+  updateMeter(s, in, 0.033);
+  in.grDb = 0.f;
+  updateMeter(s, in, 0.033, true);  // reduced motion: no easing
+  CHECK_NEAR(s.grDb, 0.0, 1e-4);
+  in.grDb = std::numeric_limits<float>::quiet_NaN();
+  updateMeter(s, in, 0.033);
+  CHECK_NEAR(s.grDb, 0.0, 1e-4);  // NaN never shows as a reduction
+  in.grDb = 3.0f;  // positive is not a reduction
+  updateMeter(s, in, 0.033);
+  CHECK_NEAR(s.grDb, 0.0, 1e-4);
+}

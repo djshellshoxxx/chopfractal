@@ -16,7 +16,14 @@ branch you can return to.
 - **Orbit View:** the phrase drawn as concentric rings (one per chop) with a sweeping, pulsing playhead.
 - **Per-hit effects:** state-variable filter, tape glide (tape stop and rise) and bit/sample-rate crunch, generated, editable and lockable like any other hit property.
 - **Export:** WAV (16-bit, 24-bit or 32-bit float, up to 192 kHz) and a Producer Kit (every chop as its own WAV plus a MIDI file that replays the pattern on those slices).
-- **Variation family tree:** every Generate, Mutate and Zoom is kept as a branch you can return to.
+- **Variation family tree:** every Generate, Mutate and Zoom is kept as a branch you can return to; drag a node to your DAW as MIDI (Alt for audio).
+- **Break Engine and Groove Lab:** break profiles, backbeat and anchor rules, humanize, fills and groove templates shape what Generate builds.
+- **Stutter, Roll, Echo, Tremolo-Pan, Glitch:** per-hit effects the generator can place, tuned in the Sound drawer.
+- **Live gestures:** hold Stutter, Reverse or Tape Stop (or MIDI CC 20, 21, 22) to play the loop live.
+- **Performance pads, input capture, scenes and A/B morph, multi-output stems, tempo match:** the Panels menu opens a drawer for each.
+- **Level match and safety limiter:** loudness-matched output with a true-peak limiter and a gain-reduction readout.
+- **Arrangement export:** render a chain of scenes to one WAV with cue markers.
+- **Command palette:** Ctrl+K (Cmd+K) finds every action, parameter and preset; every parameter tooltip shows its value, range and default.
 
 **Architecture and modularity:** [`docs/MODULARITY_MAP.md`](docs/MODULARITY_MAP.md). **IP records (public-safe, high level):** [`IP/README.md`](IP/README.md).
 
@@ -27,7 +34,7 @@ branch you can return to.
 
 | Path | What it is |
 |---|---|
-| `modules/<id>/` | Fifteen independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
+| `modules/<id>/` | Twenty-two independently buildable, portable C++17 modules, each with tests, a manifest (`module.json`), and a generated migration guide |
 | `composition/` | The headless composition root (`ProjectSession`) that wires the modules together |
 | `plugin/` | The JUCE VST3 shell: thin glue over the composition root (optional build) |
 | `tools/` | Portability checker, doc generator, module transfer script, clean-consumer smoke test, VST3 validator runner |

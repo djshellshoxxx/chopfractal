@@ -70,7 +70,9 @@ void StatusBar::updateMessage() {
   const int sev = static_cast<int>(model_.statusSeverity());
   const juce::String prefix = juce::String(cf::ui::severityPrefix(sev));
   const juce::String firstLine = line.upToFirstOccurrenceOf("\n", false, false);
-  const juce::String text = line.isEmpty() ? juce::String() : prefix + firstLine;
+  const juce::String& suffix = model_.statusSuffix();
+  juce::String text = line.isEmpty() ? juce::String() : prefix + firstLine;
+  if (suffix.isNotEmpty()) text = text.isEmpty() ? suffix : text + "  |  " + suffix;
   const auto& p = cdl::pal();
   const juce::Colour colour = sev == 2 ? p.clip : sev == 1 ? p.warn : p.ink.withAlpha(0.8f);
   if (text == shown_ && colour == message_.colour) return;
@@ -82,7 +84,7 @@ void StatusBar::updateMessage() {
 }
 
 void StatusBar::refreshReadouts() {
-  const bool compact = getWidth() < 900;
+  const bool compact = getWidth() < 1200;
   if (compact != compact_) {
     compact_ = compact;
     resized();

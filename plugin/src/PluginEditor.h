@@ -7,6 +7,7 @@
 // Registering a drawer: build a component, call registerDrawer(id, title, content, width). It gets a toggle button in the
 // top bar (unless showButton is false) and is shown in the drawer region when openDrawer(id) / toggleDrawer(id) is called.
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <functional>
 
 #include "CdlLookAndFeel.h"
 #include "CommandPalette.h"
@@ -29,6 +30,8 @@
 #include "PresetBrowser.h"
 #include "PerformDrawers.h"
 #include "RulesPanel.h"
+#include "GesturePanel.h"
+#include "SoundPanel.h"
 #include "PluginProcessor.h"
 #include "QuickStartCard.h"
 #include "QuickStartTracker.h"
@@ -52,6 +55,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   void paint(juce::Graphics& g) override;
   void resized() override;
   bool keyPressed(const juce::KeyPress&) override;
+  // The key map with the focused component given (keyPressed passes the real one); tests pass the waveform to check its keys.
+  bool handleKey(const juce::KeyPress&, juce::Component* focused);
 
   // ---- drawer registration (second wave panels plug in here) ----
   void registerDrawer(const juce::String& id, const juce::String& title, juce::Component& content, int preferredWidth = 320, bool showButton = true);
@@ -78,6 +83,8 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   int uiScalePercent() const { return uiScalePercent_; }
   void setReducedMotion(bool on);
   SettingsDrawer& settingsDrawer() { return settings_; }
+  SoundPanel& soundPanel() { return sound_; }
+  GesturePanel& gesturePanel() { return gestures_; }
   const shell::ShellRects& shellRects() const { return rects_; }
 
   // Public so tests can drive them without modal dialogs.
@@ -156,10 +163,20 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   OrbitPanel orbit_;
   PresetBrowser presets_;
   ExportDrawer export_;
-  juce::Viewport legacyView_;
+  // The Tools drawer scrolls vertically; its body follows the drawer width.
+  struct LegacyViewport : juce::Viewport {
+    std::function<void()> onSized;
+    void resized() override {
+      juce::Viewport::resized();
+      if (onSized) onSized();
+    }
+  };
+  LegacyViewport legacyView_;
   InspectorPanel inspector_;
   FxRackPanel fxRack_;
   RulesPanel rules_;
+  SoundPanel sound_;
+  GesturePanel gestures_;
   SettingsDrawer settings_;
   DrawerHost drawer_;
   PerformDrawers perform_;  // last: its panels are children of the drawer and listeners of the model

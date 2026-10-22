@@ -230,10 +230,38 @@ void ChopFractalProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
       else if (msg.isAllNotesOff() || msg.isAllSoundOff()) addPad(frame, cf::render::PadEvent::Type::AllNotesOff, 0, 0);
     }
   }
+  // Live gestures: on-screen holds first (frame 0), then MIDI CC 20 to 22 at their own samples.
+  int numGestures = 0;
+  const std::uint8_t gestureRate = static_cast<std::uint8_t>(juce::jlimit(0, cf::render::kStutterRates - 1, gestureStutterRate.load(std::memory_order_relaxed)));
+  {
+    UiGesture u;
+    while (numGestures < cf::render::kMaxGestureEventsPerBlock && uiGestureQueue_.tryPop(u)) {
+      cf::render::GestureEvent& g = gestureEvents_[static_cast<std::size_t>(numGestures++)];
+      g.frame = 0;
+      g.kind = static_cast<cf::render::GestureKind>(u.kind);
+      g.on = u.on;
+      g.rate = gestureRate;
+    }
+  }
+  if (!midi.isEmpty()) {
+    const int channel = padChannel_.load(std::memory_order_relaxed);
+    for (const auto meta : midi) {
+      if (numGestures >= cf::render::kMaxGestureEventsPerBlock) break;
+      const juce::MidiMessage msg = meta.getMessage();
+      if (!msg.isController() || (channel != 0 && msg.getChannel() != channel)) continue;
+      if (cf::render::gestureFromCc(msg.getControllerNumber(), msg.getControllerValue(), juce::jlimit(0, frames - 1, meta.samplePosition), gestureRate,
+                                    gestureEvents_[static_cast<std::size_t>(numGestures)]))
+        ++numGestures;
+    }
+  }
   cf::render::LiveInput live;
   live.pads = padEvents_.data();
   live.numPads = numPads;
   live.padParams = cf::host::toPadParams(pv);
+  live.gestures = gestureEvents_.data();
+  live.numGestures = numGestures;
+  live.gestureParams.tapeStopMs = gestureTapeStopMs.load(std::memory_order_relaxed);
+  live.gestureParams.spinUpMs = gestureSpinUpMs.load(std::memory_order_relaxed);
   // Aux outputs: the channels of bus i sit after the main channels, in bus order. Pointers only, nothing is allocated.
   cf::render::AuxOutputs aux;
   float* auxPtrs[cf::render::kMaxAuxBuses][2] = {};
@@ -517,6 +545,9 @@ void ChopFractalProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::ValueTree stateCopy = apvts.copyState();  // never mutate the live tree: hosts may call this off the message thread
   stateCopy.setProperty("manualBpm", manualBpm.load(), nullptr);
   stateCopy.setProperty("embedSource", embedSource.load(), nullptr);
+  stateCopy.setProperty("gestureStutterRate", gestureStutterRate.load(), nullptr);
+  stateCopy.setProperty("gestureTapeStopMs", gestureTapeStopMs.load(), nullptr);
+  stateCopy.setProperty("gestureSpinUpMs", gestureSpinUpMs.load(), nullptr);
   stateCopy.setProperty("engineParams", 1, nullptr);  // marks a project that knows the engine v2 parameters; absent = saved before they existed
   std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
 
@@ -574,6 +605,9 @@ void ChopFractalProcessor::setStateInformation(const void* data, int sizeInBytes
       }
       manualBpm = juce::jlimit(20.0, 999.0, static_cast<double>(apvts.state.getProperty("manualBpm", 120.0)));
       embedSource = static_cast<bool>(apvts.state.getProperty("embedSource", false));
+      gestureStutterRate = juce::jlimit(0, cf::render::kStutterRates - 1, static_cast<int>(apvts.state.getProperty("gestureStutterRate", 1)));
+      gestureTapeStopMs = juce::jlimit(20.0f, 4000.0f, static_cast<float>(static_cast<double>(apvts.state.getProperty("gestureTapeStopMs", 400.0))));
+      gestureSpinUpMs = juce::jlimit(20.0f, 4000.0f, static_cast<float>(static_cast<double>(apvts.state.getProperty("gestureSpinUpMs", 150.0))));
     }
 
   if (blob.empty()) return;
@@ -934,6 +968,17 @@ void ChopFractalProcessor::padAllNotesOff() {
   UiPad u;
   u.kind = 2;
   if (!uiPadQueue_.tryPush(u)) padInputDropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void ChopFractalProcessor::setGesture(cf::render::GestureKind kind, bool on) {
+  UiGesture u;
+  u.kind = static_cast<std::uint8_t>(kind);
+  u.on = on;
+  uiGestureQueue_.tryPush(u);  // a full queue means the audio thread is not running; nothing is held then
+}
+
+void ChopFractalProcessor::releaseAllGestures() {
+  for (const auto k : {cf::render::GestureKind::Stutter, cf::render::GestureKind::Reverse, cf::render::GestureKind::TapeStop}) setGesture(k, false);
 }
 
 cf::Status ChopFractalProcessor::setPadSettings(const cf::composition::PadSettings& settings) {

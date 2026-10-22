@@ -83,6 +83,7 @@ struct Voice {
   std::uint8_t padGroup = 0;
   // Output bus (F11): 0 main, 1..kMaxAuxBuses aux. A bus the host has not enabled folds into main at render time.
   std::uint8_t bus = 0;
+  bool gestRev = false;  // F08 Reverse gesture has flipped this voice's direction
 };
 
 constexpr std::uint8_t kTagPad = 2;
@@ -150,6 +151,26 @@ struct Renderer::Impl {
   std::atomic<std::uint64_t> padDroppedCount{0};
   std::atomic<std::uint64_t> padUnmappedCount{0};
 
+  // F08 live gestures. Everything is preallocated; the audio thread only flips these between frames.
+  bool gStutter = false, gReverse = false, gTape = false;
+  int gStutterRate = 1;
+  double tapeRate = 1.0;                 // 1 = full speed, 0 = standstill
+  double tapeDown = 0.0, tapeUp = 0.0;   // per-frame change of tapeRate while held / released
+  bool tapeActive = false;               // tapeBuf holds the rates of the span being rendered
+  std::vector<float> tapeBuf;
+  const GestureEvent* gestEvents = nullptr;
+  int numGestEvents = 0;
+  bool haveLast = false;                 // the last pattern hit, kept as a copy so a Playback swap cannot leave it dangling
+  FlatEvent lastEvent;
+  PreparedSlice lastSlice;
+  std::uint8_t lastBus = 0;
+  FlatEvent stutterEvent;                // frozen at the press
+  PreparedSlice stutterSlice;
+  std::uint8_t stutterBus = 0;
+  int stutterAt = 0;                     // frame of the chunk at which the next repeat starts
+  double chunkTpf = 0.0;
+  std::atomic<unsigned> gestMask{0};
+
   double outGain = 1.0;
   double dry = 0.0;
   bool gainsPrimed = false;  // first block after prepare() starts at the targets instead of ramping from defaults
@@ -184,6 +205,12 @@ struct Renderer::Impl {
     previews = {};
     mixL.assign(static_cast<std::size_t>(cfg.maxBlock), 0.f);
     mixR.assign(static_cast<std::size_t>(cfg.maxBlock), 0.f);
+    tapeBuf.assign(static_cast<std::size_t>(cfg.maxBlock), 1.f);
+    gStutter = gReverse = gTape = false;
+    tapeRate = 1.0;
+    tapeActive = false;
+    haveLast = false;
+    gestMask.store(0, std::memory_order_relaxed);
     cfg.auxBuses = std::max(0, std::min(cfg.auxBuses, kMaxAuxBuses));
     auxMix.assign(static_cast<std::size_t>(cfg.auxBuses) * 2 * static_cast<std::size_t>(cfg.maxBlock), 0.f);
     auxDelayLen = cfg.auxBuses > 0 ? std::max(1, Limiter::latencyFor(cfg.sampleRate)) : 0;
@@ -476,6 +503,66 @@ struct Renderer::Impl {
     v->bus = bus;
   }
 
+  // F08. Remembers the hit a Stutter gesture would freeze (a plain copy, no allocation).
+  void rememberHit(const FlatEvent& e, const PreparedSlice& slice, std::uint8_t bus) {
+    if (slice.secondary || slice.fxBit != 0) return;
+    lastEvent = e;
+    lastSlice = slice;
+    lastBus = bus;
+    haveLast = true;
+  }
+
+  // Flips a voice to play backwards (or forwards again). A voice that has not rendered yet starts from the matching end.
+  void flipVoice(Voice& v, bool reversed) {
+    if (!v.active || v.gestRev == reversed) return;
+    v.gestRev = reversed;
+    v.step = -v.step;
+    if (v.age == 0) v.pos = v.step < 0.0 ? static_cast<double>(v.regionEnd - 1) : static_cast<double>(v.regionStart);
+  }
+  void syncReverse() {
+    for (Voice& v : voices) {
+      if (v.active) flipVoice(v, gReverse);
+      else v.gestRev = false;
+    }
+  }
+
+  void applyGesture(const GestureEvent& g, int frameInChunk, const Playback& pb) {
+    switch (g.kind) {
+      case GestureKind::Reverse:
+        gReverse = g.on;
+        syncReverse();
+        break;
+      case GestureKind::TapeStop:
+        gTape = g.on;
+        break;
+      case GestureKind::Stutter:
+        if (g.on && haveLast && chunkTpf > 0.0) {
+          gStutter = true;
+          gStutterRate = std::min(kStutterRates - 1, static_cast<int>(g.rate));
+          releaseAll();  // the groove steps aside; the frozen hit takes over
+          stutterEvent = lastEvent;
+          stutterSlice = lastSlice;
+          stutterBus = lastBus;
+          stutterAt = frameInChunk;
+        } else if (!g.on) {
+          gStutter = false;
+        }
+        break;
+    }
+    (void)pb;
+  }
+
+  // The repeat of a frozen hit: one grid step long, started at its own frame.
+  void startStutterRepeat(const Playback& pb) {
+    const std::int64_t ticks = stutterPeriodTicks(gStutterRate);
+    FlatEvent e = stutterEvent;
+    e.duration = ticks;
+    PreparedSlice sl = stutterSlice;
+    sl.repeat = true;  // repeats overlap by design and are not choked as new hits
+    startFromEvent(*pb.source, e, sl, chunkTpf, stutterBus);
+    syncReverse();
+  }
+
   void drainPreview(const Playback* pb, bool allow) {
     std::uint32_t tail = previewTail.load(std::memory_order_relaxed);
     const std::uint32_t head = previewHead.load(std::memory_order_acquire);
@@ -515,6 +602,7 @@ struct Renderer::Impl {
     };
     // A voice on a bus the host did not enable plays on main.
     const int bus = (v.bus != 0 && ((auxMask >> (v.bus - 1)) & 1u)) ? v.bus : 0;
+    const bool tape = tapeActive;
     float* const dstL = bus == 0 ? mixL.data() : auxMix.data() + (static_cast<std::size_t>(bus - 1) * 2) * static_cast<std::size_t>(cfg.maxBlock);
     float* const dstR = bus == 0 ? mixR.data() : dstL + cfg.maxBlock;
     if (bus != 0) auxDirty[static_cast<std::size_t>(bus - 1)] = true;
@@ -595,6 +683,7 @@ struct Renderer::Impl {
         }
       }
       if (v.duck != 1.f) env *= v.duck;
+      if (tape) env *= tapeBuf[static_cast<std::size_t>(i)];
       env = std::max(0.f, env);
       v.lastLevel = env * std::max(v.gainL, v.gainR);
       float el = l * env, er = r * env;
@@ -619,14 +708,28 @@ struct Renderer::Impl {
       }
       dstL[i] += el * gainL;
       dstR[i] += er * gainR;
-      v.pos += v.step * v.rateScale;
+      v.pos += tape ? v.step * v.rateScale * static_cast<double>(tapeBuf[static_cast<std::size_t>(i)]) : v.step * v.rateScale;
       v.rateScale *= v.glideMul;
       ++v.age;
     }
   }
 
+  // Tape Stop: the speed factor of every frame of the span, ramping down while held and back up after.
+  void fillTape(int begin, int end) {
+    if (!gTape && tapeRate >= 1.0) {
+      tapeActive = false;
+      return;
+    }
+    tapeActive = true;
+    for (int i = begin; i < end; ++i) {
+      tapeRate = gTape ? std::max(0.0, tapeRate - tapeDown) : std::min(1.0, tapeRate + tapeUp);
+      tapeBuf[static_cast<std::size_t>(i)] = static_cast<float>(tapeRate);
+    }
+  }
+
   void renderVoices(int begin, int end) {
     if (end <= begin) return;
+    fillTape(begin, end);
     for (Voice& v : voices)
       if (v.active) renderVoice(v, begin, end);
     for (Voice& v : previews)
@@ -668,26 +771,43 @@ struct Renderer::Impl {
     constexpr int kNone = 0x7fffffff;
     std::size_t ti = 0;
     int pi = 0;
+    int gi = 0;
     int cursor = 0;
+    chunkTpf = tpf;
     while (pi < numPadEvents && padEvents[pi].frame < padOffset) ++pi;  // events of earlier chunks
+    while (gi < numGestEvents && gestEvents[gi].frame < padOffset) ++gi;
     for (;;) {
       const int tf = ti < triggers.size() ? triggers[ti].frame : kNone;
       const int pf = (pi < numPadEvents && padEvents[pi].frame - padOffset < frames) ? padEvents[pi].frame - padOffset : kNone;
-      if (tf == kNone && pf == kNone) break;
-      const int at = std::min(tf, pf);
+      const int gf = (gi < numGestEvents && gestEvents[gi].frame - padOffset < frames) ? gestEvents[gi].frame - padOffset : kNone;
+      const int sf = (gStutter && chunkTpf > 0.0 && stutterAt < frames) ? std::max(0, stutterAt) : kNone;
+      const int at = std::min(std::min(tf, pf), std::min(gf, sf));
+      if (at == kNone) break;
       if (at > cursor) {
         renderVoices(cursor, at);
         cursor = at;
       }
-      if (tf <= pf) {
+      if (tf == at) {  // pattern first, then pads, then gestures, then the stutter repeat
         const Trigger& t = triggers[ti++];
         const std::size_t idx = static_cast<std::size_t>(t.event - pb.events.data());
-        startFromEvent(*pb.source, *t.event, pb.slices[idx], tpf, idx < pb.eventBus.size() ? pb.eventBus[idx] : std::uint8_t{0});
-      } else {
+        const std::uint8_t bus = idx < pb.eventBus.size() ? pb.eventBus[idx] : std::uint8_t{0};
+        if (!gStutter) {  // a held Stutter replaces the groove with its frozen hit
+          startFromEvent(*pb.source, *t.event, pb.slices[idx], tpf, bus);
+          rememberHit(*t.event, pb.slices[idx], bus);
+          syncReverse();
+        }
+      } else if (pf == at) {
         applyPad(padEvents[pi++], *pb.source);
+        syncReverse();
+      } else if (gf == at) {
+        applyGesture(gestEvents[gi++], at, pb);
+      } else {
+        startStutterRepeat(pb);
+        stutterAt = at + static_cast<int>(std::max<std::int64_t>(1, std::llround(static_cast<double>(stutterPeriodTicks(gStutterRate)) / chunkTpf)));
       }
     }
     renderVoices(cursor, frames);
+    if (gStutter) stutterAt = std::max(0, stutterAt - frames);
   }
 
   void resetAuxDelay() {
@@ -998,8 +1118,18 @@ struct Renderer::Impl {
     padEvents = live.pads;
     numPadEvents = (live.pads && live.numPads > 0) ? std::min(live.numPads, kMaxPadEventsPerBlock) : 0;
     if (live.pads && live.numPads > kMaxPadEventsPerBlock) padDroppedCount.fetch_add(static_cast<std::uint64_t>(live.numPads - kMaxPadEventsPerBlock), std::memory_order_relaxed);
+    gestEvents = live.gestures;
+    numGestEvents = (live.gestures && live.numGestures > 0) ? std::min(live.numGestures, kMaxGestureEventsPerBlock) : 0;
+    const double sr = cfg.sampleRate;
+    const double stopMs = std::isfinite(live.gestureParams.tapeStopMs) ? std::min(4000.0, std::max(20.0, static_cast<double>(live.gestureParams.tapeStopMs))) : 400.0;
+    const double spinMs = std::isfinite(live.gestureParams.spinUpMs) ? std::min(4000.0, std::max(20.0, static_cast<double>(live.gestureParams.spinUpMs))) : 150.0;
+    tapeDown = 1000.0 / (stopMs * sr);
+    tapeUp = 1000.0 / (spinMs * sr);
     padOffset = 0;
     processBlocks(tb, params, in, out, nch, frames, aux);
+    gestEvents = nullptr;
+    numGestEvents = 0;
+    gestMask.store((gStutter ? 1u : 0u) | (gReverse ? 2u : 0u) | (gTape ? 4u : 0u), std::memory_order_relaxed);
     int pads = 0;
     for (const Voice& v : voices)
       if (v.active && v.tag == kTagPad) ++pads;
@@ -1068,6 +1198,7 @@ void Renderer::process(const TransportBlock& transport, const RenderParams& para
 }
 
 Mailbox<PadBank>& Renderer::padMailbox() { return impl_->padBank; }
+bool Renderer::gestureActive(GestureKind kind) const { return (impl_->gestMask.load(std::memory_order_relaxed) >> static_cast<unsigned>(kind)) & 1u; }
 std::uint64_t Renderer::padDropped() const { return impl_->padDroppedCount.load(std::memory_order_relaxed); }
 std::uint64_t Renderer::padUnmapped() const { return impl_->padUnmappedCount.load(std::memory_order_relaxed); }
 int Renderer::activePadVoices() const { return impl_->padVoices.load(std::memory_order_relaxed); }

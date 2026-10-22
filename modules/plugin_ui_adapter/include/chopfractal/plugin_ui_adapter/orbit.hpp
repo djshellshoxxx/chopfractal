@@ -57,4 +57,13 @@ Radii arcRadii(const OrbitView& view, const OrbitArc& arc, double radius);
 // invalid id. Zero-sweep or out-of-ring points never match.
 EventId hitTest(const OrbitView& view, double x, double y, double radius);
 
+// Editing geometry. `x`, `y` are relative to the centre with y pointing down, like hitTest.
+// Angle of a point: 0 at 12 o'clock, clockwise, in [0, 2*pi); the centre and non-finite input give 0.
+double pointerAngle(double x, double y);
+// The ring (chop index, 0 outermost) under a point, clamped to the first or last ring when the point is inside the hole or past
+// the rim; -1 when there are no rings or the input is not finite.
+int ringAt(const OrbitView& view, double x, double y, double radius);
+// Absolute tick of an angle for a loop of `lengthTicks` (rounded to the nearest tick, wraps to [0, lengthTicks)); 0 for a bad length.
+std::int64_t angleToTick(double angle, std::int64_t lengthTicks);
+
 }  // namespace chopfractal::ui

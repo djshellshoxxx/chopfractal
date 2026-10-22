@@ -1,6 +1,6 @@
 # F02 Direct editing
 
-**Status:** Ready for development  **Size:** L (9 engineer-days)  **Depends on:** F00 (panels), F01 (persisted snap prefs in `ProjectExtras::ui`)  **Blocks:** F04 (Delete/Ctrl+D/arrow keys call these commands), F07, F10
+**Status:** Implemented except as noted in section 0: hit editing in the pattern grid and the Orbit drawer (drag with ghost, hit menu), marker editing with undo, waveform zoom keys; the event editor is the Inspector drawer  **Size:** L (9 engineer-days)  **Depends on:** F00 (panels), F01 (persisted snap prefs in `ProjectExtras::ui`)  **Blocks:** F04 (Delete/Ctrl+D/arrow keys call these commands), F07, F10
 
 ## 0. Implementation status (audited 2026-10-20)
 **Partly built by pass 3 (direct hit editing basics); the rest is not started.**
@@ -10,7 +10,7 @@
 - Pattern grid: drag to move (time and lane), right-edge resize (6 px zone, one third for narrow hits), Alt+drag duplicates, Shift+click on empty space adds a one-cell hit, Delete/Backspace deletes, `M` mutes, `D` duplicates, Left/Right nudges and Shift+Left/Right resizes by one grid cell. One finished gesture is one undo step and one history node ("Edited hits"). Locked scopes refuse. A "Move / resize hits" toggle in the transport row switches between hit editing and rubber-band section selection.
 - Waveform: a click auditions the chop under the pointer (also starts a drag selection of chops), Shift+click adds a marker, Alt+click deletes the nearest marker within 8 px, double-click auditions. Double-click no longer adds markers.
 
-*Not implemented:* marker dragging, marker snap modes, enable/disable, trim, rename and marker undo/redo in the UI; waveform zoom and scroll; the event editor popup and the right-click menus; OrbitPanel editing; cross-bar duplicate and move-to-other-bar polish; snap toggle/division controls and their persistence; the nested-hit refusal messages.
+*As built (audit 2026-10-21):* everything above is implemented except as follows. The event editor popup is the Inspector drawer (sliders apply live to the audio through `ProjectSession::previewEdit` and commit one history step on release). The Orbit drawer edits top-level hits: drag along time (angle to tick, snapped like the grid, Cmd or Ctrl turns snap off) and to another ring, Shift keeps the ring, a ghost shows the drop, one undo step; right-click opens the hit menu. Helpers `pointerAngle`, `ringAt`, `angleToTick` in `plugin_ui_adapter/orbit.hpp` (the spec's `angleOf` name clashed with the existing tick overload). Waveform zoom keys (`+`, `-`, Home on the focused waveform) and marker undo and redo (Ctrl+Z, Ctrl+Y on the waveform) are in the key map.
 
 *Decisions that override the body below (the audit found these contradictions between this spec, the roadmap README and the shipped behavior; shipped behavior wins because users already have it):*
 1. **Add a marker with Shift+click** (shipped) or the right-click item `Add marker here`. The spec's "double-click on empty waveform adds a marker" is dropped; double-click keeps auditioning. Wherever this spec says double-click adds a marker, read Shift+click.

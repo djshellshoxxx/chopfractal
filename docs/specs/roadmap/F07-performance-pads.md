@@ -1,6 +1,6 @@
 # F07 Performance pads
 
-**Status:** Renderer, host parameters, composition, processor and view model implemented on `feat/AIO-audio-io`; PadPanel and the "Pads" toggle are wired by the GUI rewrite from section 12  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` section: extras tag 10); soft dependency
+**Status:** Implemented (Pads drawer)  **Size:** L (6 engineer-days)  **Depends on:** F00 (PadPanel in `plugin/src/panels/`, command layer), F01 (the `pads` section: extras tag 10); soft dependency
 on F08 (reuses `render::SpscQueue` and `render::LiveInput`; whichever merges second adapts, section 5)  **Blocks:** F11 (shares `processBlock` and bus/MIDI declarations; lands after F07
 per README)
 

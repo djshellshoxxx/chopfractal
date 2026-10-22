@@ -25,6 +25,12 @@ std::optional<EditorAction> mapKey(const juce::KeyPress& k, bool canvasFocus) {
   if (letterZ) return shift ? EditorAction::Collapse : EditorAction::ZoomIn;
   if (ch == 'l' && !shift) return EditorAction::ToggleLock;
   if (!canvasFocus) return std::nullopt;
+  if (code == juce::KeyPress::homeKey) return EditorAction::WaveFit;
+  {
+    const juce::juce_wchar t = k.getTextCharacter();
+    if (t == '+' || t == '=' || code == '+' || code == '=') return EditorAction::WaveZoomIn;
+    if (t == '-' || code == '-') return EditorAction::WaveZoomOut;
+  }
   if (code == juce::KeyPress::leftKey) return EditorAction::PrevHit;
   if (code == juce::KeyPress::rightKey) return EditorAction::NextHit;
   if (code == juce::KeyPress::upKey) return EditorAction::LaneUp;
@@ -61,6 +67,9 @@ juce::String shortcutText(EditorAction a) {
     case EditorAction::Escape: return "Esc";
     case EditorAction::SpaceHint: return "Space";
     case EditorAction::OpenPalette: return cmd + "K";
+    case EditorAction::WaveZoomIn: return "+";
+    case EditorAction::WaveZoomOut: return "-";
+    case EditorAction::WaveFit: return "Home";
   }
   return {};
 }

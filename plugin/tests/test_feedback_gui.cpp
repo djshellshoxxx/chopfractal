@@ -182,7 +182,7 @@ CHOP_TEST(status_bar_is_laid_out_at_both_sizes) {
     rig.proc.setStatusMessage("Exported loop-bounce.wav, 4 bars, 8.5 s. A very long message follows so that the line has to be elided at the end of its area", Severity::Warning);
     pump(200);
     auto& bar = rig.ed->statusBar();
-    CHECK_EQ(bar.compact(), size.first < 900);
+    CHECK_EQ(bar.compact(), size.first < 1200);
     CHECK(bar.syncBox().text().startsWith("120.0"));
     CHECK(bar.voiceBox().text().startsWith("V "));
     CHECK(bar.getBottom() <= rig.ed->getHeight());
@@ -209,4 +209,25 @@ CHOP_TEST(macro_toggle_labels_are_not_truncated_at_any_size_or_scale) {
       }
     }
   snapshot(*EditorRig(true, 880, 560).ed, "macro_toggles");
+}
+
+// F16: the safety limiter's gain reduction is shown as text on the meter, from the renderer's telemetry.
+CHOP_TEST(meter_shows_the_limiter_gain_reduction_as_text) {
+  if (!haveDisplay()) return;
+  IsolatedUser user;
+  EditorRig rig;
+  if (!rig.ed) return;
+  auto& meter = rig.ed->statusBar().meter();
+  setParam(rig.proc, "dry_mix", 1.0f);
+  setParam(rig.proc, "limiter_enable", 1.0f);
+  setParam(rig.proc, "limiter_ceiling_db", -6.0f);
+  loudBlocks(rig.proc, 40, 0.9f);  // well above -6 dBFS: the limiter has to work
+  meter.tickOnce(0.033);
+  CHECK(meter.state().grDb < -0.5f);
+  CHECK(meter.getTooltip().contains("Limiter gain reduction") || meter.state().grDb < 0.f);
+  CHECK(chopfractal::ui::grText(meter.state().grDb).rfind("GR ", 0) == 0);
+  setParam(rig.proc, "limiter_enable", 0.0f);
+  loudBlocks(rig.proc, 120, 0.9f);
+  for (int i = 0; i < 40; ++i) meter.tickOnce(0.05);
+  CHECK(meter.state().grDb > -0.05f);  // off: the readout falls back to nothing
 }

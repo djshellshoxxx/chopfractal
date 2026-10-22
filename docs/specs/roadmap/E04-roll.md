@@ -1,6 +1,6 @@
 # E04 Roll (beat-repeat freeze and roll)
 
-**Status:** renderer, codec, pass, host parameters and tests built (RND). UI call-out and state section not built.
+**Status:** Implemented (renderer, codec, pass, host parameters, Sound drawer rows, tests). The Sound drawer replaces the planned call-out.
 
 **What it does.** A beat-repeat style gesture: the hit is frozen at a point inside the chop and that grab repeats, speeding up from `rate` to `rateEnd`, with the level rising from `velStart` to `velEnd` percent of the hit's level. Event block `RollFx` {rate, rateEnd, velStart, velEnd, freeze, flags, pitch}, serialized in bit 2 of the event extension byte (see E03).
 

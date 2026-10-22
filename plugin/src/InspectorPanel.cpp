@@ -53,22 +53,39 @@ InspectorPanel::InspectorPanel(EditorModel& model, EditorCommands& commands)
     const float lin = cf::ui::dbToLevel(db);
     cmd_.setHitsTransform(ids(), [lin](cf::EventTransform& t) { t.level = lin; });
   };
+  level_.onLive = [this](double db) {
+    const float lin = cf::ui::dbToLevel(db);
+    cmd_.previewHitsTransform(ids(), [lin](cf::EventTransform& t) { t.level = lin; });
+  };
   level_.setDefault(0.0);
   pan_.onCommit = [this](double v) {
     const float p = static_cast<float>(v);
     cmd_.setHitsTransform(ids(), [p](cf::EventTransform& t) { t.pan = p; });
+  };
+  pan_.onLive = [this](double v) {
+    const float p = static_cast<float>(v);
+    cmd_.previewHitsTransform(ids(), [p](cf::EventTransform& t) { t.pan = p; });
   };
   pan_.setDefault(0.0);
   pitch_.onCommit = [this](double v) {
     const float p = static_cast<float>(v);
     cmd_.setHitsTransform(ids(), [p](cf::EventTransform& t) { t.pitchSemitones = p; });
   };
+  pitch_.onLive = [this](double v) {
+    const float p = static_cast<float>(v);
+    cmd_.previewHitsTransform(ids(), [p](cf::EventTransform& t) { t.pitchSemitones = p; });
+  };
   pitch_.setDefault(0.0);
   probability_.onCommit = [this](double v) { cmd_.setHitsProbability(ids(), static_cast<float>(v)); };
+  probability_.onLive = [this](double v) { cmd_.previewHitsProbability(ids(), static_cast<float>(v)); };
   probability_.setDefault(1.0);
   retrigger_.onCommit = [this](double v) {
     const auto n = static_cast<std::uint8_t>(std::lround(v));
     cmd_.setHitsTransform(ids(), [n](cf::EventTransform& t) { t.retrigger = n; });
+  };
+  retrigger_.onLive = [this](double v) {
+    const auto n = static_cast<std::uint8_t>(std::lround(v));
+    cmd_.previewHitsTransform(ids(), [n](cf::EventTransform& t) { t.retrigger = n; });
   };
   retrigger_.setDefault(1.0);
   for (ParamRow* r : {&level_, &pan_, &pitch_, &probability_, &retrigger_}) body_.addAndMakeVisible(*r);

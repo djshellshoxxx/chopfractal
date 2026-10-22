@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace chopfractal::host {
 
@@ -92,6 +93,59 @@ double normalize(const ParamDef& def, double plain) {
 double denormalize(const ParamDef& def, double normalized) {
   const double n = std::isfinite(normalized) ? std::min(1.0, std::max(0.0, normalized)) : 0.0;
   return snapValue(def, def.minValue + n * (def.maxValue - def.minValue));
+}
+
+namespace {
+// Shortest decimal form: 3 -> "3", 0.5 -> "0.5", -1.5 -> "-1.5".
+std::string shortNumber(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.3f", v);
+  std::string s = buf;
+  while (!s.empty() && s.back() == '0') s.pop_back();
+  if (!s.empty() && s.back() == '.') s.pop_back();
+  return s == "-0" ? "0" : s;
+}
+std::string twoDecimals(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.2f", v);
+  std::string s = buf;
+  return s == "-0.00" ? "0.00" : s;
+}
+std::vector<std::string> splitChoices(const char* choices) {
+  std::vector<std::string> out;
+  std::string cur;
+  for (const char* c = choices ? choices : ""; *c; ++c) {
+    if (*c == '|') { out.push_back(cur); cur.clear(); }
+    else cur.push_back(*c);
+  }
+  out.push_back(cur);
+  return out;
+}
+}  // namespace
+
+std::string describeParam(const ParamDef& def, double plainValue) {
+  const double v = snapValue(def, plainValue);
+  const std::string name = def.name;
+  const std::string unit = def.unit ? def.unit : "";
+  if (def.kind == ParamKind::Bool) return name + ": " + (v >= 0.5 ? "on" : "off") + " (default " + (def.defaultValue >= 0.5 ? "on" : "off") + ")";
+  if (def.kind == ParamKind::Choice) {
+    const auto labels = splitChoices(def.choices);
+    const auto label = [&](double i) {
+      const auto k = static_cast<std::size_t>(std::max(0L, std::min(static_cast<long>(labels.size()) - 1, std::lround(i))));
+      return labels.empty() ? std::string() : labels[k];
+    };
+    std::string list;
+    for (std::size_t i = 0; i < labels.size(); ++i) list += (i ? ", " : "") + labels[i];
+    const std::string u = unit.empty() ? "" : " " + unit;
+    return name + ": " + label(v) + u + " (choices: " + list + "; default " + label(def.defaultValue) + ")";
+  }
+  if (unit == "%") {
+    const double k = def.maxValue <= 1.0 ? 100.0 : 1.0;
+    const auto pct = [&](double x) { return shortNumber(std::round(x * k * 10.0) / 10.0) + "%"; };
+    return name + ": " + pct(v) + " (range " + pct(def.minValue) + " to " + pct(def.maxValue) + ", default " + pct(def.defaultValue) + ")";
+  }
+  const std::string u = unit.empty() ? "" : " " + unit;
+  return name + ": " + twoDecimals(v) + u + " (range " + shortNumber(def.minValue) + " to " + shortNumber(def.maxValue) + u + ", default " + shortNumber(def.defaultValue) + u + ")";
 }
 
 ParamValues ParamValues::defaults() {

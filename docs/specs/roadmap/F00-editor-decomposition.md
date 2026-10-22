@@ -1,6 +1,6 @@
 # F00 Editor decomposition
 
-**Status:** Implemented on `feat/F00-editor-decomposition` (as-built notes in section 12)  **Size:** M (5 engineer-days)  **Depends on:** none  **Blocks:** F01 (UI half), F02, F03, F04, F05, F06 and every later feature that adds editor controls
+**Status:** Implemented (as-built notes in section 12)  **Size:** M (5 engineer-days)  **Depends on:** none  **Blocks:** F01 (UI half), F02, F03, F04, F05, F06 and every later feature that adds editor controls
 
 ## 0. Implementation status (audited 2026-10-20)
 **Implemented** (see section 12). Audit-time notes follow. `plugin/src/PluginEditor.cpp` is now 1404 lines (header about 150 lines), not 815, because pass 3 (chaos, presets, drag-out, direct hit editing) landed in the monolith before this split. The window is 940 x 912, not 940 x 860. Decisions recorded by the audit:

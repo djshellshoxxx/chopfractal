@@ -1,6 +1,6 @@
 # E01 Echo (per-event tempo-synced repeat)
 
-**Status:** Ready for development  **Size:** M (5 engineer-days)  **Depends on:** none hard. Soft: F01 (state section), F04 (focus order), F00 (row E placement)  **Blocks:** none. Conflicts to sequence: E02 (same event block, same `Allow` trailer, same renderer stage; E01 lands first and defines the extension layout)
+**Status:** Implemented (renderer, host parameters, state, Sound drawer rows, tests)  **Size:** M (5 engineer-days)  **Depends on:** none hard. Soft: F01 (state section), F04 (focus order), F00 (row E placement)  **Blocks:** none. Conflicts to sequence: E02 (same event block, same `Allow` trailer, same renderer stage; E01 lands first and defines the extension layout)
 **Family:** FX01 "Echo" of `docs/specs/advanced-section-effects.md`, built on the per-event model of `docs/specs/effects-filter-glide-crunch.md`.
 
 ## 1. Summary and user value

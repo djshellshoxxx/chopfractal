@@ -15,7 +15,7 @@
 namespace cf = chopfractal;
 
 namespace {
-constexpr int kLegacyW = 920, kLegacyH = 344;
+constexpr int kLegacyW = 372, kLegacyControlsH = 338, kLegacyH = kLegacyControlsH + 6 + 56;
 }
 
 ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
@@ -38,6 +38,8 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
       inspector_(model_, commands_),
       fxRack_(model_, commands_),
       rules_(model_, commands_),
+      sound_(processor.apvts),
+      gestures_(processor),
       perform_(processor, model_, commands_),
       registry_(*this),
       quickCard_(model_, commands_, quickStartTracker_),
@@ -54,12 +56,19 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   for (juce::Component* c : std::initializer_list<juce::Component*>{&chrome_, &wave_, &pattern_, &macro_, &topBar_, &status_, &drawer_}) addAndMakeVisible(*c);
 
   // Tools drawer: the older panels, unchanged, at their old relative positions.
-  controls_.setBounds(0, 0, 920, 232 - 36 + 30);
-  features_.setBounds(0, 232 - 36 + 30 + 6, 920, 104);
+  controls_.setBounds(0, 0, kLegacyW, kLegacyControlsH);
+  features_.setBounds(0, kLegacyControlsH + 6, kLegacyW, 56);
   for (juce::Component* c : std::initializer_list<juce::Component*>{&controls_, &features_}) legacyBody_.addAndMakeVisible(*c);  // the Orbit View and the family tree have their own drawers
   legacyBody_.setSize(kLegacyW, kLegacyH);
   legacyView_.setViewedComponent(&legacyBody_, false);
-  legacyView_.setScrollBarsShown(true, true);
+  legacyView_.onSized = [this] {
+    const int w = std::max(300, legacyView_.getMaximumVisibleWidth());
+    if (legacyBody_.getWidth() == w) return;
+    controls_.setBounds(0, 0, w, kLegacyControlsH);
+    features_.setBounds(0, kLegacyControlsH + 6, w, 56);
+    legacyBody_.setSize(w, kLegacyH);
+  };
+  legacyView_.setScrollBarsShown(true, false);
   legacyView_.setComponentID("ToolsDrawer");
 
   registerDrawer("presets", "Presets", presets_, 380);
@@ -81,12 +90,15 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   registerMenuDrawer("inspector", "Inspector", inspector_, 320);
   registerMenuDrawer("fx", "Effects", fxRack_, 340);
   registerMenuDrawer("rules", "Rules", rules_, 420);
+  registerMenuDrawer("sound", "Sound", sound_, 360);
+  registerMenuDrawer("gestures", "Gestures", gestures_, 360);
   registerMenuDrawer("history", "History", historyDrawer_, 440);
   inspector_.onOpenFx = [this] { openDrawer("fx"); };
   pattern_.onEditHit = [this](chopfractal::EventId) { openDrawer("inspector"); };
   registerDrawer("settings", "Settings", settings_, 300, false);
   perform_.registerAll([this](const juce::String& id, const juce::String& title, juce::Component& c, int w) { registerMenuDrawer(id, title, c, w); });
   registerMenuDrawer("orbit", "Orbit", orbit_, 320);
+  orbit_.onEditHit = [this](chopfractal::EventId) { openDrawer("inspector"); };
   features_.attachEvolve(&perform_.evolve());
   perform_.commands().openDrawer = [this](const juce::String& id) { openDrawer(id); };
   topBar_.onMenuChoice = [this](const juce::String& id) { toggleDrawer(id); };
@@ -99,6 +111,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   settings_.showUserSettings(saved);
   drawer_.onChanged = [this] {
     topBar_.setDrawerButtonOn(drawer_.openId());
+    rules_.setDrawerOpen(drawer_.openId() == "rules");
     resized();
   };
 
@@ -307,7 +320,10 @@ void ChopFractalEditor::resized() {
 // not consumed and the host keeps its own shortcuts.
 bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
   if (palette_.isVisible()) return palette_.keyPressed(k);  // modal
-  auto* focused = juce::Component::getCurrentlyFocusedComponent();
+  return handleKey(k, juce::Component::getCurrentlyFocusedComponent());
+}
+
+bool ChopFractalEditor::handleKey(const juce::KeyPress& k, juce::Component* focused) {
   const bool canvas = focused == nullptr || focused == this || focused == &wave_ || focused == &pattern_ || focused == &orbit_ || focused == &history_ ||
                       wave_.isParentOf(focused) || pattern_.isParentOf(focused) || orbit_.isParentOf(focused) || history_.isParentOf(focused);
   const auto action = mapKey(k, canvas);
@@ -319,11 +335,27 @@ bool ChopFractalEditor::keyPressed(const juce::KeyPress& k) {
   if (dynamic_cast<juce::TextEditor*>(focused) != nullptr) return false;
   const auto& v = model_.view();
   const bool shift = k.getModifiers().isShiftDown();
+  const bool waveFocus = focused == &wave_ || wave_.isParentOf(focused);
   switch (*action) {
     case EditorAction::Generate: commands_.generate(); return true;
     case EditorAction::Mutate: commands_.mutate(); return true;
-    case EditorAction::Undo: commands_.undo(); return true;
-    case EditorAction::Redo: commands_.redo(); return true;
+    case EditorAction::Undo:
+      if (waveFocus && commands_.canUndoMarkers()) commands_.undoMarkers();  // F04: with the waveform focused, undo is the marker undo
+      else commands_.undo();
+      return true;
+    case EditorAction::Redo:
+      if (waveFocus && commands_.canRedoMarkers()) commands_.redoMarkers();
+      else commands_.redo();
+      return true;
+    case EditorAction::WaveZoomIn:
+    case EditorAction::WaveZoomOut:
+      if (!waveFocus || v.sourceFrames <= 0) return false;
+      model_.zoomWaveAround(wave_.getWidth() / 2.0, *action == EditorAction::WaveZoomIn ? 1.5 : 1.0 / 1.5);
+      return true;
+    case EditorAction::WaveFit:
+      if (!waveFocus || v.sourceFrames <= 0) return false;
+      model_.fitWave();
+      return true;
     case EditorAction::ZoomIn: commands_.zoomInSelected(); return true;
     case EditorAction::Collapse: commands_.collapseSelected(); return true;
     case EditorAction::ToggleLock: commands_.toggleLockSelectedBar(); return true;

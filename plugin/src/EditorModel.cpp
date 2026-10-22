@@ -337,6 +337,12 @@ void EditorModel::setStatus(const juce::String& text, Severity severity) {
   emit(Change::Status);
 }
 
+void EditorModel::setStatusSuffix(const juce::String& text) {
+  if (text == statusSuffix_) return;
+  statusSuffix_ = text;
+  emit(Change::Status);
+}
+
 void EditorModel::announceSelection() {
   setStatus(juce::String(static_cast<int>(selectedChops_.size())) + " source sections, " + juce::String(static_cast<int>(selectedHits_.size())) +
             " pattern hits selected. Zoom In subdivides selected hits.");

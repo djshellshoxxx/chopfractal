@@ -1,5 +1,7 @@
 #include "HistoryPanel.h"
 
+#include "DragOut.h"
+
 #include <algorithm>
 #include <cstdlib>
 
@@ -60,6 +62,8 @@ void HistoryPanel::paint(juce::Graphics& g) {
 
 void HistoryPanel::mouseDown(const juce::MouseEvent& e) {
   grabEditorFocus();
+  pressNode_ = cf::history::kNoNode;
+  dragStarted_ = false;
   const auto pt = e.getPosition();
   for (const auto& n : model_.view().tree) {
     const auto np = treePos(n);
@@ -70,8 +74,36 @@ void HistoryPanel::mouseDown(const juce::MouseEvent& e) {
         cmd_.historyMenu(id, this);
         break;
       }
-      cmd_.activateNode(id);
+      pressNode_ = id;  // recalled on release unless this turns into a drag
+      pressAlt_ = e.mods.isAltDown();
       break;
     }
   }
+}
+
+juce::String HistoryPanel::getTooltip() {
+  const auto pt = getMouseXYRelative();
+  for (const auto& n : model_.view().tree) {
+    const auto np = treePos(n);
+    if (std::abs(pt.x - np.x) < 11 && std::abs(pt.y - np.y) < 11) return "Click to recall, drag to your DAW as MIDI, Alt-drag for audio";
+  }
+  return "Variation family tree, each Generate, Mutate and Zoom is a branch you can return to";
+}
+
+void HistoryPanel::mouseDrag(const juce::MouseEvent& e) {
+  if (pressNode_ == cf::history::kNoNode || dragStarted_ || e.getDistanceFromDragStart() < DragHandle::kDragThresholdPx) return;
+  dragStarted_ = true;
+  lastDragFile_ = cmd_.makeVariationDragFile(pressNode_, pressAlt_ || e.mods.isAltDown());
+  if (lastDragFile_ == juce::File() || !lastDragFile_.existsAsFile()) return;
+  if (onDragFile) onDragFile(lastDragFile_);
+  else
+    juce::DragAndDropContainer::performExternalDragDropOfFiles(juce::StringArray(lastDragFile_.getFullPathName()), false, this);
+}
+
+void HistoryPanel::mouseUp(const juce::MouseEvent& e) {
+  const auto id = pressNode_;
+  const bool wasDrag = dragStarted_ || e.getDistanceFromDragStart() >= DragHandle::kDragThresholdPx;
+  pressNode_ = cf::history::kNoNode;
+  dragStarted_ = false;
+  if (id != cf::history::kNoNode && !wasDrag) cmd_.activateNode(id);
 }

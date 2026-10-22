@@ -1,6 +1,6 @@
 # F18 Arrangement Export
 
-**Status:** Session layer done (branch feat/SESS-session-features); the dialog (`ArrangementDialog`) is the GUI worker's, see section 12  **Size:** L (9 engineer-days)  **Depends on:** F09 (scenes and their chain), F01 (extras tag 16), F13 (MIDI file helper and export folder). Soft: F16 (level match and limiter in the render), F17 (groove), E01/E02 (render through the same path)  **Blocks:** none
+**Status:** Implemented (Arrange drawer; the Export drawer no longer carries a second arrangement section)  **Size:** L (9 engineer-days)  **Depends on:** F09 (scenes and their chain), F01 (extras tag 16), F13 (MIDI file helper and export folder). Soft: F16 (level match and limiter in the render), F17 (groove), E01/E02 (render through the same path)  **Blocks:** none
 **Category:** value. A finished, DAW-ready arrangement from stored scenes.
 
 ## 0. Implementation status and decisions (2026-10-21)

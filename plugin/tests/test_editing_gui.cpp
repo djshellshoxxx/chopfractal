@@ -251,3 +251,41 @@ CHOP_TEST(fx_rack_switches_effects_on_and_off_per_hit_in_single_undo_steps) {
   view = f.ed->model().fxRack();
   CHECK(!view.modules[static_cast<std::size_t>(cf::ui::FxModule::Echo)].on);
 }
+
+CHOP_TEST(waveform_keys_zoom_fit_and_undo_markers_only_while_the_waveform_has_focus) {
+  if (!haveDisplay()) return;
+  Fixture f;
+  CHECK(f.open());
+  if (!f.ed) return;
+  auto plus = juce::KeyPress('+', juce::ModifierKeys(juce::ModifierKeys::shiftModifier), '+');
+  auto minus = juce::KeyPress('-', juce::ModifierKeys(), '-');
+  auto home = juce::KeyPress(juce::KeyPress::homeKey, juce::ModifierKeys(), 0);
+  auto ctrlZ = juce::KeyPress('z', juce::ModifierKeys(juce::ModifierKeys::ctrlModifier), 'z');
+  auto ctrlY = juce::KeyPress('y', juce::ModifierKeys(juce::ModifierKeys::ctrlModifier), 'y');
+  auto& model = f.ed->model();
+  CHECK(!model.waveZoomed());
+  CHECK(!f.ed->handleKey(plus, nullptr));  // not the waveform: the key is left alone
+  CHECK(!model.waveZoomed());
+  CHECK(f.ed->handleKey(plus, &f.ed->wavePanel()));
+  CHECK(model.waveZoomed());
+  const auto zoomedSpan = model.waveWindow().endFrame - model.waveWindow().startFrame;
+  CHECK(f.ed->handleKey(minus, &f.ed->wavePanel()));
+  CHECK((model.waveWindow().endFrame - model.waveWindow().startFrame) > zoomedSpan || !model.waveZoomed());
+  CHECK(f.ed->handleKey(plus, &f.ed->wavePanel()));
+  CHECK(f.ed->handleKey(home, &f.ed->wavePanel()));
+  CHECK(!model.waveZoomed());
+  // Ctrl+Z with the waveform focused undoes the marker edit, not the pattern.
+  f.ed->commands().setMarkerSnap(0);
+  const auto before = markerPositions(f.p);
+  CHECK(model.view().markers.size() > 2);
+  if (model.view().markers.size() <= 2) return;
+  f.ed->commands().moveMarker(model.view().markers[2].id, model.view().markers[2].position + 400);
+  pump(100);
+  CHECK(markerPositions(f.p) != before);
+  CHECK(f.ed->handleKey(ctrlZ, &f.ed->wavePanel()));
+  pump(100);
+  CHECK(markerPositions(f.p) == before);
+  CHECK(f.ed->handleKey(ctrlY, &f.ed->wavePanel()));
+  pump(100);
+  CHECK(markerPositions(f.p) != before);
+}

@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -100,6 +101,11 @@ const ParamDef* findParam(std::string_view id);
 double snapValue(const ParamDef& def, double plain);       // clamp to range and round to step/choice
 double normalize(const ParamDef& def, double plain);       // plain -> [0, 1]
 double denormalize(const ParamDef& def, double normalized);  // [0, 1] -> plain (snapped)
+
+// Tooltip value line (F04): "Density: 50% (range 0% to 100%, default 50%)", "Output Gain: -6.00 dB (range -60 to 12 dB, default 0 dB)",
+// "Pattern Length: 4 bars (choices: 1, 2, 4, 8; default 4)", "Effect Enable: on (default on)". A "%" parameter whose range is 0..1 shows
+// the value times 100; a "%" parameter with a wider range (Echo Amount 0..100) shows it as stored. Out of range or NaN values are snapped first.
+std::string describeParam(const ParamDef& def, double plainValue);
 
 struct ParamValues {
   std::array<double, kParamCount> v{};

@@ -305,10 +305,15 @@ void EditorCommands::historyMenu(cf::history::NodeId id, juce::Component* anchor
   m.addItem(2, "Rename...");
   m.addItem(3, "Compare with active variation");
   m.addItem(4, "Delete this branch");
+  m.addSeparator();
+  m.addItem(5, "Export MIDI...");
+  m.addItem(6, "Export WAV...");
   juce::Component::SafePointer<juce::Component> alive(anchor);  // the panel lives exactly as long as this object
   m.showMenuAsync(juce::PopupMenu::Options(), [this, alive, id](int choice) {
     if (alive == nullptr) return;
-    if (choice == 1) {
+    if (choice == 5 || choice == 6) {
+      exportVariation(id, choice == 6);
+    } else if (choice == 1) {
       bool now = false;
       proc_.withSession([&](cf::composition::ProjectSession& s) {
         for (const auto& n : s.history().listAll())
@@ -538,6 +543,59 @@ juce::File EditorCommands::makeDragFile(bool wav, const ExportUi& ui) {
   return f;
 }
 
+juce::File EditorCommands::makeVariationDragFile(cf::history::NodeId node, bool wav) {
+  cf::Status status;
+  std::vector<std::uint8_t> bytes;
+  int skipped = 0;
+  std::string name = "variation";
+  proc_.withSession([&](cf::composition::ProjectSession& s) {
+    for (const auto& n : s.history().listAll())
+      if (n.id == node && !n.label.empty()) name = n.label;
+    if (wav) {
+      auto r = s.renderVariationWav(node, wavOptions(exportUi()));
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    } else {
+      auto r = s.renderVariationMidi(node, midiOptions(), &skipped);
+      if (r.ok()) bytes = std::move(r.value()); else status = r.error();
+    }
+  });
+  juce::File f;
+  if (status.ok()) {
+    juce::String stem = juce::File::createLegalFileName(juce::String(name)).trim();
+    if (stem.isEmpty()) stem = "variation";
+    f = dragout::writeTemp("chopfractal-" + stem.substring(0, 40), wav ? "wav" : "mid", bytes);
+    if (f == juce::File()) status = cf::makeError(cf::ErrorCode::InvalidArgument, "could not write the temporary file");
+  }
+  if (!status.ok()) model_.setStatus(juce::String(cf::ui::dragRenderErrorMessage(status.error().message)), Severity::Warning);
+  else if (skipped > 0) model_.setStatus(juce::String(cf::ui::dragSkippedEventsMessage(skipped)), Severity::Warning);
+  else model_.setStatus({});
+  return f;
+}
+
+void EditorCommands::exportVariation(cf::history::NodeId node, bool wav) {
+  const juce::String ext = wav ? "wav" : "mid";
+  chooser_ = std::make_unique<juce::FileChooser>(wav ? "Export this variation as WAV" : "Export this variation as MIDI",
+                                                 juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("chopfractal-variation." + ext), "*." + ext);
+  chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                        [this, node, wav, ext](const juce::FileChooser& fc) {
+                          juce::File f = fc.getResult();
+                          if (f == juce::File()) return;
+                          const bool extensionAdded = !f.hasFileExtension(ext);
+                          if (extensionAdded) f = f.getParentDirectory().getChildFile(f.getFileName() + "." + ext);
+                          cf::Status st;
+                          proc_.withSession([&](cf::composition::ProjectSession& s) {
+                            if (wav) {
+                              auto r = s.exportVariationWav(node, f.getFullPathName().toStdString(), wavOptions(exportUi()));
+                              if (!r.ok()) st = r.error();
+                            } else {
+                              auto r = s.exportVariationMidi(node, f.getFullPathName().toStdString(), midiOptions(), !extensionAdded);
+                              if (!r.ok()) st = r.error();
+                            }
+                          });
+                          model_.setStatus(st.ok() ? "Exported " + f.getFileName() + "." : juce::String(st.error().message), st.ok() ? Severity::Info : Severity::Error);
+                        });
+}
+
 std::unique_ptr<dragout::DragFileSet> EditorCommands::makeKitDragSet() {
   cf::Result<std::vector<cf::composition::KitFile>> files = std::vector<cf::composition::KitFile>{};
   proc_.withSession([&](cf::composition::ProjectSession& s) { files = s.renderKitFiles(kitOptions()); });
@@ -549,99 +607,6 @@ std::unique_ptr<dragout::DragFileSet> EditorCommands::makeKitDragSet() {
   for (const auto& f : files.value()) set->add(juce::String(f.name), f.bytes);
   if (set->failed()) model_.setStatus(juce::String(cf::ui::dragTempFileErrorMessage()));
   return set;
-}
-
-// ---------------------------------------------------------------------------------------------
-// arrangement export (F18)
-// ---------------------------------------------------------------------------------------------
-
-ArrangementState EditorCommands::arrangementState() {
-  ArrangementState st;
-  proc_.withSession([&](cf::composition::ProjectSession& s) {
-    st.arrangement = s.arrangement();
-    st.rows = s.arrangementRows();
-    int n = 0;
-    for (const auto& sc : s.sceneList().scenes) {
-      ++n;
-      const std::string prefix = "Scene " + std::to_string(n);
-      st.scenes.push_back({sc.id, sc.name.compare(0, prefix.size(), prefix) == 0 ? sc.name : prefix + " " + sc.name});
-    }
-    st.hasSource = s.hasSource();
-    if (const auto* job = s.arrangementJob()) {
-      st.running = !job->done();
-      const auto pr = job->progress();
-      st.jobSection = pr.section;
-      st.jobSections = pr.sections;
-      st.jobFraction = pr.fraction;
-    }
-  });
-  return st;
-}
-
-bool EditorCommands::editArrangement(const std::function<void(cf::composition::Arrangement&)>& edit) {
-  cf::Status st;
-  proc_.withSession([&](cf::composition::ProjectSession& s) {
-    cf::composition::Arrangement a = s.arrangement();
-    edit(a);
-    st = s.setArrangement(a);
-  });
-  if (!st.ok()) model_.setStatus(juce::String(st.error().message));
-  return st.ok();
-}
-
-void EditorCommands::arrangementFromChain() { run([](cf::composition::ProjectSession& s) { return s.fillArrangementFromChain(); }); }
-void EditorCommands::autoFillArrangement() { run([](cf::composition::ProjectSession& s) { return s.autoFillArrangement(); }); }
-
-cf::Status EditorCommands::startArrangementExport(const std::string& folder) {
-  const ExportUi ui = exportUi();
-  cf::composition::ArrangementExportSettings st;
-  st.root = folder;
-  st.bpm = proc_.activeBpm.load();
-  st.wavOptions = wavOptions(ui).wav;
-  cf::Status status;
-  proc_.withSession([&](cf::composition::ProjectSession& s) { status = s.startArrangementExport(s.arrangement(), "chopfractal", st); });
-  model_.setStatus(status.ok() ? juce::String(cf::ui::arrangementProgressMessage(1, 1, 0.0)) : juce::String(status.error().message));
-  return status;
-}
-
-void EditorCommands::exportArrangement() {
-  chooser_ = std::make_unique<juce::FileChooser>("Choose a folder for the arrangement", juce::File::getSpecialLocation(juce::File::userMusicDirectory));
-  chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this](const juce::FileChooser& fc) {
-    const juce::File dir = fc.getResult();
-    if (dir != juce::File()) startArrangementExport(dir.getFullPathName().toStdString());
-  });
-}
-
-void EditorCommands::cancelArrangement() { proc_.withSession([](cf::composition::ProjectSession& s) { s.cancelArrangementExport(); }); }
-
-bool EditorCommands::pollArrangement() {
-  bool running = false, finished = false;
-  cf::composition::ArrangementResult result;
-  cf::composition::ArrangementProgress progress;
-  proc_.withSession([&](cf::composition::ProjectSession& s) {
-    auto* job = s.arrangementJob();
-    if (!job) return;
-    if (!job->done()) {
-      running = true;
-      progress = job->progress();
-      return;
-    }
-    result = job->result();
-    finished = true;
-    s.releaseArrangementJob();
-  });
-  if (running) {
-    model_.setProgress(juce::String(cf::ui::arrangementProgressMessage(std::max(1, progress.section), std::max(1, progress.sections), progress.fraction)));
-  } else if (finished) {
-    if (result.status.ok() && onMilestone) onMilestone(QuickStep::Export);
-    if (result.status.ok())
-      model_.setStatus(juce::String(cf::ui::arrangementExportedMessage(juce::File(juce::String(result.wavPath)).getFileName().toStdString(), result.bars, result.seconds)));
-    else if (result.status.error().code == cf::ErrorCode::Cancelled)
-      model_.setStatus(juce::String(cf::ui::arrangementCancelledMessage()));
-    else
-      model_.setStatus(juce::String(result.status.error().message));
-  }
-  return running;
 }
 
 // ---------------------------------------------------------------------------------------------

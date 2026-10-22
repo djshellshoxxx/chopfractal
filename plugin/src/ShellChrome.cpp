@@ -1,5 +1,7 @@
 #include "ShellChrome.h"
 
+#include "ControlHelp.h"
+
 #include <algorithm>
 #include <cmath>
 #include <chopfractal/plugin_host_adapter/parameters.hpp>
@@ -12,7 +14,7 @@
 namespace cf = chopfractal;
 
 ShellChrome::ShellChrome(EditorModel& model, EditorCommands& commands, juce::AudioProcessorValueTreeState& apvts)
-    : EditorPanelBase(model, commands, "ShellChrome"), apvts_(apvts) {
+    : EditorPanelBase(model, commands, "ShellChrome"), apvts_(apvts), tips_(apvts) {
   for (juce::Button* b : std::initializer_list<juce::Button*>{&load_, &detect_, &zoom_, &collapse_, &lock_}) {
     addAndMakeVisible(*b);
     b->setTitle(b->getButtonText());
@@ -73,6 +75,7 @@ ShellChrome::ShellChrome(EditorModel& model, EditorCommands& commands, juce::Aud
   bars_.setTitle("Pattern length in bars");
   addAndMakeVisible(bars_);
   barsAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts_, "pattern_bars", bars_);
+  tips_.bind(bars_, "pattern_bars", control_help::forName("Pattern length in bars"));
   barsLabel_.setFont(cdl::font(cdl::FontRole::Label));
   barsLabel_.setColour(juce::Label::textColourId, cdl::pal().inkMuted);
   addAndMakeVisible(barsLabel_);

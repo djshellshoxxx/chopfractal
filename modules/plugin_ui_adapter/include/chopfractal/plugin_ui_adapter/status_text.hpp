@@ -21,19 +21,24 @@ std::string dbText(float db);  // "-12.3 dB" with a real minus sign, "-inf dB" a
 struct MeterInput {
   float peak[2] = {0.f, 0.f};     // linear peak since the last look
   std::uint32_t clipSamples = 0;  // samples above 0 dBFS since the last look
+  float grDb = 0.f;               // safety limiter: most negative gain reduction since the last look (<= 0, 0 when it is idle or off)
 };
 struct MeterState {
   float db[2] = {-60.f, -60.f};
   float holdDb[2] = {-60.f, -60.f};
   double holdAge[2] = {0.0, 0.0};
+  float grDb = 0.f;               // limiter gain reduction as shown: instant attack, 20 dB per second release
   bool clipLatched = false;
 };
 // Attack is instant, release 20 dB per second, the hold line stays 1.5 s then falls at 20 dB per second; a clip latches
 // until the owner clears it. Returns true when anything visible moved by at least 0.25 dB (about a pixel) or the latch changed.
 bool updateMeter(MeterState&, const MeterInput&, double dtSeconds, bool reducedMotion = false);
 
-// "Output peak: L -12.3 dB, R -11.8 dB. CLIP lights when the output exceeds 0 dBFS, click it to reset"
+// "Output peak: L -12.3 dB, R -11.8 dB. CLIP lights when the output exceeds 0 dBFS, click it to reset"; while the limiter works the
+// sentence "Limiter gain reduction -2.1 dB." follows the peaks.
 std::string meterTooltip(const MeterState&);
+// "GR -2.1 dB" (real minus sign), empty while the reduction is under 0.05 dB. Text, so the reading never depends on colour.
+std::string grText(float grDb);
 std::string voiceText(int active, int maxVoices);  // "V 3/8"
 
 }  // namespace chopfractal::ui

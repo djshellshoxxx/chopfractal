@@ -189,3 +189,33 @@ CHOP_TEST(every_rules_panel_control_has_an_accessible_title) {
   });
   CHECK(checked > 20);
 }
+
+// G2: unapplied draft rules are flagged in the status bar once the drawer is closed, and the flag goes with the draft.
+CHOP_TEST(status_bar_flags_unapplied_rule_changes_only_while_the_drawer_is_closed) {
+  if (!haveDisplay()) return;
+  RulesFixture f;
+  CHECK(f.open());
+  if (!f.panel) return;
+  CHECK(f.ed->model().statusSuffix().isEmpty());
+  findButton(*f.editor, "Add Rule")->onClick();
+  pump(60);
+  CHECK(f.panel->draft().dirty());
+  CHECK(f.ed->model().statusSuffix().isEmpty());  // the drawer is open: the editor itself shows it
+  f.ed->closeDrawer();
+  pump(100);
+  CHECK(f.ed->model().statusSuffix() == "Unapplied rule changes");
+  CHECK(f.ed->statusBar().displayedText().contains("Unapplied rule changes"));
+  f.ed->openDrawer("rules");
+  pump(100);
+  CHECK(f.ed->model().statusSuffix().isEmpty());
+  f.ed->closeDrawer();
+  pump(100);
+  CHECK(f.ed->model().statusSuffix() == "Unapplied rule changes");
+  f.ed->openDrawer("rules");
+  pump(100);
+  findButton(*f.editor, "Revert")->onClick();
+  pump(60);
+  f.ed->closeDrawer();
+  pump(100);
+  CHECK(f.ed->model().statusSuffix().isEmpty());  // nothing left to apply
+}

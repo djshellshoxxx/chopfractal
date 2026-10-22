@@ -1,11 +1,13 @@
 #include "ControlsPanel.h"
 
+#include "ControlHelp.h"
+
 #include <initializer_list>
 
 namespace cf = chopfractal;
 
 ControlsPanel::ControlsPanel(EditorModel& model, EditorCommands& commands, juce::AudioProcessorValueTreeState& apvts)
-    : EditorPanelBase(model, commands, "ControlsPanel"), apvts_(apvts) {
+    : EditorPanelBase(model, commands, "ControlsPanel"), apvts_(apvts), tips_(apvts) {
   // Transport, undo/redo, Generate, Load Loop / Detect Chops and the hit-editing buttons live in the shell (TopBar, MacroStrip, ShellChrome).
   for (juce::Button* b : std::initializer_list<juce::Button*>{&mutate_, &dice_}) {
     addAndMakeVisible(*b);
@@ -57,6 +59,8 @@ void ControlsPanel::addSlider(ParamSlider& s, const char* paramId, const juce::S
   s.label.setText(title, juce::dontSendNotification);
   s.label.attachToComponent(&s.slider, true);
   s.attachment = std::make_unique<Attachment::SliderAttachment>(apvts_, paramId, s.slider);
+  s.slider.setNumDecimalPlacesToDisplay(2);
+  tips_.bind(s.slider, paramId, control_help::forName(title));
 }
 
 void ControlsPanel::addToggle(ParamToggle& t, const char* paramId, const juce::String& title) {
@@ -64,6 +68,7 @@ void ControlsPanel::addToggle(ParamToggle& t, const char* paramId, const juce::S
   t.button.setTitle(title);
   addAndMakeVisible(t.button);
   t.attachment = std::make_unique<Attachment::ButtonAttachment>(apvts_, paramId, t.button);
+  tips_.bind(t.button, paramId, control_help::forName(title));
 }
 
 void ControlsPanel::modelChanged(Change c) {
@@ -92,6 +97,28 @@ void ControlsPanel::modelChanged(Change c) {
 
 void ControlsPanel::resized() {
   auto area = getLocalBounds();
+  if (area.getWidth() < 640) {  // the Tools drawer: one column of rows
+    auto r1 = area.removeFromTop(30);
+    mutate_.setBounds(r1.removeFromLeft(96).reduced(2));
+    followHost_.setBounds(r1.removeFromLeft(100).reduced(2));
+    transportHint_.setBounds(area.removeFromTop(20).reduced(6, 0));
+    area.removeFromTop(6);
+    auto r2 = area.removeFromTop(26);
+    seedLabel_.setBounds(r2.removeFromLeft(50));
+    seed_.setBounds(r2.removeFromLeft(110).reduced(2));
+    dice_.setBounds(r2.removeFromLeft(90).reduced(2));
+    embed_.setBounds(area.removeFromTop(26).reduced(2));
+    area.removeFromTop(6);
+    for (ParamSlider* ps : {&density_, &swing_, &variation_, &fxIntensity_, &chaos_, &dry_, &gain_}) ps->slider.setBounds(area.removeFromTop(24).withTrimmedLeft(110));
+    area.removeFromTop(4);
+    auto t1 = area.removeFromTop(24);
+    const int w1 = t1.getWidth() / 4;
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&enable_.button, &reverse_.button, &pitch_.button, &retrigger_.button}) b->setBounds(t1.removeFromLeft(w1));
+    auto t2 = area.removeFromTop(24);
+    const int w2 = t2.getWidth() / 3;
+    for (juce::Button* b : std::initializer_list<juce::Button*>{&filter_.button, &glide_.button, &crunch_.button}) b->setBounds(t2.removeFromLeft(w2));
+    return;
+  }
   auto row1 = area.removeFromTop(30);
   mutate_.setBounds(row1.removeFromLeft(96).reduced(2));
   followHost_.setBounds(row1.removeFromLeft(100).reduced(2));
