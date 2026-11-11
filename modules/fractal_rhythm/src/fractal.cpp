@@ -56,6 +56,7 @@ struct Builder {
       q.scope.beat = static_cast<int>(std::min<Ticks>(ctx.beatsPerBar - 1, startInBar / (ctx.barTicks / ctx.beatsPerBar)));
       q.firstInBar = placed.empty();
       q.barSoFar = placed;
+      q.recent.assign(placed.end() - static_cast<std::ptrdiff_t>(std::min<std::size_t>(placed.size(), 16)), placed.end());  // repeat limits read this
       if (ctx.policy->evaluate(q).allowed) return c.id;
     }
     return ChopId{};
@@ -114,6 +115,82 @@ struct Builder {
   }
 };
 
+// Sounding leaves (the deepest cells) in time order, with their bar-relative start.
+// Children are held through shared_ptr<const NestedPattern>, but every one was created non-const by build() above and is not
+// shared with anyone yet, so the post-pass may edit it.
+std::vector<Event>& mutableKids(const Event& e) { return const_cast<NestedPattern&>(*e.child).events; }
+
+struct Leaf {
+  Ticks start;
+  Event* event;
+};
+void collectLeaves(std::vector<Event>& events, Ticks base, std::vector<Leaf>& out) {
+  for (Event& e : events) {
+    if (e.child) collectLeaves(mutableKids(e), base + e.start, out);
+    else out.push_back({base + e.start, &e});
+  }
+}
+
+// A parent plays its first child's chop; children that differ from it carry a source override.
+void refreshParents(std::vector<Event>& events) {
+  for (Event& e : events) {
+    if (!e.child || e.child->events.empty()) continue;
+    std::vector<Event>& kids = mutableKids(e);
+    refreshParents(kids);
+    e.chop = kids.front().chop;
+    for (Event& k : kids) k.sourceOverride = k.chop != e.chop;
+  }
+}
+
+// Requirement rules ("this role must sound in the final beat"): per beat, a missing chop replaces the last leaf of the
+// beat that the policy still accepts, the way the pattern engine does for generated bars. Returns true if a leaf changed.
+bool enforceRequired(const Context& ctx, std::vector<Event>& events) {
+  std::vector<Leaf> leaves;
+  collectLeaves(events, 0, leaves);
+  if (leaves.empty()) return false;
+  const Ticks beatT = ctx.barTicks / ctx.beatsPerBar;
+  auto beatOf = [&](Ticks start) { return static_cast<int>(std::min<Ticks>(ctx.beatsPerBar - 1, start / beatT)); };
+  bool changed = false;
+  for (int beat = 0; beat < ctx.beatsPerBar; ++beat) {
+    ScopeContext sc;
+    sc.level = ScopeLevel::Beat;
+    sc.bar = ctx.bar;
+    sc.barCount = ctx.barCount;
+    sc.beat = beat;
+    sc.beatsPerBar = ctx.beatsPerBar;
+    auto inBeat = [&]() {
+      std::vector<ChopId> v;
+      for (const Leaf& l : leaves)
+        if (beatOf(l.start) == beat) v.push_back(l.event->chop);
+      return v;
+    };
+    std::vector<std::size_t> rewritten;
+    for (const Requirement& rq : ctx.policy->required(sc, inBeat())) {
+      const std::vector<ChopId> now = inBeat();
+      if (std::find(now.begin(), now.end(), rq.chop) != now.end()) continue;
+      for (std::size_t i = leaves.size(); i-- > 0;) {
+        if (beatOf(leaves[i].start) != beat || std::find(rewritten.begin(), rewritten.end(), i) != rewritten.end()) continue;
+        CandidateQuery q;
+        q.chop = rq.chop;
+        q.startInBar = leaves[i].start;
+        q.scope = sc;
+        q.scope.level = ScopeLevel::Event;
+        for (std::size_t j = 0; j < i; ++j) q.barSoFar.push_back(leaves[j].event->chop);
+        q.firstInBar = q.barSoFar.empty();
+        const std::size_t from = q.barSoFar.size() > 16 ? q.barSoFar.size() - 16 : 0;
+        q.recent.assign(q.barSoFar.begin() + static_cast<std::ptrdiff_t>(from), q.barSoFar.end());
+        if (ctx.policy->evaluate(q).allowed) {
+          leaves[i].event->chop = rq.chop;
+          rewritten.push_back(i);
+          changed = true;
+        }
+        break;  // only the last leaf of the beat is tried, as in generated bars
+      }
+    }
+  }
+  return changed;
+}
+
 }  // namespace
 
 std::size_t soundingHits(const Settings& s) {
@@ -166,6 +243,7 @@ Result<std::vector<Event>> generateBar(const Context& ctx, const Settings& s) {
   if (!b.error.ok()) return b.error.error();
   if (b.leafCount > ctx.eventBudget)
     return makeError(ErrorCode::LimitExceeded, "mutation produced too many hits for the event budget", static_cast<std::int64_t>(b.leafCount));
+  if (ctx.policy && enforceRequired(ctx, events)) refreshParents(events);
   return events;
 }
 

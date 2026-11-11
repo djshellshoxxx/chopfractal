@@ -107,6 +107,8 @@ class GrammarPolicy : public ICandidatePolicy {
  public:
   // `chops` are the candidate chops in a stable order; role -> chop resolution takes the first match.
   GrammarPolicy(RoleMap roles, RuleSet rules, std::vector<ChopId> chops);
+  GrammarPolicy(const GrammarPolicy& o);
+  GrammarPolicy& operator=(const GrammarPolicy& o);
 
   Decision evaluate(const CandidateQuery& q) const override;
   bool isPreserved(const CandidateQuery& q) const override;
@@ -123,11 +125,15 @@ class GrammarPolicy : public ICandidatePolicy {
   bool matchesChop(const Condition& c, ChopId chop) const;
   bool matchesPosition(const Condition& c, const ScopeContext& s, bool firstInBar) const;
   bool inRange(const Condition& c, const ScopeContext& s) const;
-  std::vector<const Rule*> ordered() const;
+  bool firstFor(const Condition& c, const CandidateQuery& q) const;
+  const RoleId& roleRef(ChopId chop) const;
+  const std::vector<const Rule*>& ordered() const;
+  void rebuildOrder();
 
   RoleMap roles_;
   RuleSet rules_;
   std::vector<ChopId> chops_;
+  std::vector<const Rule*> ordered_;  // enabled rules, priority high first then id; points into rules_
 };
 
 // ---- guided templates: ready-made rules for the common cases ----

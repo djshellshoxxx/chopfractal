@@ -1,5 +1,8 @@
 #include <chopfractal/chop_roles_grammar/grammar.hpp>
 
+#include <chrono>
+#include <cstdio>
+
 #include "chop_test.hpp"
 
 using namespace chopfractal;
@@ -248,7 +251,9 @@ CHOP_TEST(requirements_resolve_to_a_chop_only_when_unsatisfied_and_in_scope) {
 CHOP_TEST(preserve_rules_keep_matching_events) {
   GrammarPolicy p = policyOf({templates::preserveFirst(1, "kick")});
   CHECK(p.isPreserved(query(1, 0, 0, /*firstInBar=*/true)));
-  CHECK(!p.isPreserved(query(1, 0, 1, /*firstInBar=*/false)));
+  CandidateQuery second = query(1, 0, 1, /*firstInBar=*/false);
+  second.barSoFar = {ChopId{1}};  // a kick already played earlier in the bar
+  CHECK(!p.isPreserved(second));
   CHECK(!p.isPreserved(query(2, 0, 0, /*firstInBar=*/true)));
   Rule disabled = templates::preserveFirst(2, "snare");
   disabled.enabled = false;
@@ -367,5 +372,58 @@ CHOP_TEST(preserving_rule_returns_first_matching_enabled_preserve_rule_or_zero) 
   CHECK(policy.preservingRule(q) == 0);
   q.chop = ChopId{1};
   q.firstInBar = false;  // not first in the bar any more
+  q.barSoFar = {ChopId{1}};
   CHECK(policy.preservingRule(q) == 0);
+}
+
+// "Keep the first kick in each bar" (spec example) means the first kick, even when another chop played before it.
+CHOP_TEST(first_in_bar_is_relative_to_the_chop_or_role_the_rule_names) {
+  GrammarPolicy keepKick = policyOf({templates::preserveFirst(1, "kick")});
+  CandidateQuery q = query(1, 0, 1, /*firstInBar=*/false);
+  q.barSoFar = {ChopId{3}};  // a hat came first, no kick yet
+  CHECK(keepKick.isPreserved(q));
+  q.barSoFar = {ChopId{3}, ChopId{1}};  // a kick already played
+  CHECK(!keepKick.isPreserved(q));
+  // A rule that names nothing still means the first event of any chop.
+  Rule any;
+  any.id = 2;
+  any.action.kind = ActionKind::Forbid;
+  any.when.position = Position::FirstInBar;
+  GrammarPolicy noOpener = policyOf({any});
+  CandidateQuery opener = query(2, 0, 0, /*firstInBar=*/true);
+  CHECK(!noOpener.evaluate(opener).allowed);
+  CandidateQuery later = query(2, 0, 1, /*firstInBar=*/false);
+  later.barSoFar = {ChopId{3}};
+  CHECK(noOpener.evaluate(later).allowed);
+}
+
+// Big rule sets (the 64-rule maximum) with long bars must evaluate quickly; the order of rules is computed once.
+CHOP_TEST(evaluation_with_a_maximum_rule_set_stays_fast_and_deterministic) {
+  std::vector<Rule> rules;
+  for (std::uint32_t i = 1; i <= kMaxRules; ++i) {
+    Rule r;
+    r.id = i;
+    r.priority = static_cast<int>(i % 7);
+    switch (i % 4) {
+      case 0: r.action.kind = ActionKind::MaxCount; r.scope = RuleScope::Bar; r.action.count = 500; r.when.role = i % 8 == 0 ? "hat" : "kick"; break;
+      case 1: r.action.kind = ActionKind::MaxConsecutiveRepeats; r.action.count = 16; break;
+      case 2: r.action.kind = ActionKind::Prefer; r.weight = 1.0 + 0.01 * i; r.when.role = "snare"; break;
+      default: r.action.kind = ActionKind::Forbid; r.when.role = "accent"; r.when.barMin = 100; break;
+    }
+    rules.push_back(r);
+  }
+  const GrammarPolicy policy = policyOf(rules);
+  CandidateQuery q = query(1, 0, 1, false);
+  for (int i = 0; i < 300; ++i) q.barSoFar.push_back(ChopId{static_cast<std::uint64_t>(i % 5 + 1)});
+  q.recent.assign(q.barSoFar.end() - 16, q.barSoFar.end());
+  const auto t0 = std::chrono::steady_clock::now();
+  double sum = 0.0;
+  for (int i = 0; i < 20000; ++i) {
+    q.chop = ChopId{static_cast<std::uint64_t>(i % 5 + 1)};
+    sum += policy.evaluate(q).weight;
+  }
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  CHECK(sum > 0.0);
+  CHECK(ms < 1500.0);  // generous for a Debug build on a shared machine; per-evaluate cost was about six times higher before
+  std::printf("evaluate x20000 with %zu rules: %.0f ms\n", kMaxRules, ms);
 }

@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <set>
+#include <utility>
 
 namespace chopfractal::roles {
 namespace {
@@ -111,11 +113,51 @@ ValidationReport validateRules(const RuleSet& rules, const RoleMap* roles) {
 }
 
 GrammarPolicy::GrammarPolicy(RoleMap roles, RuleSet rules, std::vector<ChopId> chops)
-    : roles_(std::move(roles)), rules_(std::move(rules)), chops_(std::move(chops)) {}
+    : roles_(std::move(roles)), rules_(std::move(rules)), chops_(std::move(chops)) {
+  // The rule set is immutable for the policy's lifetime, so the evaluation order is computed once.
+  for (const Rule& r : rules_.rules)
+    if (r.enabled) ordered_.push_back(&r);
+  std::stable_sort(ordered_.begin(), ordered_.end(), [](const Rule* a, const Rule* b) { return a->priority != b->priority ? a->priority > b->priority : a->id < b->id; });
+}
+
+GrammarPolicy::GrammarPolicy(const GrammarPolicy& o) : ICandidatePolicy(o), roles_(o.roles_), rules_(o.rules_), chops_(o.chops_) { rebuildOrder(); }
+
+GrammarPolicy& GrammarPolicy::operator=(const GrammarPolicy& o) {
+  if (this != &o) {
+    roles_ = o.roles_;
+    rules_ = o.rules_;
+    chops_ = o.chops_;
+    rebuildOrder();
+  }
+  return *this;
+}
+
+void GrammarPolicy::rebuildOrder() {
+  ordered_.clear();
+  for (const Rule& r : rules_.rules)
+    if (r.enabled) ordered_.push_back(&r);
+  std::stable_sort(ordered_.begin(), ordered_.end(), [](const Rule* a, const Rule* b) { return a->priority != b->priority ? a->priority > b->priority : a->id < b->id; });
+}
+
+const RoleId& GrammarPolicy::roleRef(ChopId chop) const {
+  static const RoleId kNone;
+  const auto& all = roles_.all();
+  auto it = all.find(chop.value);
+  return it == all.end() ? kNone : it->second;
+}
 
 bool GrammarPolicy::matchesChop(const Condition& c, ChopId chop) const {
   if (c.chop.valid() && c.chop != chop) return false;
-  if (!c.role.empty() && roles_.roleOf(chop) != c.role) return false;
+  if (!c.role.empty() && roleRef(chop) != c.role) return false;
+  return true;
+}
+
+// "First in bar" is relative to what the rule names: "keep the first kick in each bar" protects the first kick even when a
+// hat plays before it. A rule that names no chop or role means the first event of any chop.
+bool GrammarPolicy::firstFor(const Condition& c, const CandidateQuery& q) const {
+  if (c.role.empty() && !c.chop.valid()) return q.firstInBar;
+  for (ChopId earlier : q.barSoFar)
+    if (matchesChop(c, earlier)) return false;
   return true;
 }
 
@@ -135,24 +177,18 @@ bool GrammarPolicy::matchesPosition(const Condition& c, const ScopeContext& s, b
   return false;
 }
 
-std::vector<const Rule*> GrammarPolicy::ordered() const {
-  std::vector<const Rule*> v;
-  for (const Rule& r : rules_.rules)
-    if (r.enabled) v.push_back(&r);
-  std::stable_sort(v.begin(), v.end(), [](const Rule* a, const Rule* b) { return a->priority != b->priority ? a->priority > b->priority : a->id < b->id; });
-  return v;
-}
+const std::vector<const Rule*>& GrammarPolicy::ordered() const { return ordered_; }
 
 Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
   Decision d;
-  const std::vector<const Rule*> rules = ordered();
+  const std::vector<const Rule*>& rules = ordered();
 
   // A matching Require of strictly higher priority overrides a lower-priority prohibition.
   int maxRequirePriority = -1000000;
   bool anyRequire = false;
   for (const Rule* r : rules)
     if (r->action.kind == ActionKind::Require && matchesChop(r->when, q.chop) && inRange(r->when, q.scope) &&
-        matchesPosition(r->when, q.scope, q.firstInBar)) {
+        matchesPosition(r->when, q.scope, firstFor(r->when, q))) {
       anyRequire = true;
       maxRequirePriority = std::max(maxRequirePriority, r->priority);
     }
@@ -167,19 +203,21 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
     d.trace.push_back({r.id, TraceEntry::Effect::Rejected});
   };
 
+  std::vector<std::pair<ChopId, int>> barCounts;
+  bool countsBuilt = false;
   for (const Rule* rp : rules) {
     const Rule& r = *rp;
     if (!inRange(r.when, q.scope)) continue;
     switch (r.action.kind) {
       case ActionKind::Forbid:
-        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, q.firstInBar)) reject(r);
+        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, firstFor(r.when, q))) reject(r);
         break;
       case ActionKind::MaxConsecutiveRepeats: {
         if (!matchesChop(r.when, q.chop)) break;
         int run = 0;
+        const RoleId& candidateRole = roleRef(q.chop);
         for (auto it = q.recent.rbegin(); it != q.recent.rend(); ++it) {
-          const bool same = r.action.repeatBy == RepeatBy::SameChop ? *it == q.chop
-                                                                    : (!roles_.roleOf(q.chop).empty() && roles_.roleOf(*it) == roles_.roleOf(q.chop));
+          const bool same = r.action.repeatBy == RepeatBy::SameChop ? *it == q.chop : (!candidateRole.empty() && roleRef(*it) == candidateRole);
           if (!same) break;
           ++run;
         }
@@ -188,14 +226,20 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
       }
       case ActionKind::MaxCount: {
         if (!matchesChop(r.when, q.chop)) break;
+        if (!countsBuilt) {  // per-chop tallies of the bar, shared by every count rule: cost grows with chops, not events
+          std::map<std::uint64_t, int> tally;
+          for (ChopId c : q.barSoFar) ++tally[c.value];
+          for (const auto& kv : tally) barCounts.push_back({ChopId{kv.first}, kv.second});
+          countsBuilt = true;
+        }
         int n = 0;
-        for (ChopId c : q.barSoFar)
-          if (matchesChop(r.when, c)) ++n;
+        for (const auto& [c, k] : barCounts)
+          if (matchesChop(r.when, c)) n += k;
         if (n >= r.action.count) reject(r);
         break;
       }
       case ActionKind::Prefer:
-        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, q.firstInBar)) {
+        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, firstFor(r.when, q))) {
           d.weight *= r.weight;
           d.trace.push_back({r.id, TraceEntry::Effect::Weighted});
         }
@@ -211,7 +255,7 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
 bool GrammarPolicy::isPreserved(const CandidateQuery& q) const {
   for (const Rule& r : rules_.rules)
     if (r.enabled && r.action.kind == ActionKind::Preserve && matchesChop(r.when, q.chop) && inRange(r.when, q.scope) &&
-        matchesPosition(r.when, q.scope, q.firstInBar))
+        matchesPosition(r.when, q.scope, firstFor(r.when, q)))
       return true;
   return false;
 }
@@ -219,7 +263,7 @@ bool GrammarPolicy::isPreserved(const CandidateQuery& q) const {
 std::uint32_t GrammarPolicy::preservingRule(const CandidateQuery& q) const {
   for (const Rule& r : rules_.rules)
     if (r.enabled && r.action.kind == ActionKind::Preserve && matchesChop(r.when, q.chop) && inRange(r.when, q.scope) &&
-        matchesPosition(r.when, q.scope, q.firstInBar))
+        matchesPosition(r.when, q.scope, firstFor(r.when, q)))
       return r.id;
   return 0;
 }
@@ -239,7 +283,7 @@ std::vector<Requirement> GrammarPolicy::required(const ScopeContext& scope, cons
     ChopId target = r.when.chop;
     if (!target.valid())
       for (ChopId c : chops_)
-        if (roles_.roleOf(c) == r.when.role) {
+        if (roleRef(c) == r.when.role) {
           target = c;
           break;
         }

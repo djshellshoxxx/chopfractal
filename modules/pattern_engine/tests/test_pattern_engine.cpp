@@ -1196,3 +1196,71 @@ CHOP_TEST(candidate_query_for_unknown_id_returns_invalid_chop) {
   if (!g.ok()) return;
   CHECK(!candidateQueryFor(g.value(), EventId{999999}).chop.valid());
 }
+
+namespace {
+// "At most `cap` events of the listed chops per bar", counted like the real grammar does: from the earlier events of the bar.
+struct CapPolicy : ICandidatePolicy {
+  std::set<std::uint64_t> ids;
+  int cap = 1;
+  Decision evaluate(const CandidateQuery& q) const override {
+    Decision d;
+    if (!ids.count(q.chop.value)) return d;
+    int n = 0;
+    for (ChopId c : q.barSoFar) n += ids.count(c.value) ? 1 : 0;
+    if (n >= cap) {
+      d.allowed = false;
+      d.weight = 0.0;
+      d.blockedBy = 11;
+    }
+    return d;
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext&, const std::vector<ChopId>&) const override { return {}; }
+};
+
+int countIds(const Bar& b, const std::set<std::uint64_t>& ids) {
+  int n = 0;
+  for (const Beat& bt : b.beats)
+    for (const Event& e : bt.events) n += ids.count(e.chop.value) ? 1 : 0;
+  return n;
+}
+}  // namespace
+
+// Audit item: Mutate counted "at most N" using only earlier events, so events it kept later in the bar (locked beats)
+// were ignored and a bar could end above the limit.
+CHOP_TEST(mutate_keeps_at_most_n_rules_satisfied_over_the_whole_bar) {
+  const ChopSnapshot c = makeChops(2);
+  Settings s = baseSettings();
+  s.density = 1.0;
+  s.variation = {1, 1, 1, 1};
+  s.grid = {16, false};
+  CapPolicy cap;
+  cap.ids = {1};
+  int mutatedBars = 0;
+  for (std::uint64_t seed = 1; seed <= 10; ++seed) {
+    s.seed = seed;
+    Pattern base = gen(c, s);
+    // Beats 2 and 3 stay as they are (locked); the earlier beats are regenerated under the limit.
+    int lockedMax = 0;
+    for (Bar& b : base.bars) {
+      b.beats[2].locked = b.beats[3].locked = true;
+      int n = 0;
+      for (int bt = 2; bt < 4; ++bt)
+        for (const Event& e : b.beats[static_cast<std::size_t>(bt)].events) n += e.chop == ChopId{1} ? 1 : 0;
+      lockedMax = std::max(lockedMax, n);
+    }
+    cap.cap = lockedMax + 1;
+    MutateOptions o;
+    o.seed = seed + 50;
+    o.amount = 1.0;
+    auto m = mutate(base, c, o, &cap);
+    CHECK(m.ok());
+    if (!m.ok()) continue;
+    for (std::size_t b = 0; b < m.value().bars.size(); ++b) {
+      const int n = countIds(m.value().bars[b], cap.ids);
+      CHECK(n <= cap.cap);
+      ++mutatedBars;
+    }
+  }
+  CHECK(mutatedBars > 0);
+}
