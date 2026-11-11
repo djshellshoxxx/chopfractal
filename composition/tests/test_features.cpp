@@ -158,6 +158,25 @@ CHOP_TEST(fractal_rhythm_respects_locks_and_the_event_cap) {
   CHECK(!none.applyFractal(fs).ok());
 }
 
+CHOP_TEST(fractal_repeat_rules_hold_across_the_bar_line) {
+  // Replacing only bar 1 must not repeat the chop that ends bar 0, whatever the seed.
+  for (std::uint64_t seed = 1; seed <= 24; ++seed) {
+    ProjectSession s;
+    CHECK(ready(s));
+    roles::RuleSet rules;
+    rules.rules = {roles::templates::avoidAdjacentRepeats(1)};
+    CHECK(s.setRules(rules).ok());
+    CHECK(s.generate(settings(seed, 2)).ok());
+    fractal::Settings fs;
+    fs.motif = "xxxx";
+    fs.depth = 1;
+    fs.seed = seed;
+    CHECK(s.applyFractal(fs, {1}).ok());
+    const auto flat = pattern::flatten(*s.pattern(), *s.chops()).value();
+    for (std::size_t i = 1; i < flat.size(); ++i) CHECK(flat[i].chop != flat[i - 1].chop);
+  }
+}
+
 CHOP_TEST(evolve_on_a_fully_locked_pattern_stops_instead_of_flooding_the_undo_stack) {
   ProjectSession s;
   CHECK(ready(s));
