@@ -70,7 +70,7 @@ class PatternPanel : public EditorPanelBase {
   chopfractal::ui::EventRect dragRect_;
   juce::Point<int> dragStart_, dragNow_;
   chopfractal::Ticks grabOffset_ = 0;
-  bool dragCopy_ = false, dragSnap_ = true, dragLaneLock_ = false;
+  bool dragCopy_ = false, dragSnap_ = true;
   bool dragRefused_ = false;
   int dragLane_ = 0;
   // The planned drop (ghost) while a drag is active.

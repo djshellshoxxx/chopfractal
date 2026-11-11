@@ -61,6 +61,7 @@ class PresetBrowser : public EditorPanelBase, private juce::ListBoxModel, privat
   void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
   void selectedRowsChanged(int lastRowSelected) override;
   void returnKeyPressed(int) override { loadSelected(applyAndGenerate()); }
+  using juce::Component::keyPressed;  // the KeyListener overload below must not hide Component's one
   bool keyPressed(const juce::KeyPress&, juce::Component*) override;
   void textEditorTextChanged(juce::TextEditor&) override;
   void textEditorReturnKeyPressed(juce::TextEditor&) override { loadSelected(applyAndGenerate()); }

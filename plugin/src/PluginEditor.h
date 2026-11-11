@@ -186,7 +186,6 @@ class ChopFractalEditor : public juce::AudioProcessorEditor, public juce::FileDr
   CommandPalette palette_;
   juce::Component::SafePointer<juce::CallOutBox> shortcutsBox_;
   bool spaceHintShown_ = false;
-  bool exportSeenDone_ = false;
   std::uint64_t announcedRevision_ = 0;
   chopfractal::EventId announcedHit_;
   bool announceSelection_ = false;
