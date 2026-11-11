@@ -602,6 +602,10 @@ class ProjectSession {
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
   bool settleRestoredPattern();
+  // The family tree follows Undo/Redo/recall: the node recorded with the restored pattern object, else a payload match.
+  void syncActiveNodeToPattern(std::shared_ptr<const pattern::Pattern> key = nullptr);
+  // Pattern object -> the family-tree node recorded with it (the weak_ptr guards against a reused address).
+  std::map<const pattern::Pattern*, std::pair<std::weak_ptr<const pattern::Pattern>, history::NodeId>> nodeOfPattern_;
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
   Status reconcileAfterMarkerChange();

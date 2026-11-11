@@ -322,6 +322,8 @@ CHOP_TEST(pads_are_ignored_and_killed_when_the_effect_is_off) {
   LiveInput live;
   live.pads = &e;
   live.numPads = 1;
+  rig.r.process(TransportBlock{}, off2, inp, outp, 2, 256, live);  // the sounding voice crossfades out over a few ms
+  live = LiveInput{};
   rig.r.process(TransportBlock{}, off2, inp, outp, 2, 256, live);
   CHECK(peakOf(l) == 0.f);
   CHECK(rig.r.activePadVoices() == 0);

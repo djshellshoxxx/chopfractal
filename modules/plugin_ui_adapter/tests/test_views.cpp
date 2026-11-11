@@ -178,6 +178,27 @@ CHOP_TEST(history_layout_gives_leaves_columns_and_parents_depth) {
   CHECK(layoutHistoryTree({}, 0).empty());
   // An orphan whose parent is missing is shown as a root rather than dropped.
   CHECK_EQ(layoutHistoryTree({node(9, 77, 1, "orphan")}, 0).size(), 1u);
+  // Pre-order output: a parent precedes its subtree and siblings keep their order.
+  CHECK(layout[0].id == 1 && layout[1].id == 2 && layout[2].id == 4 && layout[3].id == 3 && layout[4].id == 5);
+}
+
+CHOP_TEST(history_layout_handles_a_very_long_chain_without_recursion) {
+  // A hostile or migrated state can hold a chain far longer than the history cap; the layout must not use the call stack.
+  std::vector<history::NodeSummary> nodes;
+  const std::size_t n = 200000;
+  nodes.reserve(n);
+  for (std::size_t i = 1; i <= n; ++i) {
+    history::NodeSummary s;
+    s.id = i;
+    s.parent = i - 1;
+    s.order = i;
+    s.label = "n";
+    nodes.push_back(s);
+  }
+  const auto layout = layoutHistoryTree(nodes, n);
+  CHECK_EQ(layout.size(), n);
+  CHECK(layout.front().depth == 0 && layout.back().depth == static_cast<int>(n - 1));
+  CHECK(layout.back().active && layout.front().column == 0 && layout.back().column == 0);
 }
 
 // ---- Orbit View ----

@@ -1,16 +1,29 @@
 name: CI
 
+# Docs-only changes (docs/ and the root README) skip CI. Not skipped: docs/design (the shell tests read the design
+# tokens), module READMEs and MIGRATION.md (generated from module.json and checked by the portability job), and the
+# LICENSE and notices files (packaged and checked by the packaging test).
+# Pull requests run the fast gate: repository checks, GCC and Clang, sanitizers, the transfer smoke test and the Linux
+# plugin (build, shell tests, validator). Pushes to main, the nightly schedule and manual runs add the slow platform
+# jobs: macOS and Windows portable tests and the full package matrix (Windows, macOS arm64/x86_64/universal).
 on:
   push:
     branches: [main]
+    paths: ["**", "!docs/**", "docs/design/**", "!README.md", "!IP/**"]
   pull_request:
+    paths: ["**", "!docs/**", "docs/design/**", "!README.md", "!IP/**"]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its stale run. Main, nightly and manual runs carry the only cross-platform
+# jobs, so each gets its own group (event + commit) and is never cancelled by a later push.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never cancel a main-branch run
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   # Portability protocol: manifests, dependency graph, includes, forbidden host/GUI headers, current docs.
@@ -38,12 +51,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {name: linux-gcc, os: ubuntu-24.04, cc: gcc, cxx: g++, werror: "ON"}
-          - {name: linux-clang, os: ubuntu-24.04, cc: clang, cxx: clang++, werror: "ON"}
-          - {name: macos-arm64, os: macos-14, cc: clang, cxx: clang++, werror: "ON"}
-          # MSVC /W4 has not been exercised yet, so warnings are reported but not fatal there.
-          - {name: windows-msvc, os: windows-2022, cc: cl, cxx: cl, werror: "OFF"}
+        # jobs: about one compile job per 2 GB of runner RAM (ubuntu-24.04 and windows-2022: 4 cores/16 GB,
+        # macos-14: 3 cores/7 GB). The macOS and MSVC rows repeat the same tests on another OS, so they run only on
+        # main, nightly and manual runs (the golden hashes still catch a cross-platform divergence there).
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"linux-gcc","os":"ubuntu-24.04","cc":"gcc","cxx":"g++","werror":"ON","jobs":4},{"name":"linux-clang","os":"ubuntu-24.04","cc":"clang","cxx":"clang++","werror":"ON","jobs":4}]' || '[{"name":"linux-gcc","os":"ubuntu-24.04","cc":"gcc","cxx":"g++","werror":"ON","jobs":4},{"name":"linux-clang","os":"ubuntu-24.04","cc":"clang","cxx":"clang++","werror":"ON","jobs":4},{"name":"macos-arm64","os":"macos-14","cc":"clang","cxx":"clang++","werror":"ON","jobs":3},{"name":"windows-msvc","os":"windows-2022","cc":"cl","cxx":"cl","werror":"OFF","jobs":4}]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Configure
@@ -52,9 +63,9 @@ jobs:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel ${{ matrix.jobs }}
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure --parallel ${{ matrix.jobs }}
 
   sanitizers:
     timeout-minutes: 45
@@ -65,22 +76,22 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build
           cmake -S . -B build-asan -G Ninja -DCHOPFRACTAL_SANITIZE=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          cmake --build build-asan
-          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-asan --output-on-failure
+          cmake --build build-asan --parallel 4
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-asan --output-on-failure --parallel 4
       - name: ThreadSanitizer on the real-time renderer and its lock-free mailbox
         run: |
           cmake -S modules/audio_renderer -B build-tsan -G Ninja -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
-          cmake --build build-tsan --target test_audio_renderer
+          cmake --build build-tsan --target test_audio_renderer --parallel 4
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan/test_audio_renderer
       - name: ThreadSanitizer on the input capture module (audio thread vs. status, stop and take)
         run: |
           cmake -S modules/input_capture -B build-tsan-ic -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
-          cmake --build build-tsan-ic --target test_input_capture
+          cmake --build build-tsan-ic --target test_input_capture --parallel 4
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan-ic/test_input_capture
       - name: ThreadSanitizer on the time-stretch module (threaded determinism test)
         run: |
           cmake -S modules/time_stretch -B build-tsan-ts -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
-          cmake --build build-tsan-ts --target test_time_stretch
+          cmake --build build-tsan-ts --target test_time_stretch --parallel 4
           TSAN_OPTIONS=halt_on_error=1 ./build-tsan-ts/test_time_stretch
 
   # Each module copied with only its declared dependencies into an empty project must build and pass.
@@ -92,11 +103,12 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ninja-build
       - run: tools/smoke_transfer.sh
 
-  # The JUCE shell for every platform: Standalone + VST3 + CLAP for Windows x64, Linux x86_64, macOS arm64 and macOS
-  # x86_64 (plus a macOS universal merge). Runs the headless shell tests on each, the Steinberg validator on Linux,
+  # The JUCE shell: Standalone + VST3 + CLAP. Pull requests build Linux x86_64 only; main, nightly and manual runs
+  # build Windows x64, Linux x86_64, macOS arm64 and macOS x86_64 (plus a macOS universal merge). Runs the headless shell tests on each, the Steinberg validator on Linux,
   # and uploads one zip/tar.gz per platform and format (14 day retention). See .github/workflows/build-packages.yml.
   packages:
     uses: ./.github/workflows/build-packages.yml
     with:
       release: false
       retention-days: 14
+      full: ${{ github.event_name != 'pull_request' }}

@@ -198,9 +198,31 @@ CHOP_TEST(proposals_preview_replace_merge_and_undo_in_one_step) {
   CHECK(m.undo());
   CHECK_EQ(m.markers().size(), 1u);
   CHECK(m.applyProposal(p, MergeMode::Replace).ok());
-  CHECK(m.find(manual) == nullptr);
-  // Replace clears the manual marker, so 5010 no longer conflicts; 47990 is too close to the end.
-  CHECK_EQ(m.markers().size(), 3u);  // 0, 5010, 20000
+  // Replace keeps the user's manual marker; 5010 conflicts with it and 47990 is too close to the end.
+  CHECK(m.find(manual) != nullptr && m.find(manual)->manual);
+  CHECK_EQ(m.markers().size(), 3u);  // 0, 5000 (manual), 20000
+  // A second Replace drops the previous automatic markers but still keeps the manual one.
+  Proposal q;
+  q.markers = {{30000, 1.f}};
+  CHECK(m.applyProposal(q, MergeMode::Replace).ok());
+  CHECK_EQ(m.markers().size(), 2u);  // 5000 (manual), 30000
+  CHECK(m.find(manual) != nullptr);
+  CHECK(m.clearMarkers().ok() && m.markers().empty());  // Clear is how a user removes manual markers
+}
+
+CHOP_TEST(trim_is_validated_for_disabled_markers_too) {
+  ChopMap m = makeMap();
+  auto a = m.addMarker(0).value();
+  auto b = m.addMarker(10000).value();
+  auto c = m.addMarker(20000).value();
+  CHECK(m.setEnabled(b, false).ok());
+  CHECK(!m.setTrim(b, 10000, 10000).ok());           // b would be left with less than the minimum region
+  CHECK(!m.setTrim(b, 0, 0xFFFFFFFFu).ok());
+  CHECK_EQ(m.find(b)->trimStart, 0u);
+  CHECK(m.setTrim(b, 100, 200).ok());
+  CHECK(m.setEnabled(b, true).ok());
+  CHECK(!m.setTrim(b, 9990, 0).ok());                // same limit once enabled
+  CHECK(m.setTrim(a, 0, 0).ok() && m.setTrim(c, 1, 1).ok());
 }
 
 CHOP_TEST(snap_helpers) {
