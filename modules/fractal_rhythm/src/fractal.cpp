@@ -170,19 +170,33 @@ bool enforceRequired(const Context& ctx, std::vector<Event>& events) {
       if (std::find(now.begin(), now.end(), rq.chop) != now.end()) continue;
       for (std::size_t i = leaves.size(); i-- > 0;) {
         if (beatOf(leaves[i].start) != beat || std::find(rewritten.begin(), rewritten.end(), i) != rewritten.end()) continue;
-        CandidateQuery q;
-        q.chop = rq.chop;
-        q.startInBar = leaves[i].start;
-        q.scope = sc;
-        q.scope.level = ScopeLevel::Event;
-        for (std::size_t j = 0; j < i; ++j) q.barSoFar.push_back(leaves[j].event->chop);
-        q.firstInBar = q.barSoFar.empty();
-        const std::size_t from = q.barSoFar.size() > 16 ? q.barSoFar.size() - 16 : 0;
-        q.recent.assign(q.barSoFar.begin() + static_cast<std::ptrdiff_t>(from), q.barSoFar.end());
-        if (ctx.policy->evaluate(q).allowed) {
-          leaves[i].event->chop = rq.chop;
+        // A leaf's query: the leaves before it, as the generator saw them. `all` lists every other leaf instead (count rules).
+        auto queryFor = [&](std::size_t j, bool all) {
+          CandidateQuery q;
+          q.chop = leaves[j].event->chop;
+          q.startInBar = leaves[j].start;
+          q.scope = sc;
+          q.scope.level = ScopeLevel::Event;
+          q.scope.beat = beatOf(leaves[j].start);
+          for (std::size_t k = 0; k < leaves.size(); ++k)
+            if (all ? k != j : k < j) q.barSoFar.push_back(leaves[k].event->chop);
+          q.firstInBar = j == 0;
+          std::vector<ChopId> before;
+          for (std::size_t k = 0; k < j; ++k) before.push_back(leaves[k].event->chop);
+          const std::size_t from = before.size() > 16 ? before.size() - 16 : 0;
+          q.recent.assign(before.begin() + static_cast<std::ptrdiff_t>(from), before.end());
+          return q;
+        };
+        const ChopId old = leaves[i].event->chop;
+        leaves[i].event->chop = rq.chop;
+        // The rewrite must be acceptable for itself (also counting leaves after it) and must not break any later leaf.
+        bool ok = ctx.policy->evaluate(queryFor(i, false)).allowed && ctx.policy->evaluate(queryFor(i, true)).allowed;
+        for (std::size_t j = i + 1; ok && j < leaves.size(); ++j) ok = ctx.policy->evaluate(queryFor(j, false)).allowed;
+        if (ok) {
           rewritten.push_back(i);
           changed = true;
+        } else {
+          leaves[i].event->chop = old;
         }
         break;  // only the last leaf of the beat is tried, as in generated bars
       }

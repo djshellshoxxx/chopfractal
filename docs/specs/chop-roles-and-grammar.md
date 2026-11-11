@@ -2,7 +2,7 @@
 
 **Status:** Creation spec for review  
 
-**Implementation (audited 2026-10-20):** Built and tested (`chop_roles_grammar`): roles, serializable rules, explainable `GrammarPolicy`, templates, composition injection. Editor: role combo with Set Role, Smart Setup suggestions with Accept Roles. **No rule-editing UI** (F06). Audit rounds 4/5 follow-ups fixed: Mutate counts events kept later in the bar for "at most N" rules; Fractal honors repeat and required rules; `FirstInBar` is relative to what the rule names ("keep the first kick in each bar" protects the first kick even after a hat; a rule naming no chop or role means the first event of any chop); rule evaluation no longer re-sorts rules or rescans the bar per rule.
+**Implementation (audited 2026-10-20):** Built and tested (`chop_roles_grammar`): roles, serializable rules, explainable `GrammarPolicy`, templates, composition injection. Editor: role combo with Set Role, Smart Setup suggestions with Accept Roles. **No rule-editing UI** (F06). Audit rounds 4/5 follow-ups fixed: Mutate counts events kept later in the bar for "at most N" rules; Fractal honors repeat and required rules; for Preserve and Prefer, `FirstInBar` is relative to what the rule names ("keep the first kick in each bar" protects the first kick even after a hat); for Forbid and the Require override it stays the first event of the bar, so a "forbid hat, first in bar" rule does not ban every hat; rule evaluation no longer re-sorts rules or rescans the bar per rule.
 
 **Module ID:** `chop_roles_grammar`  
 **Purpose:** Give chops user-defined musical roles and use compact rules to guide generation without relying on opaque AI or genre labels.

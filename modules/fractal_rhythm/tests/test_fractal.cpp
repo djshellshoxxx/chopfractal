@@ -310,3 +310,58 @@ CHOP_TEST(required_chops_sound_in_their_beat_and_parents_follow) {
     for (const Event& k : top.child->events) CHECK(k.sourceOverride == (k.chop != top.chop));
   }
 }
+
+namespace {
+struct CapAndNeed : ICandidatePolicy {
+  ChopId capped;
+  int cap = 99;
+  bool noAdjacentRepeat = false;
+  ChopId needed;  // required in beat 0
+  Decision evaluate(const CandidateQuery& q) const override {
+    Decision d;
+    if (capped.valid() && q.chop == capped) {
+      int n = 0;
+      for (ChopId c : q.barSoFar) n += c == capped ? 1 : 0;
+      if (n >= cap) d.allowed = false;
+    }
+    if (noAdjacentRepeat && !q.recent.empty() && q.recent.back() == q.chop) d.allowed = false;
+    return d;
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext& sc, const std::vector<ChopId>& placed) const override {
+    if (needed.valid() && sc.beat == 0 && std::find(placed.begin(), placed.end(), needed) == placed.end()) return {{needed, 4}};
+    return {};
+  }
+};
+}  // namespace
+
+// A required-chop rewrite must not break a count or repeat rule for the leaves around it.
+CHOP_TEST(required_rewrites_never_break_count_or_repeat_rules) {
+  const auto snap = chops(8);
+  Settings s;
+  s.motif = "xxxx";
+  s.depth = 2;
+  CapAndNeed count;
+  count.capped = ChopId{6};
+  count.cap = 1;
+  count.needed = ChopId{6};  // leaf 5 already plays chop 6; leaf 3 would be a second one
+  Context c = ctxFor(snap);
+  c.policy = &count;
+  auto r = generateBar(c, s);
+  CHECK(r.ok());
+  if (r.ok()) {
+    int n = 0;
+    for (const auto& e : flat(r.value(), snap)) n += e.chop == ChopId{6} ? 1 : 0;
+    CHECK(n <= 1);
+  }
+  CapAndNeed repeat;
+  repeat.noAdjacentRepeat = true;
+  repeat.needed = ChopId{5};  // leaf 4 plays chop 5; leaf 3 would repeat it
+  c.policy = &repeat;
+  auto q = generateBar(c, s);
+  CHECK(q.ok());
+  if (q.ok()) {
+    const auto f = flat(q.value(), snap);
+    for (std::size_t i = 1; i < f.size(); ++i) CHECK(f[i].chop != f[i - 1].chop);
+  }
+}

@@ -152,6 +152,9 @@ bool GrammarPolicy::matchesChop(const Condition& c, ChopId chop) const {
   return true;
 }
 
+// Used only by rules that keep or boost a candidate (Preserve, Prefer). Prohibitions and the Require override keep the
+// first-event-of-the-bar meaning: a "forbid hat, first in bar" rule that tracked the first hat would never let one be placed
+// and would ban every hat in the bar.
 // "First in bar" is relative to what the rule names: "keep the first kick in each bar" protects the first kick even when a
 // hat plays before it. A rule that names no chop or role means the first event of any chop.
 bool GrammarPolicy::firstFor(const Condition& c, const CandidateQuery& q) const {
@@ -188,7 +191,7 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
   bool anyRequire = false;
   for (const Rule* r : rules)
     if (r->action.kind == ActionKind::Require && matchesChop(r->when, q.chop) && inRange(r->when, q.scope) &&
-        matchesPosition(r->when, q.scope, firstFor(r->when, q))) {
+        matchesPosition(r->when, q.scope, q.firstInBar)) {
       anyRequire = true;
       maxRequirePriority = std::max(maxRequirePriority, r->priority);
     }
@@ -210,7 +213,7 @@ Decision GrammarPolicy::evaluate(const CandidateQuery& q) const {
     if (!inRange(r.when, q.scope)) continue;
     switch (r.action.kind) {
       case ActionKind::Forbid:
-        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, firstFor(r.when, q))) reject(r);
+        if (matchesChop(r.when, q.chop) && matchesPosition(r.when, q.scope, q.firstInBar)) reject(r);
         break;
       case ActionKind::MaxConsecutiveRepeats: {
         if (!matchesChop(r.when, q.chop)) break;

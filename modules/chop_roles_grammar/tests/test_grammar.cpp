@@ -397,6 +397,20 @@ CHOP_TEST(first_in_bar_is_relative_to_the_chop_or_role_the_rule_names) {
   CHECK(noOpener.evaluate(later).allowed);
 }
 
+// A prohibition keeps the first-event-of-the-bar meaning; otherwise "forbid hat, first in bar" would ban every hat in the bar.
+CHOP_TEST(forbid_first_in_bar_does_not_ban_later_hats) {
+  Rule r = rule(1, ActionKind::Forbid, "hat");
+  r.when.position = Position::FirstInBar;
+  const GrammarPolicy p = policyOf({r});
+  CandidateQuery opener = query(3, 0, 0, /*firstInBar=*/true);
+  CHECK(!p.evaluate(opener).allowed);  // a hat that opens the bar is still rejected
+  CandidateQuery later = query(3, 0, 1, /*firstInBar=*/false);
+  later.barSoFar = {ChopId{2}};  // a snare opened the bar: hats are fine
+  CHECK(p.evaluate(later).allowed);
+  later.barSoFar = {ChopId{2}, ChopId{3}};
+  CHECK(p.evaluate(later).allowed);
+}
+
 // Big rule sets (the 64-rule maximum) with long bars must evaluate quickly; the order of rules is computed once.
 CHOP_TEST(evaluation_with_a_maximum_rule_set_stays_fast_and_deterministic) {
   std::vector<Rule> rules;
