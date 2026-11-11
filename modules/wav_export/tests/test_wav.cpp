@@ -2,6 +2,7 @@
 #include <chopfractal/wav_export/wav.hpp>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 
@@ -178,4 +179,76 @@ CHOP_TEST(normalizing_to_full_scale_is_not_reported_as_clipping) {
   CHECK_EQ(rep.clipped, 0u);
   o.format = Format::Pcm24;
   CHECK(encode(tone(1, 500, 0.3f), o, &rep).ok() && rep.clipped == 0);
+}
+
+namespace {
+// Builds a WAVE_FORMAT_EXTENSIBLE file by hand. `fmtLen` bytes of the fmt chunk are written (a short value truncates it).
+std::vector<std::uint8_t> extensibleFile(std::uint16_t sub, int bits, int ch, std::uint16_t cbSize, std::size_t fmtLen, bool goodGuid,
+                                         const std::vector<std::uint8_t>& data) {
+  std::vector<std::uint8_t> f;
+  auto p16 = [&](std::vector<std::uint8_t>& o, std::uint32_t v) { o.push_back(v & 255); o.push_back((v >> 8) & 255); };
+  auto p32 = [&](std::vector<std::uint8_t>& o, std::uint32_t v) { for (int i = 0; i < 4; ++i) o.push_back((v >> (8 * i)) & 255); };
+  std::vector<std::uint8_t> fmt;
+  p16(fmt, 0xFFFE);
+  p16(fmt, static_cast<std::uint32_t>(ch));
+  p32(fmt, 48000);
+  p32(fmt, static_cast<std::uint32_t>(48000 * ch * bits / 8));
+  p16(fmt, static_cast<std::uint32_t>(ch * bits / 8));
+  p16(fmt, static_cast<std::uint32_t>(bits));
+  p16(fmt, cbSize);
+  p16(fmt, static_cast<std::uint32_t>(bits));  // valid bits
+  p32(fmt, ch == 2 ? 3u : 4u);                 // channel mask
+  p16(fmt, sub);
+  const std::uint8_t tail[14] = {0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71};
+  for (int i = 0; i < 14; ++i) fmt.push_back(goodGuid ? tail[i] : 0x55);
+  fmt.resize(fmtLen, 0);
+  const std::string riff = "RIFF", wave = "WAVE", fmtTag = "fmt ", dataTag = "data";
+  f.insert(f.end(), riff.begin(), riff.end());
+  p32(f, 0);
+  f.insert(f.end(), wave.begin(), wave.end());
+  f.insert(f.end(), fmtTag.begin(), fmtTag.end());
+  p32(f, static_cast<std::uint32_t>(fmt.size()));
+  f.insert(f.end(), fmt.begin(), fmt.end());
+  f.insert(f.end(), dataTag.begin(), dataTag.end());
+  p32(f, static_cast<std::uint32_t>(data.size()));
+  f.insert(f.end(), data.begin(), data.end());
+  const std::uint32_t sz = static_cast<std::uint32_t>(f.size() - 8);
+  for (int i = 0; i < 4; ++i) f[4 + static_cast<std::size_t>(i)] = (sz >> (8 * i)) & 255;
+  return f;
+}
+}  // namespace
+
+CHOP_TEST(extensible_pcm_and_float_decode_and_hostile_extensible_headers_are_rejected) {
+  // 16-bit PCM stereo: L = 16384 (0.5), R = -32768 (-1.0)
+  const std::vector<std::uint8_t> pcm = {0x00, 0x40, 0x00, 0x80};
+  auto a = extensibleFile(1, 16, 2, 22, 40, true, pcm);
+  auto da = decode(a.data(), a.size());
+  CHECK(da.ok());
+  if (da.ok()) {
+    CHECK(da.value().format == Format::Pcm16 && da.value().sampleRate == 48000 && da.value().planar.size() == 2u);
+    CHECK_NEAR(da.value().planar[0][0], 0.5, 1e-6);
+    CHECK_NEAR(da.value().planar[1][0], -1.0, 1e-6);
+  }
+  // 32-bit float mono: 0.25
+  const float v = 0.25f;
+  std::vector<std::uint8_t> fl(4);
+  std::memcpy(fl.data(), &v, 4);
+  auto b = extensibleFile(3, 32, 1, 22, 40, true, fl);
+  auto db = decode(b.data(), b.size());
+  CHECK(db.ok());
+  if (db.ok()) CHECK(db.value().format == Format::Float32 && db.value().planar[0][0] == 0.25f);
+  // Hostile headers: each must fail cleanly with a message.
+  auto truncated = extensibleFile(1, 16, 2, 22, 20, true, pcm);   // fmt chunk cut inside the extension
+  auto tiny = extensibleFile(1, 16, 2, 22, 17, true, pcm);        // too short even for cbSize
+  auto badCb = extensibleFile(1, 16, 2, 4, 40, true, pcm);        // cbSize below the 22 the extension needs
+  auto hugeCb = extensibleFile(1, 16, 2, 60000, 40, true, pcm);   // cbSize beyond the chunk
+  auto badGuid = extensibleFile(1, 16, 2, 22, 40, false, pcm);    // not the KSDATAFORMAT base GUID
+  auto alaw = extensibleFile(6, 16, 2, 22, 40, true, pcm);        // valid GUID, unsupported subformat (A-law)
+  for (const auto* bad : {&truncated, &tiny, &badCb, &hugeCb, &badGuid, &alaw}) {
+    auto r = decode(bad->data(), bad->size());
+    CHECK(!r.ok());
+    if (!r.ok()) CHECK(!r.error().message.empty());
+  }
+  CHECK(decode(badGuid.data(), badGuid.size()).error().code == ErrorCode::UnsupportedVersion);
+  CHECK(decode(badCb.data(), badCb.size()).error().code == ErrorCode::Corrupt);
 }

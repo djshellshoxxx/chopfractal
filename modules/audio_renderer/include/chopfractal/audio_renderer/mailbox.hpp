@@ -3,8 +3,9 @@
 //
 //  * publish()  : any non-RT thread (serialized by a mutex). Allocates; never called from the audio thread.
 //  * acquire()  : the single RT thread only. Wait-free, allocation-free, never frees anything.
-//  * Reclamation: an object is freed only after the RT thread has acknowledged a strictly newer one, so
-//                 the RT thread can never touch freed memory. Freeing happens on the publishing thread.
+//  * Reclamation: an object is freed only when it is neither the RT thread's active/candidate slot nor the newest
+//                 pending one, so the RT thread can never touch freed memory and retention is bounded (at most 3)
+//                 even if the RT thread never calls acquire(). Freeing happens on the publishing thread.
 // The Mailbox must outlive the RT thread's last call to acquire().
 #include <cstddef>
 #include <utility>
@@ -31,11 +32,19 @@ class Mailbox {
   }
 
   // RT thread only. Returns the newest published object, or nullptr if nothing was ever published.
+  // The candidate slot is announced through `candidate_` and re-validated against `pending_` before it becomes active, so a
+  // publisher never frees a slot between the RT thread reading the pointer and acknowledging it (hazard-pointer handshake).
+  // The retry count is bounded: on a lost race the previous (still protected) object stays active until the next call.
   const T* acquire() {
-    const Slot* p = pending_.load(std::memory_order_acquire);
-    if (p != nullptr && p != active_) {
-      active_ = p;
-      activeGeneration_.store(p->generation, std::memory_order_release);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+      const Slot* p = pending_.load(std::memory_order_seq_cst);
+      if (p == nullptr || p == active_) break;
+      candidate_.store(p, std::memory_order_seq_cst);
+      if (pending_.load(std::memory_order_seq_cst) == p) {
+        active_ = p;
+        activeSlot_.store(p, std::memory_order_seq_cst);
+        break;
+      }
     }
     return active_ ? active_->value.get() : nullptr;
   }
@@ -57,23 +66,30 @@ class Mailbox {
     std::uint64_t generation = 0;
   };
 
+  // Only three slots can be in use: the one the RT thread reads (active), the one it is about to adopt (candidate) and the
+  // newest published (pending). Everything else, including superseded items the RT thread never saw (a bypassed track
+  // while the UI keeps publishing), is freed here on the publishing thread, so retention stays bounded at three.
   void collectLocked() {
-    const std::uint64_t active = activeGeneration_.load(std::memory_order_acquire);
-    // Keep: anything not older than the acknowledged generation (this includes the newest, still
-    // unacknowledged object). While no reader is running, bound the backlog: a reader that starts later
-    // only ever jumps to the newest pending object.
-    std::size_t keepFrom = 0;
-    while (keepFrom < owned_.size() && owned_[keepFrom]->generation < active) ++keepFrom;
-    if (active == 0 && owned_.size() > kInactiveBacklog) keepFrom = owned_.size() - kInactiveBacklog;
-    if (keepFrom > 0) owned_.erase(owned_.begin(), owned_.begin() + static_cast<std::ptrdiff_t>(keepFrom));
+    const Slot* keepA = activeSlot_.load(std::memory_order_seq_cst);
+    const Slot* keepC = candidate_.load(std::memory_order_seq_cst);
+    const Slot* keepP = pending_.load(std::memory_order_seq_cst);
+    std::size_t w = 0;
+    for (std::size_t r = 0; r < owned_.size(); ++r) {
+      const Slot* s = owned_[r].get();
+      if (s == keepA || s == keepC || s == keepP) {
+        if (w != r) owned_[w] = std::move(owned_[r]);
+        ++w;
+      }
+    }
+    owned_.resize(w);
   }
 
-  static constexpr std::size_t kInactiveBacklog = 16;
   std::mutex mutex_;
   std::vector<std::unique_ptr<Slot>> owned_;  // ordered by generation
   std::uint64_t counter_ = 0;
   std::atomic<const Slot*> pending_{nullptr};
-  std::atomic<std::uint64_t> activeGeneration_{0};
+  std::atomic<const Slot*> candidate_{nullptr};   // RT thread's announced candidate
+  std::atomic<const Slot*> activeSlot_{nullptr};  // slot the RT thread is reading
   const Slot* active_ = nullptr;  // touched by the RT thread only
 };
 

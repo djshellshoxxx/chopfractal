@@ -263,6 +263,7 @@ CHOP_TEST(pass_through_without_a_source_and_when_disabled) {
   r.mailbox().publish(pb);
   params.enabled = false;
   tb.positionValid = true;
+  r.process(tb, params, in, out, 2, 256);  // the first disabled block crossfades from the (silent) processed branch
   r.process(tb, params, in, out, 2, 256);
   CHECK(oa == a && ob == b);  // disabled: pass-through even with a source and playing transport
   CHECK_EQ(r.activeVoices(), 0);
@@ -1047,4 +1048,107 @@ CHOP_TEST(meter_is_race_free_between_the_audio_and_the_ui_thread) {
   stop = true;
   ui.join();
   CHECK(seen.load() > 0);
+}
+
+namespace {
+// Drives one renderer through enabled/disabled segments (toggling only at segment edges), each chunked by `block`.
+std::vector<float> driveToggles(int block, const std::shared_ptr<const Playback>& pb, const std::vector<std::pair<int, bool>>& segments, float inputLevel) {
+  Renderer r;
+  Config cfg;
+  cfg.sampleRate = 48000.0;
+  cfg.maxBlock = 2048;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  std::vector<float> result;
+  std::vector<float> x(2048, inputLevel), oL(2048), oR(2048);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  RenderParams p;
+  for (const auto& seg : segments) {
+    p.enabled = seg.second;
+    for (int done = 0; done < seg.first; done += block) {
+      const int n = std::min(block, seg.first - done);
+      r.process(tb, p, in, out, 2, n);
+      result.insert(result.end(), oL.begin(), oL.begin() + n);
+      result.insert(result.end(), oR.begin(), oR.begin() + n);
+    }
+  }
+  return result;
+}
+}  // namespace
+
+CHOP_TEST(effect_enable_toggle_crossfades_instead_of_clicking_and_is_block_size_invariant) {
+  auto pb = playback(makeSource(1, 48000, 96000, dc), {ev(1, 96000, 0, 3840)}, 3840);
+  const std::vector<std::pair<int, bool>> segs = {{10000, true}, {20000, false}, {20000, true}, {10000, false}};
+  const auto ref = driveToggles(2048, pb, segs, 0.f);
+  // Reference stream is interleaved per block; compare per-sample steps on the left channel of a block-size-1 style run.
+  const auto one = driveToggles(1, pb, segs, 0.f);  // [L,R] pairs of 1 frame
+  float maxStep = 0.f, prev = 0.f;
+  bool sawMid = false;
+  for (std::size_t i = 0; i < one.size(); i += 2) {
+    const float v = one[i];
+    if (i >= 2 * 5000) maxStep = std::max(maxStep, std::fabs(v - prev));  // after the event's own fade-in
+    if (v > 0.1f && v < 0.9f && i > 2 * 10000) sawMid = true;
+    prev = v;
+  }
+  CHECK(maxStep < 0.02f);  // a hard cut would step by ~1.0
+  CHECK(sawMid);
+  CHECK(allFinite(one));
+  // Block-size invariance with toggles (left channel of every run, extracted by frame).
+  auto left = [](const std::vector<float>& v, int block, const std::vector<std::pair<int, bool>>& s) {
+    std::vector<float> l;
+    std::size_t pos = 0;
+    for (const auto& seg : s)
+      for (int done = 0; done < seg.first; done += block) {
+        const int n = std::min(block, seg.first - done);
+        l.insert(l.end(), v.begin() + static_cast<std::ptrdiff_t>(pos), v.begin() + static_cast<std::ptrdiff_t>(pos) + n);
+        pos += 2 * static_cast<std::size_t>(n);
+      }
+    return l;
+  };
+  const auto refL = left(ref, 2048, segs);
+  for (int block : {1, 7, 32, 64, 333, 1024}) {
+    const auto got = driveToggles(block, pb, segs, 0.25f);
+    const auto want = driveToggles(2048, pb, segs, 0.25f);
+    CHECK(left(got, block, segs) == left(want, 2048, segs));
+  }
+  CHECK(refL.size() == 60000u);
+}
+
+CHOP_TEST(effect_enable_toggle_performs_no_heap_allocation) {
+  Renderer r;
+  Config cfg;
+  r.prepare(cfg);
+  r.mailbox().publish(playback(makeSource(2, 44100, 24000, ramp), {ev(1, 24000, 0, 960), ev(2, 24000, 480, 960)}));
+  std::vector<float> x(256, 0.1f), oL(256), oR(256);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  RenderParams p;
+  r.process(tb, p, in, out, 2, 256);
+  gAllocs = 0;
+  gCountAllocs = true;
+  for (int i = 0; i < 300; ++i) {
+    p.enabled = (i / 7) % 2 == 0;
+    r.process(tb, p, in, out, 2, 256);
+  }
+  gCountAllocs = false;
+  CHECK_EQ(gAllocs.load(), 0);
+}
+
+CHOP_TEST(mailbox_retention_stays_bounded_when_the_reader_never_consumes) {
+  Mailbox<std::vector<int>> box;
+  for (int k = 0; k < 2000; ++k) box.publish(std::make_shared<const std::vector<int>>(8, k));
+  CHECK(box.retainedForTesting() <= 3);
+  // The reader reads once, goes away (bypassed track), and the publisher keeps going.
+  const std::vector<int>* seen = box.acquire();
+  CHECK(seen && (*seen)[0] == 1999);
+  for (int k = 2000; k < 4000; ++k) box.publish(std::make_shared<const std::vector<int>>(8, k));
+  CHECK(box.retainedForTesting() <= 3);
+  CHECK((*seen)[0] == 1999);  // the slot the reader still holds was not freed
+  const std::vector<int>* now = box.acquire();
+  CHECK(now && (*now)[0] == 3999);
 }
