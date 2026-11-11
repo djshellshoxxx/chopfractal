@@ -3,7 +3,10 @@
 #include <chopfractal/pattern_engine/pattern.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <unordered_set>
+#include <vector>
 
 namespace chopfractal::pattern::detail {
 
