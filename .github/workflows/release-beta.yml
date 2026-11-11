@@ -63,6 +63,7 @@ jobs:
     with:
       release: true
       retention-days: 30
+      full: true
     secrets: inherit
 
   publish:
