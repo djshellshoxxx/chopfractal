@@ -938,6 +938,35 @@ struct Renderer::Impl {
     drainPreview(pb, params.enabled && sourceReady);
     if (fxCount < 0) fxCount = params.enabled ? fxLen : 0;
     if (!sourceReady) fxCount = params.enabled ? fxLen : 0;  // nothing to fade: plain pass-through
+    if (sourceReady && !params.enabled && fxCount > 0 && fxCount < frames) {
+      // The fade-out ends inside this chunk: the processed branch runs only for the frames it is audible, the rest is plain
+      // pass-through, so state (position, smoothers, gestures) never advances past the fade and re-enable is block-size invariant.
+      const int head = fxCount;
+      const int savedPadOffset = padOffset;
+      processChunk(tb, params, in, out, nch, head, aux);
+      TransportBlock t2 = tb;
+      if (tb.positionValid && std::isfinite(tb.ppq)) {
+        double b = (std::isfinite(tb.bpm) && tb.bpm > 0.0) ? std::min(kMaxBpm, std::max(kMinBpm, tb.bpm)) : 120.0;
+        t2.ppq = tb.ppq + static_cast<double>(head) * b / (60.0 * cfg.sampleRate);
+      }
+      const float* inp[2] = {nullptr, nullptr};
+      float* outp[2] = {nullptr, nullptr};
+      for (int c = 0; c < nch; ++c) {
+        inp[c] = (in && in[c]) ? in[c] + head : nullptr;
+        outp[c] = out[c] + head;
+      }
+      AuxOutputs restAux;
+      float* restPtrs[kMaxAuxBuses][2] = {};
+      restAux.count = std::max(0, std::min(aux.count, kMaxAuxBuses));
+      for (int b = 0; b < restAux.count; ++b) {
+        for (int c = 0; c < 2; ++c) restPtrs[b][c] = (aux.bus[b] && aux.bus[b][c]) ? aux.bus[b][c] + head : nullptr;
+        restAux.bus[b] = restPtrs[b];
+      }
+      padOffset = savedPadOffset + head;
+      processChunk(t2, params, inp, outp, nch, frames - head, restAux);
+      padOffset = savedPadOffset;
+      return;
+    }
     if (!sourceReady || (!params.enabled && fxCount == 0)) {
       hardKillAll();
       wasPlaying = false;
@@ -959,6 +988,7 @@ struct Renderer::Impl {
       TransportBlock quiet = tb;
       quiet.scheduleEvents = false;
       numPadEvents = 0;
+      numGestEvents = 0;  // gestures queued during the fade-out are ignored, like pads
       renderProcessed(quiet, params, in, out, nch, frames, aux, *pb);
     } else {
       renderProcessed(tb, params, in, out, nch, frames, aux, *pb);

@@ -1,12 +1,12 @@
 #include <algorithm>
-#include <limits>
 #include <atomic>
 #include <chopfractal/audio_renderer/renderer.hpp>
 #include <chopfractal/chop_contracts/rng.hpp>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <new>
-#include <chrono>
 #include <thread>
 
 #include "chop_test.hpp"
@@ -78,7 +78,8 @@ std::shared_ptr<const Playback> playback(SourcePtr src, const FlatEventList& eve
   return r.ok() ? r.value() : nullptr;
 }
 
-std::vector<std::vector<float>> renderWith(const std::shared_ptr<const Playback>& pb, int block = 512, int cycles = 1, double tail = 0.0, double bpm = 120.0, double sr = 48000.0) {
+std::vector<std::vector<float>> renderWith(const std::shared_ptr<const Playback>& pb, int block = 512, int cycles = 1, double tail = 0.0, double bpm = 120.0,
+                                           double sr = 48000.0) {
   OfflineSettings s;
   s.blockSize = block;
   s.cycles = cycles;
@@ -105,13 +106,13 @@ CHOP_TEST(events_start_on_the_exact_sample_and_fade_in_and_out) {
   const auto& L = out[0];
   CHECK_EQ(L.size(), 96000u);  // 4 beats at 120 bpm = 2 s
   CHECK_NEAR(L[23999], 0.0, 0.0);
-  CHECK_NEAR(L[24000], 0.0, 0.0);              // age 0: the attack ramp starts at silence
-  CHECK_NEAR(L[24000 + 16], 0.5, 1e-6);        // halfway through the 32-frame default attack
+  CHECK_NEAR(L[24000], 0.0, 0.0);        // age 0: the attack ramp starts at silence
+  CHECK_NEAR(L[24000 + 16], 0.5, 1e-6);  // halfway through the 32-frame default attack
   CHECK_NEAR(L[24000 + 32], 1.0, 1e-6);
   CHECK_NEAR(L[24000 + 5000], 1.0, 1e-6);
-  CHECK_NEAR(L[24000 + 24000 - 1], 0.0, 1e-6); // released to silence at the gate end
+  CHECK_NEAR(L[24000 + 24000 - 1], 0.0, 1e-6);  // released to silence at the gate end
   CHECK_NEAR(L[48000], 0.0, 0.0);
-  CHECK(out[1] == out[0]);                     // centered mono source feeds both channels equally
+  CHECK(out[1] == out[0]);  // centered mono source feeds both channels equally
 }
 
 CHOP_TEST(reverse_pitch_level_and_pan_transforms) {
@@ -124,15 +125,15 @@ CHOP_TEST(reverse_pitch_level_and_pan_transforms) {
   FlatEvent up = ev(1, 24000, 0, 960);
   up.tx.pitchSemitones = 12.f;
   out = renderWith(playback(src, {up}));
-  CHECK_NEAR(out[0][500], 1000.0 / 24000.0, 1e-5);   // double speed
-  CHECK_NEAR(out[0][12100], 0.0, 0.0);               // and half the length (resampling, not time-stretch)
+  CHECK_NEAR(out[0][500], 1000.0 / 24000.0, 1e-5);  // double speed
+  CHECK_NEAR(out[0][12100], 0.0, 0.0);              // and half the length (resampling, not time-stretch)
 
   FlatEvent lvl = ev(1, 24000, 0, 960);
   lvl.tx.level = 0.5f;
   lvl.tx.pan = 1.f;
   auto dcSrc = makeSource(1, 48000, 24000, dc);
   out = renderWith(playback(dcSrc, {lvl}));
-  CHECK_NEAR(out[0][1000], 0.0, 1e-7);               // hard right silences the left side
+  CHECK_NEAR(out[0][1000], 0.0, 1e-7);  // hard right silences the left side
   CHECK_NEAR(out[1][1000], 0.5, 1e-6);
   lvl.tx.pan = -1.f;
   out = renderWith(playback(dcSrc, {lvl}));
@@ -171,19 +172,19 @@ CHOP_TEST(retrigger_is_expanded_into_decaying_sub_hits) {
     level *= 0.8f;
   }
   auto out = renderWith(pb);
-  CHECK_NEAR(out[0][3000], 1.0, 1e-5);     // first hit
-  CHECK_NEAR(out[0][9000], 0.8, 1e-5);     // second hit, decayed
+  CHECK_NEAR(out[0][3000], 1.0, 1e-5);  // first hit
+  CHECK_NEAR(out[0][9000], 0.8, 1e-5);  // second hit, decayed
 }
 
 CHOP_TEST(playback_validation_rejects_bad_input) {
   auto src = makeSource(1, 48000, 1000, dc);
   CHECK(!makePlayback(nullptr, {}, 3840).ok());
   CHECK(!makePlayback(src, {}, 0).ok());
-  CHECK(!makePlayback(src, {}, 1).ok());                          // shorter than the minimum loop
+  CHECK(!makePlayback(src, {}, 1).ok());                                  // shorter than the minimum loop
   CHECK(!makePlayback(src, {}, std::numeric_limits<Ticks>::max()).ok());  // would overflow the tick math
-  CHECK(makePlayback(src, {}, 3840).ok());  // an empty pattern is valid
-  CHECK(!makePlayback(src, {ev(1, 2000, 0, 100)}, 3840).ok());   // reads past the source
-  CHECK(!makePlayback(src, {ev(1, 500, 3840, 100)}, 3840).ok()); // starts at the loop end
+  CHECK(makePlayback(src, {}, 3840).ok());                                // an empty pattern is valid
+  CHECK(!makePlayback(src, {ev(1, 2000, 0, 100)}, 3840).ok());            // reads past the source
+  CHECK(!makePlayback(src, {ev(1, 500, 3840, 100)}, 3840).ok());          // starts at the loop end
   CHECK(!makePlayback(src, {ev(1, 500, 0, 0)}, 3840).ok());
   FlatEvent bad = ev(1, 500, 0, 100);
   bad.tx.level = std::nanf("");
@@ -235,9 +236,9 @@ CHOP_TEST(pattern_loops_and_the_tail_rings_out_without_new_events) {
   auto pb = playback(src, {ev(1, 24000, 0, 480), ev(2, 24000, 600, 360)}, 960);
   auto out = renderWith(pb, 512, 2, 0.5);
   const auto& L = out[0];
-  CHECK_NEAR(L[1000], 1.0, 1e-5);                    // first hit of cycle 1
-  CHECK_NEAR(L[24000 + 1000], 1.0, 1e-5);            // cycle 2 starts exactly one loop later (960 ticks = 24000 frames)
-  const std::size_t end = 48000;                     // 2 cycles of 960 ticks
+  CHECK_NEAR(L[1000], 1.0, 1e-5);          // first hit of cycle 1
+  CHECK_NEAR(L[24000 + 1000], 1.0, 1e-5);  // cycle 2 starts exactly one loop later (960 ticks = 24000 frames)
+  const std::size_t end = 48000;           // 2 cycles of 960 ticks
   CHECK_EQ(L.size(), end + 24000u);
   for (std::size_t i = end + 2000; i < L.size(); ++i) CHECK_NEAR(L[i], 0.0, 0.0);  // nothing new starts in the tail
 }
@@ -485,38 +486,41 @@ CHOP_TEST(process_performs_no_heap_allocation) {
 }
 
 CHOP_TEST(mailbox_hands_off_immutable_data_across_threads_without_freeing_live_objects) {
-  Mailbox<std::vector<int>> box;
-  CHECK(box.acquire() == nullptr);
-  std::atomic<bool> done{false};
-  std::atomic<long> torn{0};
-  std::atomic<long> reads{0};
-  std::thread reader([&] {
-    while (!done.load()) {
-      const std::vector<int>* v = box.acquire();
-      if (v) {
-        const int first = (*v)[0];
-        for (int x : *v)
-          if (x != first) torn.fetch_add(1);
-        reads.fetch_add(1);
+  // Repeated rounds: the reclamation race (publisher frees the slot the reader is adopting) needs many interleavings.
+  for (int round = 0; round < 12; ++round) {
+    Mailbox<std::vector<int>> box;
+    CHECK(box.acquire() == nullptr);
+    std::atomic<bool> done{false};
+    std::atomic<long> torn{0};
+    std::atomic<long> reads{0};
+    std::thread reader([&] {
+      while (!done.load()) {
+        const std::vector<int>* v = box.acquire();
+        if (v) {
+          const int first = (*v)[0];
+          for (int x : *v)
+            if (x != first) torn.fetch_add(1);
+          reads.fetch_add(1);
+        }
       }
+      box.acquire();
+    });
+    for (int k = 1; k <= 3000; ++k) {
+      box.publish(std::make_shared<const std::vector<int>>(static_cast<std::size_t>(64 + k % 64), k));
+      // On a loaded machine the reader thread may not be scheduled until the loop is over; let it get its first
+      // reads while objects are still being replaced, so the test always exercises concurrent hand-off.
+      if (k == 1)
+        for (int spin = 0; spin < 5000 && reads.load() == 0; ++spin) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    box.acquire();
-  });
-  for (int k = 1; k <= 3000; ++k) {
-    box.publish(std::make_shared<const std::vector<int>>(static_cast<std::size_t>(64 + k % 64), k));
-    // On a loaded machine the reader thread may not be scheduled until the loop is over; let it get its first
-    // reads while objects are still being replaced, so the test always exercises concurrent hand-off.
-    if (k == 1)
-      for (int spin = 0; spin < 5000 && reads.load() == 0; ++spin) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    done = true;
+    reader.join();
+    CHECK_EQ(torn.load(), 0);
+    CHECK(reads.load() > 0);
+    const std::vector<int>* last = box.acquire();
+    CHECK(last && (*last)[0] == 3000);
+    box.collect();
+    CHECK(box.retainedForTesting() <= 2);  // everything older than the acknowledged object has been freed
   }
-  done = true;
-  reader.join();
-  CHECK_EQ(torn.load(), 0);
-  CHECK(reads.load() > 0);
-  const std::vector<int>* last = box.acquire();
-  CHECK(last && (*last)[0] == 3000);
-  box.collect();
-  CHECK(box.retainedForTesting() <= 2);  // everything older than the acknowledged object has been freed
 }
 
 CHOP_TEST(first_block_starts_at_the_target_gain_and_exact_render_lengths_do_not_grow) {
@@ -660,8 +664,8 @@ CHOP_TEST(tape_glide_changes_the_read_rate_across_the_hit) {
   up.glideSemitones = 12.f;
   const auto d = renderFx(src, down);
   const auto u = renderFx(src, up);
-  CHECK(d[12000] < base[12000] - 0.05f);  // falls behind: tape stop
-  CHECK(u[12000] > base[12000] + 0.05f);  // runs ahead: rise
+  CHECK(d[12000] < base[12000] - 0.05f);                         // falls behind: tape stop
+  CHECK(u[12000] > base[12000] + 0.05f);                         // runs ahead: rise
   CHECK(d[100] > 0.f && std::fabs(d[100] - base[100]) < 1e-3f);  // the ramp starts at the normal rate
   EventFx zero;
   zero.glideSemitones = 0.f;
@@ -768,7 +772,7 @@ CHOP_TEST(process_performs_no_heap_allocation_with_the_quality_stage_and_every_g
   gCountAllocs = true;
   for (int i = 0; i < 400; ++i) {
     tb.ppq = i * 512 * 120.0 / (60.0 * 48000.0);
-    if (i == 150) p.fxMask = 0;           // toggling the bypass mid-playback
+    if (i == 150) p.fxMask = 0;  // toggling the bypass mid-playback
     if (i == 250) p.fxMask = fxbit::kAll;
     if (i == 300) p.slicePolish = false;
     r.process(tb, p, in, out, 2, 512);
@@ -800,7 +804,7 @@ CHOP_TEST(pad_path_performs_no_heap_allocation) {
   tb.playing = true;
   tb.positionValid = true;
   RenderParams p;
-  std::vector<PadEvent> pads(300);  // above the per-block cap: the excess is dropped and counted, not allocated for
+  std::vector<PadEvent> pads(300);    // above the per-block cap: the excess is dropped and counted, not allocated for
   r.process(tb, p, in, out, 2, 700);  // warm-up: first acquire
   gAllocs = 0;
   gCountAllocs = true;
@@ -809,7 +813,8 @@ CHOP_TEST(pad_path_performs_no_heap_allocation) {
     tb.playing = i % 40 != 39;
     for (std::size_t k = 0; k < pads.size(); ++k) {
       pads[k].frame = static_cast<std::int32_t>(k * 700 / pads.size());
-      pads[k].type = (k + static_cast<std::size_t>(i)) % 5 == 0 ? PadEvent::Type::NoteOff : ((k % 97 == 96) ? PadEvent::Type::AllNotesOff : PadEvent::Type::NoteOn);
+      pads[k].type =
+          (k + static_cast<std::size_t>(i)) % 5 == 0 ? PadEvent::Type::NoteOff : ((k % 97 == 96) ? PadEvent::Type::AllNotesOff : PadEvent::Type::NoteOn);
       pads[k].note = static_cast<std::uint8_t>(30 + (k * 7 + static_cast<std::size_t>(i)) % 50);  // some unmapped
       pads[k].velocity = static_cast<std::uint8_t>(1 + k % 127);
     }
@@ -998,7 +1003,7 @@ CHOP_TEST(meter_reports_peak_clip_and_voices) {
 
   std::vector<float> loud(256, 0.2f);
   for (int i = 0; i < 256; i += 4) loud[static_cast<std::size_t>(i)] = (i % 8 == 0) ? 1.5f : -1.25f;  // 64 samples above 1
-  loud[1] = std::numeric_limits<float>::quiet_NaN();                                              // never a peak, never a clip
+  loud[1] = std::numeric_limits<float>::quiet_NaN();                                                  // never a peak, never a clip
   const float* inl[2] = {loud.data(), loud.data()};
   r.process(tb, params, inl, out, 2, 256);
   m = r.meter().take();
@@ -1151,4 +1156,67 @@ CHOP_TEST(mailbox_retention_stays_bounded_when_the_reader_never_consumes) {
   CHECK((*seen)[0] == 1999);  // the slot the reader still holds was not freed
   const std::vector<int>* now = box.acquire();
   CHECK(now && (*now)[0] == 3999);
+}
+
+namespace {
+// Disable for a short stretch (with a gesture queued and a gain change during the fade), re-enable, and return what plays
+// after the re-enable. Segment lengths are multiples of every tested block size's chunking only through `block` splitting.
+std::vector<float> afterReenable(int block, bool hostPosition, const std::shared_ptr<const Playback>& pb) {
+  Renderer r;
+  Config cfg;
+  cfg.sampleRate = 48000.0;
+  cfg.maxBlock = 2048;
+  r.prepare(cfg);
+  r.mailbox().publish(pb);
+  std::vector<float> x(2048, 0.1f), oL(2048), oR(2048);
+  const float* in[2] = {x.data(), x.data()};
+  float* out[2] = {oL.data(), oR.data()};
+  TransportBlock tb;
+  tb.playing = true;
+  tb.positionValid = hostPosition;
+  RenderParams p;
+  std::vector<float> after;
+  long frame = 0;
+  const struct {
+    int len;
+    bool enabled;
+  } segs[] = {{6000, true}, {1000, false}, {4000, true}};
+  int segIndex = 0;
+  for (const auto& seg : segs) {
+    p.enabled = seg.enabled;
+    p.outputGainDb = seg.enabled ? 0.f : -12.f;
+    for (int done = 0; done < seg.len; done += block) {
+      const int n = std::min(block, seg.len - done);
+      tb.ppq = static_cast<double>(frame) * 120.0 / (60.0 * 48000.0);
+      LiveInput live;
+      GestureEvent g;
+      g.frame = 0;
+      g.kind = GestureKind::TapeStop;
+      g.on = true;
+      if (segIndex == 1 && done == 0) {
+        live.gestures = &g;
+        live.numGestures = 1;
+      }
+      r.process(tb, p, in, out, 2, n, live);
+      if (segIndex == 2) after.insert(after.end(), oL.begin(), oL.begin() + n);
+      frame += n;
+    }
+    ++segIndex;
+  }
+  return after;
+}
+}  // namespace
+
+CHOP_TEST(output_after_a_disable_then_re_enable_is_block_size_invariant) {
+  FlatEventList events;
+  for (int i = 0; i < 40; ++i) events.push_back(ev(static_cast<std::uint64_t>(i + 1), 96000, i * 90, 60));  // dense: audible after any re-enable
+  auto pb = playback(makeSource(1, 48000, 96000, ramp), events, 3840);
+  bool audible = false;
+  for (float v : afterReenable(2048, false, pb)) audible = audible || std::fabs(v) > 0.01f;
+  CHECK(audible);
+  for (bool hostPosition : {false, true}) {
+    const auto ref = afterReenable(2048, hostPosition, pb);
+    CHECK_EQ(ref.size(), 4000u);
+    for (int block : {1, 7, 64, 333, 1024}) CHECK(afterReenable(block, hostPosition, pb) == ref);
+  }
 }
