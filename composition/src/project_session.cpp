@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 namespace chopfractal::composition {
 namespace {
@@ -261,6 +262,9 @@ void ProjectSession::recordHistory(const std::string& label) {
     return;
   }
   history_.setActive(r.value().id);
+  for (auto it = nodeOfPattern_.begin(); it != nodeOfPattern_.end();) it = it->second.first.expired() ? nodeOfPattern_.erase(it) : std::next(it);
+  const auto cur = patterns_.currentShared();
+  nodeOfPattern_[cur.get()] = {cur, r.value().id};  // Undo/Redo/recall return to exactly this node, even for identical payloads
   if (!r.value().pruned.empty())
     notice(Notice::Level::Info, "Removed " + std::to_string(r.value().pruned.size()) + " older snapshot(s) to stay within the history limit.");
   if (pendingActivation_ != history::kNoNode && !history_.contains(pendingActivation_)) pendingActivation_ = history::kNoNode;
@@ -549,8 +553,14 @@ bool ProjectSession::redo() {
 // The family tree follows Undo/Redo/recall: when the restored pattern is exactly the payload of a node near the
 // active one (its ancestors, then its children, then any node), that node becomes active. A pattern that matches no
 // node (an edit that was never snapshotted, or a pattern before the first one) leaves the active node alone.
-void ProjectSession::syncActiveNodeToPattern() {
+void ProjectSession::syncActiveNodeToPattern(std::shared_ptr<const pattern::Pattern> key) {
   if (!patterns_.hasPattern()) return;
+  if (!key) key = patterns_.currentShared();
+  auto known = nodeOfPattern_.find(key.get());  // the node recorded with this very pattern object
+  if (known != nodeOfPattern_.end() && known->second.first.lock() == key && history_.contains(known->second.second)) {
+    history_.setActive(known->second.second);
+    return;
+  }
   const std::vector<std::uint8_t> bytes = pattern::serialize(patterns_.current());
   const std::uint64_t hash = history::hashPayload(bytes);
   auto matches = [&](history::NodeId id) {
@@ -589,7 +599,7 @@ Status ProjectSession::recallSnapshot(std::size_t slot) {
   patterns_.adopt(std::move(restored));  // one undo step
   pendingActivation_ = history::kNoNode;
   if (repaired) notice(Notice::Level::Info, std::string("Snapshot ") + (slot == 0 ? "A" : "B") + " used chops that no longer exist; those events were adjusted or removed.");
-  syncActiveNodeToPattern();
+  syncActiveNodeToPattern(stored);
   return {};
 }
 

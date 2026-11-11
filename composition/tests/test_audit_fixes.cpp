@@ -106,3 +106,20 @@ CHOP_TEST(recall_repairs_references_to_deleted_chops_instead_of_failing) {
   CHECK(sawNotice(s, "Snapshot A used chops that no longer exist"));
   CHECK(s.undo());  // the recall was one undo step
 }
+
+CHOP_TEST(redo_returns_to_the_node_recorded_with_an_identical_pattern) {
+  ProjectSession s;
+  CHECK(fixture::ready(s, false));
+  CHECK(s.generate(settings(1)).ok());
+  const auto n1 = s.history().active();
+  pattern::MutateOptions mo;
+  CHECK(s.mutate(mo).ok());
+  const auto n2 = s.history().active();
+  CHECK(s.generate(settings(1)).ok());
+  const auto n3 = s.history().active();
+  CHECK(n1 != n2 && n2 != n3 && n1 != n3);
+  CHECK(s.undo());
+  CHECK_EQ(s.history().active(), n2);
+  CHECK(s.redo());
+  CHECK_EQ(s.history().active(), n3);  // not the ancestor n1 with the same bytes
+}
