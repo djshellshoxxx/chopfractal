@@ -7,12 +7,12 @@
 //                 pending one, so the RT thread can never touch freed memory and retention is bounded (at most 3)
 //                 even if the RT thread never calls acquire(). Freeing happens on the publishing thread.
 // The Mailbox must outlive the RT thread's last call to acquire().
-#include <cstddef>
-#include <utility>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 namespace chopfractal::render {
@@ -27,7 +27,10 @@ class Mailbox {
     slot->generation = ++counter_;
     const Slot* raw = slot.get();
     owned_.push_back(std::move(slot));
-    pending_.store(raw, std::memory_order_release);
+    // seq_cst, not release: this store and the candidate_ load in collectLocked() form a Dekker pair with the RT thread's
+    // candidate_ store and pending_ re-check. A release store may be reordered after the later load (StoreLoad, allowed on
+    // x86), which let the RT thread adopt the previous slot while the collector freed it.
+    pending_.store(raw, std::memory_order_seq_cst);
     collectLocked();
   }
 
@@ -70,8 +73,10 @@ class Mailbox {
   // newest published (pending). Everything else, including superseded items the RT thread never saw (a bypassed track
   // while the UI keeps publishing), is freed here on the publishing thread, so retention stays bounded at three.
   void collectLocked() {
-    const Slot* keepA = activeSlot_.load(std::memory_order_seq_cst);
+    // candidate_ before activeSlot_: the RT thread stores activeSlot_ = p before it overwrites candidate_ with a newer slot,
+    // so if this load already sees the newer candidate, the activeSlot_ load below sees p or later (p is never missed).
     const Slot* keepC = candidate_.load(std::memory_order_seq_cst);
+    const Slot* keepA = activeSlot_.load(std::memory_order_seq_cst);
     const Slot* keepP = pending_.load(std::memory_order_seq_cst);
     std::size_t w = 0;
     for (std::size_t r = 0; r < owned_.size(); ++r) {
@@ -90,7 +95,7 @@ class Mailbox {
   std::atomic<const Slot*> pending_{nullptr};
   std::atomic<const Slot*> candidate_{nullptr};   // RT thread's announced candidate
   std::atomic<const Slot*> activeSlot_{nullptr};  // slot the RT thread is reading
-  const Slot* active_ = nullptr;  // touched by the RT thread only
+  const Slot* active_ = nullptr;                  // touched by the RT thread only
 };
 
 }  // namespace chopfractal::render
