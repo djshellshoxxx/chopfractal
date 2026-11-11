@@ -602,6 +602,7 @@ class ProjectSession {
   Status installPlayback(const pattern::Pattern& p);  // validate + publish; no state change on failure
   Status republish();
   bool settleRestoredPattern();
+  void syncActiveNodeToPattern();  // family tree follows Undo/Redo/recall when the pattern equals a node's payload
   void recordHistory(const std::string& label);
   Status applyActivation(history::NodeId node);
   Status reconcileAfterMarkerChange();
