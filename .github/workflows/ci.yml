@@ -1,14 +1,17 @@
 name: CI
 
+# Docs-only changes (docs/ and the root README) skip CI. Not skipped: docs/design (the shell tests read the design
+# tokens), module READMEs and MIGRATION.md (generated from module.json and checked by the portability job), and the
+# LICENSE and notices files (packaged and checked by the packaging test).
 # Pull requests run the fast gate: repository checks, GCC and Clang, sanitizers, the transfer smoke test and the Linux
 # plugin (build, shell tests, validator). Pushes to main, the nightly schedule and manual runs add the slow platform
 # jobs: macOS and Windows portable tests and the full package matrix (Windows, macOS arm64/x86_64/universal).
 on:
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md", "**/*.png", "**/*.jpg", "**/*.svg", "IP/**", "LICENSE*"]
+    paths: ["**", "!docs/**", "docs/design/**", "!README.md", "!IP/**"]
   pull_request:
-    paths-ignore: ["docs/**", "**/*.md", "**/*.png", "**/*.jpg", "**/*.svg", "IP/**", "LICENSE*"]
+    paths: ["**", "!docs/**", "docs/design/**", "!README.md", "!IP/**"]
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -16,8 +19,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its stale run. Main, nightly and manual runs carry the only cross-platform
+# jobs, so each gets its own group (event + commit) and is never cancelled by a later push.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
