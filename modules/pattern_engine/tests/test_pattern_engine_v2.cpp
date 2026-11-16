@@ -407,3 +407,65 @@ CHOP_TEST(v2_golden_output_is_pinned) {
   CHECK_EQ(fnv1a(serialize(pd)), 2976639533175961092ull);
   if (pm.ok()) CHECK_EQ(fnv1a(serialize(pm.value())), 8933794691795037903ull);
 }
+
+namespace {
+struct HatCapPolicy : ICandidatePolicy {
+  int cap = 1;
+  static bool isHat(ChopId c) { return c.value >= 7 && c.value <= 10; }
+  Decision evaluate(const CandidateQuery& q) const override {
+    Decision d;
+    if (!isHat(q.chop)) return d;
+    int n = 0;
+    for (ChopId c : q.barSoFar) n += isHat(c) ? 1 : 0;
+    if (n >= cap) {
+      d.allowed = false;
+      d.weight = 0.0;
+      d.blockedBy = 12;
+    }
+    return d;
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext&, const std::vector<ChopId>&) const override { return {}; }
+};
+int hatsIn(const Bar& b) {
+  int n = 0;
+  for (const Beat& bt : b.beats)
+    for (const Event& e : bt.events) n += HatCapPolicy::isHat(e.chop) ? 1 : 0;
+  return n;
+}
+}  // namespace
+
+// Audit item: break-engine Mutate ignored the events it kept when counting "at most N per bar".
+CHOP_TEST(v2_mutate_counts_kept_events_for_at_most_n_rules) {
+  const ChopSnapshot c = kit();
+  int regenerated = 0;
+  for (std::uint64_t seed = 1; seed <= 10; ++seed) {
+    Settings s = v2(breakeng::Profile::Jungle, seed);
+    s.density = 1.0;
+    auto g = generate(c, s);
+    CHECK(g.ok());
+    if (!g.ok()) continue;
+    Pattern base = g.value();
+    int lockedMax = 0;
+    for (Bar& b : base.bars) {
+      b.beats[2].locked = b.beats[3].locked = true;  // kept as they are; the first two beats are free to change
+      int n = 0;
+      for (int bt = 2; bt < 4; ++bt)
+        for (const Event& e : b.beats[static_cast<std::size_t>(bt)].events) n += HatCapPolicy::isHat(e.chop) ? 1 : 0;
+      lockedMax = std::max(lockedMax, n);
+    }
+    HatCapPolicy cap;
+    cap.cap = lockedMax + 1;
+    MutateOptions o;
+    o.seed = seed + 20;
+    o.amount = 1.0;
+    auto m = mutate(base, c, o, &cap);
+    CHECK(m.ok());
+    if (!m.ok()) continue;
+    for (std::size_t b = 0; b < m.value().bars.size(); ++b) {
+      CHECK(hatsIn(m.value().bars[b]) <= std::max(cap.cap, hatsIn(base.bars[b])));
+      ++regenerated;
+    }
+  }
+  CHECK(regenerated > 0);
+}

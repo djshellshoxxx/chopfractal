@@ -216,3 +216,30 @@ CHOP_TEST(section_blocks_survive_truncation_and_byte_flip_sweeps) {
       run(q);
     }
 }
+
+CHOP_TEST(unknown_future_project_modules_survive_load_and_resave) {
+  ProjectSession a;
+  CHECK(statefix::fixtureSession(a));
+  auto base = codec::decode(a.saveState(false).value().data(), a.saveState(false).value().size());
+  CHECK(base.ok());
+  if (!base.ok()) return;
+  codec::ProjectState st = base.value();
+  st.modules["future_module"] = {7, std::vector<std::uint8_t>{1, 2, 3, 4, 5}};
+  auto enc = codec::encode(st);
+  CHECK(enc.ok());
+  if (!enc.ok()) return;
+  ProjectSession b;
+  CHECK(b.loadState(enc.value().data(), enc.value().size(), {}).ok());
+  const auto resaved = b.saveState(false).value();
+  CHECK(resaved == enc.value());  // byte for byte, including the module this build does not know
+  auto back = codec::decode(resaved.data(), resaved.size());
+  CHECK(back.ok() && back.value().modules.count("future_module") == 1);
+  if (back.ok() && back.value().modules.count("future_module")) {
+    const auto& m = back.value().modules.at("future_module");
+    CHECK(m.schemaVersion == 7 && m.bytes == (std::vector<std::uint8_t>{1, 2, 3, 4, 5}));
+  }
+  // A module this build writes itself is never overwritten by a stale foreign copy.
+  ProjectSession c;
+  CHECK(c.loadState(resaved.data(), resaved.size(), {}).ok());
+  CHECK(c.saveState(false).value() == resaved);
+}

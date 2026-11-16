@@ -1,4 +1,5 @@
 #include <chopfractal/fractal_rhythm/fractal.hpp>
+#include <algorithm>
 #include <cmath>
 #include <set>
 
@@ -246,4 +247,121 @@ CHOP_TEST(a_candidate_policy_can_forbid_chops) {
   c.policy = &none;
   auto silent = generateBar(c, s);
   CHECK(silent.ok() && silent.value().empty());  // every cell rests rather than failing
+}
+
+namespace {
+struct NoRepeatNeedsRole : ICandidatePolicy {
+  ChopId needed;  // must sound in the final beat (a "require" rule), when valid
+  bool noAdjacentRepeat = false;
+  Decision evaluate(const CandidateQuery& q) const override {
+    Decision d;
+    if (noAdjacentRepeat && !q.recent.empty() && q.recent.back() == q.chop) d.allowed = false;
+    return d;
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext& sc, const std::vector<ChopId>& placed) const override {
+    if (needed.valid() && sc.finalBeat() && std::find(placed.begin(), placed.end(), needed) == placed.end()) return {{needed, 3}};
+    return {};
+  }
+};
+}  // namespace
+
+// Audit item: Fractal ignored repeat limits (the policy saw no recent chops) and required rules.
+CHOP_TEST(repeat_limits_are_honored_in_time_order) {
+  const auto snap = chops(2);
+  NoRepeatNeedsRole p;
+  p.noAdjacentRepeat = true;
+  Context c = ctxFor(snap);
+  c.policy = &p;
+  Settings s;
+  s.motif = "xxxx";
+  s.depth = 2;
+  s.mutation = 1.0;  // random alternates would repeat chops without the limit
+  for (std::uint64_t seed = 1; seed <= 8; ++seed) {
+    s.seed = seed;
+    auto r = generateBar(c, s);
+    CHECK(r.ok());
+    if (!r.ok()) continue;
+    const auto f = flat(r.value(), snap);
+    for (std::size_t i = 1; i < f.size(); ++i) CHECK(f[i].chop != f[i - 1].chop);
+  }
+}
+
+CHOP_TEST(required_chops_sound_in_their_beat_and_parents_follow) {
+  const auto snap = chops(8);
+  NoRepeatNeedsRole p;
+  p.needed = ChopId{1};  // the cycle puts chops 5..8 in the final beat, so chop 1 has to be placed there
+  Context c = ctxFor(snap);
+  c.policy = &p;
+  Settings s;
+  s.motif = "xxxx";
+  s.depth = 2;
+  auto r = generateBar(c, s);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  const auto f = flat(r.value(), snap);
+  bool inFinalBeat = false;
+  for (const auto& e : f) inFinalBeat = inFinalBeat || (e.start >= 3 * 960 && e.chop == ChopId{1});
+  CHECK(inFinalBeat);
+  // The cell that holds the rewritten leaf plays its first child's chop, and differing children carry the override flag.
+  for (const Event& top : r.value()) {
+    if (!top.child) continue;
+    CHECK(top.chop == top.child->events.front().chop);
+    for (const Event& k : top.child->events) CHECK(k.sourceOverride == (k.chop != top.chop));
+  }
+}
+
+namespace {
+struct CapAndNeed : ICandidatePolicy {
+  ChopId capped;
+  int cap = 99;
+  bool noAdjacentRepeat = false;
+  ChopId needed;  // required in beat 0
+  Decision evaluate(const CandidateQuery& q) const override {
+    Decision d;
+    if (capped.valid() && q.chop == capped) {
+      int n = 0;
+      for (ChopId c : q.barSoFar) n += c == capped ? 1 : 0;
+      if (n >= cap) d.allowed = false;
+    }
+    if (noAdjacentRepeat && !q.recent.empty() && q.recent.back() == q.chop) d.allowed = false;
+    return d;
+  }
+  bool isPreserved(const CandidateQuery&) const override { return false; }
+  std::vector<Requirement> required(const ScopeContext& sc, const std::vector<ChopId>& placed) const override {
+    if (needed.valid() && sc.beat == 0 && std::find(placed.begin(), placed.end(), needed) == placed.end()) return {{needed, 4}};
+    return {};
+  }
+};
+}  // namespace
+
+// A required-chop rewrite must not break a count or repeat rule for the leaves around it.
+CHOP_TEST(required_rewrites_never_break_count_or_repeat_rules) {
+  const auto snap = chops(8);
+  Settings s;
+  s.motif = "xxxx";
+  s.depth = 2;
+  CapAndNeed count;
+  count.capped = ChopId{6};
+  count.cap = 1;
+  count.needed = ChopId{6};  // leaf 5 already plays chop 6; leaf 3 would be a second one
+  Context c = ctxFor(snap);
+  c.policy = &count;
+  auto r = generateBar(c, s);
+  CHECK(r.ok());
+  if (r.ok()) {
+    int n = 0;
+    for (const auto& e : flat(r.value(), snap)) n += e.chop == ChopId{6} ? 1 : 0;
+    CHECK(n <= 1);
+  }
+  CapAndNeed repeat;
+  repeat.noAdjacentRepeat = true;
+  repeat.needed = ChopId{5};  // leaf 4 plays chop 5; leaf 3 would repeat it
+  c.policy = &repeat;
+  auto q = generateBar(c, s);
+  CHECK(q.ok());
+  if (q.ok()) {
+    const auto f = flat(q.value(), snap);
+    for (std::size_t i = 1; i < f.size(); ++i) CHECK(f[i].chop != f[i - 1].chop);
+  }
 }

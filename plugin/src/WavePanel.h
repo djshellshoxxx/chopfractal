@@ -49,6 +49,5 @@ class WavePanel : public EditorPanelBase {
   int pressX_ = 0;
   std::int64_t dragFrame_ = 0;
   double panAnchorX_ = 0.0;
-  double thumbGrab_ = 0.0;
   chopfractal::ChopId hoverMarker_;
 };

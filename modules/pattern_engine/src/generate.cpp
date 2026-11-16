@@ -119,6 +119,9 @@ class Gen {
       cands.push_back(base.id);
     }
     std::uint32_t blocked = 0;
+    // The query depends on the slot, not the candidate: build it once and swap the chop (it used to be rebuilt per chop).
+    CandidateQuery slotQuery;
+    if (policy_) slotQuery = query(p, bar, t, ChopId{});
     auto filter = [&](const std::vector<ChopId>& list, std::vector<ChopId>& allowed, std::vector<double>& weights) {
       for (ChopId c : list) {
         if (!policy_) {
@@ -126,7 +129,8 @@ class Gen {
           weights.push_back(1.0);
           continue;
         }
-        const Decision d = policy_->evaluate(query(p, bar, t, c));
+        slotQuery.chop = c;
+        const Decision d = policy_->evaluate(slotQuery);
         if (d.allowed) {
           allowed.push_back(c);
           weights.push_back(d.weight);
@@ -331,12 +335,37 @@ class Gen {
           }
       if (!holder) continue;
       Event& e = holder->events[index];
-      const Decision d = policy_->evaluate(query(p, bar, e.start, e.chop));
+      // "At most N per bar" counts the whole bar. The query only lists earlier events, so events that this pass will
+      // not revisit (kept by Mutate, later in the bar) are counted through a second query; a candidate must pass both.
+      CandidateQuery eq = query(p, bar, e.start, e.chop);
+      CandidateQuery wq = eq;
+      bool hasLater = false;
+      for (const Beat& bt : B.beats)
+        for (const Event& o : bt.events)
+          if (o.start >= e.start && o.id.value != idv && !fresh.count(o.id.value)) {
+            wq.barSoFar.push_back(o.chop);
+            hasLater = true;
+          }
+      auto decide = [&](ChopId chop) {
+        eq.chop = chop;
+        Decision r = policy_->evaluate(eq);
+        if (r.allowed && hasLater) {
+          wq.chop = chop;
+          const Decision w = policy_->evaluate(wq);
+          if (!w.allowed) {
+            r.allowed = false;
+            r.weight = 0.0;
+            r.blockedBy = w.blockedBy;
+          }
+        }
+        return r;
+      };
+      const Decision d = decide(e.chop);
       if (d.allowed) continue;
       std::vector<ChopId> allowed;
       std::vector<double> weights;
       for (const ChopInfo& c : chops_.chops) {
-        const Decision dc = policy_->evaluate(query(p, bar, e.start, c.id));
+        const Decision dc = decide(c.id);
         if (dc.allowed) {
           allowed.push_back(c.id);
           weights.push_back(dc.weight);

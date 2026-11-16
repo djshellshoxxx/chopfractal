@@ -13,7 +13,6 @@ using cf::roles::ActionKind;
 using cf::ui::TemplateKind;
 
 namespace {
-constexpr int kBodyW = 400;
 const ActionKind kActions[] = {ActionKind::Preserve, ActionKind::Require, ActionKind::Forbid, ActionKind::MaxConsecutiveRepeats, ActionKind::MaxCount, ActionKind::Prefer};
 const char* const kPositions[] = {"Anywhere", "First in bar", "Final beat", "Phrase boundary"};
 

@@ -168,14 +168,19 @@ Status ChopMap::setFades(ChopId id, std::uint32_t fadeIn, std::uint32_t fadeOut)
 }
 
 Status ChopMap::setTrim(ChopId id, std::uint32_t trimStart, std::uint32_t trimEnd) {
-  const std::vector<Region> regs = regions();
+  const std::vector<Marker>& all = markers();
   const Marker* cur = find(id);
   if (!cur) return makeError(ErrorCode::NotFound, "marker not found");
-  for (const Region& r : regs) {
-    if (r.id != id) continue;
-    if (static_cast<std::int64_t>(trimStart) + trimEnd > r.range.length() - minRegion_)
-      return makeError(ErrorCode::OutOfRange, "trim leaves less than the minimum region length");
+  // The span the trims must fit in: an enabled marker's region runs to the next enabled marker; a disabled marker has
+  // no region, so it is checked against the span to the next marker of any state (the smallest span it could get).
+  std::int64_t end = info_.frames;
+  for (const Marker& m : all) {
+    if (m.position <= cur->position || (cur->enabled && !m.enabled)) continue;
+    end = m.position;
+    break;
   }
+  if (static_cast<std::int64_t>(trimStart) + trimEnd > end - cur->position - minRegion_)
+    return makeError(ErrorCode::OutOfRange, "trim leaves less than the minimum region length");
   CHOP_EDIT_MARKER((m->trimStart = trimStart, m->trimEnd = trimEnd));
 }
 #undef CHOP_EDIT_MARKER
@@ -188,7 +193,9 @@ Status ChopMap::clearMarkers() {
 
 Result<ChopMap::State> ChopMap::computeProposal(const Proposal& proposal, MergeMode mode) const {
   State s = history_.current();
-  if (mode == MergeMode::Replace) s.markers.clear();
+  // Replace drops the previous analysis result but never a marker the user placed (manual); Clear removes those.
+  if (mode == MergeMode::Replace)
+    s.markers.erase(std::remove_if(s.markers.begin(), s.markers.end(), [](const Marker& m) { return !m.manual; }), s.markers.end());
   std::vector<ProposedMarker> sorted = proposal.markers;
   std::sort(sorted.begin(), sorted.end(), [](const ProposedMarker& a, const ProposedMarker& b) { return a.position < b.position; });
   for (const ProposedMarker& p : sorted) {

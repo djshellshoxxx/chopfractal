@@ -185,6 +185,19 @@ Result<Decoded> decode(const std::uint8_t* d, std::size_t n) {
       ch = get16(d + body + 2);
       rate = get32(d + body + 4);
       bits = get16(d + body + 14);
+      if (tagv == 0xFFFE) {  // WAVE_FORMAT_EXTENSIBLE: the real format is the first two bytes of the SubFormat GUID
+        if (len < 18) return makeError(ErrorCode::Corrupt, "extensible fmt chunk is truncated");
+        const std::uint32_t cb = get16(d + body + 16);
+        if (cb < 22 || 18u + cb > len) return makeError(ErrorCode::Corrupt, "extensible fmt chunk has a bad cbSize");
+        const std::uint32_t valid = get16(d + body + 18);
+        if (valid == 0 || valid > bits) return makeError(ErrorCode::Corrupt, "extensible fmt chunk has bad valid bits");
+        static const std::uint8_t kGuidTail[14] = {0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71};
+        const std::uint8_t* g = d + body + 24;
+        if (std::memcmp(g + 2, kGuidTail, sizeof kGuidTail) != 0) return makeError(ErrorCode::UnsupportedVersion, "unsupported extensible SubFormat GUID");
+        const std::uint32_t sub = get16(g);
+        if (sub != 1 && sub != 3) return makeError(ErrorCode::UnsupportedVersion, "unsupported extensible subformat (only PCM and IEEE float)");
+        tagv = sub;
+      }
       haveFmt = true;
     } else if (std::memcmp(d + pos, "data", 4) == 0) {
       if (!haveFmt) return makeError(ErrorCode::Corrupt, "data chunk precedes fmt chunk");

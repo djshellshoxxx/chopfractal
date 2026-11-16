@@ -14,6 +14,10 @@ on:
       retention-days:
         type: number
         default: 14
+      full:
+        description: "true builds every platform (and the macOS universal merge); false builds Linux x86_64 only"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -26,11 +30,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {platform: windows-x64, os: windows-2022}
-          - {platform: linux-x86_64, os: ubuntu-24.04}
-          - {platform: macos-arm64, os: macos-14, arch: arm64}
-          - {platform: macos-x86_64, os: macos-15-intel, arch: x86_64}
+        # jobs: explicit compile parallelism, about one job per 2 GB of runner RAM (JUCE translation units are heavy).
+        # A bare --parallel runs unlimited make jobs on macOS, which swapped the 7 GB macos-14 runner past the timeout.
+        include: ${{ fromJSON(inputs.full && '[{"platform":"windows-x64","os":"windows-2022","jobs":4},{"platform":"linux-x86_64","os":"ubuntu-24.04","jobs":4},{"platform":"macos-arm64","os":"macos-14","arch":"arm64","jobs":3},{"platform":"macos-x86_64","os":"macos-15-intel","arch":"x86_64","jobs":4}]' || '[{"platform":"linux-x86_64","os":"ubuntu-24.04","jobs":4}]') }}
     defaults:
       run:
         shell: bash
@@ -75,7 +77,7 @@ jobs:
             macos-*) cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release $flags -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 ;;
           esac
       - name: Build Standalone, VST3, CLAP and shell tests
-        run: cmake --build build-plugin --config Release --parallel --target ChopFractal_Standalone ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
+        run: cmake --build build-plugin --config Release --parallel ${{ matrix.jobs }} --target ChopFractal_Standalone ChopFractal_VST3 ChopFractal_CLAP ChopFractalShellTests
       - name: Shell tests (headless)
         run: |
           t=build-plugin/plugin/ChopFractalShellTests_artefacts/Release/ChopFractalShellTests
@@ -169,6 +171,7 @@ jobs:
   macos-universal:
     name: build (macos-universal)
     needs: build
+    if: inputs.full
     runs-on: macos-14
     timeout-minutes: 20
     defaults:

@@ -129,11 +129,11 @@ CHOP_TEST(generated_pattern_plays_through_the_real_processor_and_stops_with_the_
   const auto stopped = run(p, ph, 40);
   CHECK(peak(std::vector<float>(stopped.end() - 4096, stopped.end())) < 1e-6f);  // stopped transport: silence (dry mix is 0)
 
-  // Effect disabled: the input is simply passed through, source or not.
+  // Effect disabled: after a short click-free crossfade (about 5 ms) the input is simply passed through, source or not.
   ph.playing = true;
   setParam(p, "effect_enable", 0.f);
   const auto bypassed = run(p, ph, 4, 512, 0.25f);
-  CHECK_NEAR(bypassed[100], 0.25f * std::sin(0.05f * 100.f), 1e-6);
+  for (std::size_t i = 1000; i < bypassed.size(); i += 97) CHECK_NEAR(bypassed[i], 0.25f * std::sin(0.05f * static_cast<float>(i)), 1e-6);
 }
 
 CHOP_TEST(missing_host_tempo_falls_back_visibly_and_stays_valid) {

@@ -173,6 +173,10 @@ struct Renderer::Impl {
 
   double outGain = 1.0;
   double dry = 0.0;
+  // effect_enable crossfade (a few ms): fxCount runs 0 (dry) .. fxLen (processed); -1 = not primed. Per-sample, so block-size invariant.
+  int fxCount = -1;
+  int fxLen = 1;
+  std::vector<float> fxDry;  // copy of the input while a crossfade runs (hosts may process in place); 2 * maxBlock
   bool gainsPrimed = false;  // first block after prepare() starts at the targets instead of ramping from defaults
   double smoothCoef = 0.01;
 
@@ -233,6 +237,9 @@ struct Renderer::Impl {
     outGain = 1.0;
     dry = 0.0;
     gainsPrimed = false;
+    fxDry.assign(static_cast<std::size_t>(cfg.maxBlock) * 2, 0.f);
+    fxCount = -1;
+    fxLen = std::max(1, static_cast<int>(std::lround(0.005 * cfg.sampleRate)));
     wasPlaying = false;
     haveExpected = false;
     previewHead.store(0);
@@ -929,7 +936,38 @@ struct Renderer::Impl {
     polish = params.slicePolish;
     fxMask = params.fxMask;
     drainPreview(pb, params.enabled && sourceReady);
-    if (!params.enabled || !sourceReady) {
+    if (fxCount < 0) fxCount = params.enabled ? fxLen : 0;
+    if (!sourceReady) fxCount = params.enabled ? fxLen : 0;  // nothing to fade: plain pass-through
+    if (sourceReady && !params.enabled && fxCount > 0 && fxCount < frames) {
+      // The fade-out ends inside this chunk: the processed branch runs only for the frames it is audible, the rest is plain
+      // pass-through, so state (position, smoothers, gestures) never advances past the fade and re-enable is block-size invariant.
+      const int head = fxCount;
+      const int savedPadOffset = padOffset;
+      processChunk(tb, params, in, out, nch, head, aux);
+      TransportBlock t2 = tb;
+      if (tb.positionValid && std::isfinite(tb.ppq)) {
+        double b = (std::isfinite(tb.bpm) && tb.bpm > 0.0) ? std::min(kMaxBpm, std::max(kMinBpm, tb.bpm)) : 120.0;
+        t2.ppq = tb.ppq + static_cast<double>(head) * b / (60.0 * cfg.sampleRate);
+      }
+      const float* inp[2] = {nullptr, nullptr};
+      float* outp[2] = {nullptr, nullptr};
+      for (int c = 0; c < nch; ++c) {
+        inp[c] = (in && in[c]) ? in[c] + head : nullptr;
+        outp[c] = out[c] + head;
+      }
+      AuxOutputs restAux;
+      float* restPtrs[kMaxAuxBuses][2] = {};
+      restAux.count = std::max(0, std::min(aux.count, kMaxAuxBuses));
+      for (int b = 0; b < restAux.count; ++b) {
+        for (int c = 0; c < 2; ++c) restPtrs[b][c] = (aux.bus[b] && aux.bus[b][c]) ? aux.bus[b][c] + head : nullptr;
+        restAux.bus[b] = restPtrs[b];
+      }
+      padOffset = savedPadOffset + head;
+      processChunk(t2, params, inp, outp, nch, frames - head, restAux);
+      padOffset = savedPadOffset;
+      return;
+    }
+    if (!sourceReady || (!params.enabled && fxCount == 0)) {
       hardKillAll();
       wasPlaying = false;
       haveExpected = false;
@@ -939,6 +977,56 @@ struct Renderer::Impl {
       passthrough(in, out, nch, frames);
       return;
     }
+    const bool fading = !(params.enabled && fxCount >= fxLen);
+    if (fading)
+      for (int c = 0; c < nch; ++c) {
+        float* d = fxDry.data() + static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.maxBlock);
+        const float* src = (in && in[c]) ? in[c] : nullptr;
+        for (int i = 0; i < frames; ++i) d[i] = src ? src[i] : 0.f;
+      }
+    if (!params.enabled) {  // fading out: ring out what sounds, start nothing new (pads, preview, pattern)
+      TransportBlock quiet = tb;
+      quiet.scheduleEvents = false;
+      numPadEvents = 0;
+      numGestEvents = 0;  // gestures queued during the fade-out are ignored, like pads
+      renderProcessed(quiet, params, in, out, nch, frames, aux, *pb);
+    } else {
+      renderProcessed(tb, params, in, out, nch, frames, aux, *pb);
+    }
+    applyFxFade(params, out, nch, frames, aux);
+  }
+
+  // effect_enable toggles: a short linear crossfade between the dry input and the processed block, per sample.
+  void applyFxFade(const RenderParams& params, float* const* out, int nch, int frames, const AuxOutputs& aux) {
+    if (params.enabled && fxCount >= fxLen) return;  // steady state: output untouched (bit-identical)
+    const int auxCount = std::max(0, std::min(aux.count, kMaxAuxBuses));
+    const float inv = 1.f / static_cast<float>(fxLen);
+    for (int i = 0; i < frames; ++i) {
+      if (params.enabled) fxCount = std::min(fxLen, fxCount + 1);
+      else fxCount = std::max(0, fxCount - 1);
+      if (fxCount >= fxLen) continue;
+      const float w = static_cast<float>(fxCount) * inv;
+      for (int c = 0; c < nch; ++c) {
+        const float x = fxDry[static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.maxBlock) + static_cast<std::size_t>(i)];
+        out[c][i] = w * out[c][i] + (1.f - w) * (std::isfinite(x) ? x : 0.f);
+      }
+      for (int b = 0; b < auxCount; ++b)
+        for (int c = 0; c < 2; ++c)
+          if (aux.bus[b] && aux.bus[b][c]) aux.bus[b][c][i] *= w;
+    }
+    if (!params.enabled && fxCount == 0) {  // fully dry: release everything the processed branch held
+      hardKillAll();
+      wasPlaying = false;
+      haveExpected = false;
+      if (limiter.active()) limiter.reset();
+      resetAuxDelay();
+      latency.store(0, std::memory_order_relaxed);
+    }
+  }
+
+  void renderProcessed(const TransportBlock& tb, const RenderParams& params, const float* const* in, float* const* out, int nch, int frames,
+                       const AuxOutputs& aux, const Playback& pbRef) {
+    const Playback* pb = &pbRef;
     const LimiterParams lp{params.limiterEnabled, params.limiterCeilingDb};
     latency.store(params.limiterEnabled ? limiter.latencyFrames() : 0, std::memory_order_relaxed);
 

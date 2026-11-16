@@ -201,10 +201,19 @@ std::vector<TreeNodeView> layoutHistoryTree(const std::vector<history::NodeSumma
   for (auto& kv : children)
     std::sort(kv.second.begin(), kv.second.end(), [](const history::NodeSummary* a, const history::NodeSummary* b) { return a->order < b->order; });
 
+  // Iterative pre-order walk (an explicit stack, so a very long chain cannot exhaust the call stack). A leaf takes the
+  // next free column; a parent sits above its first child.
   std::vector<TreeNodeView> out;
+  out.reserve(nodes.size());
   int nextColumn = 0;
-  std::function<int(const history::NodeSummary&, int)> visit = [&](const history::NodeSummary& n, int depth) -> int {
-    const std::size_t slot = out.size();
+  struct Frame {
+    const history::NodeSummary* node;
+    std::size_t slot;
+    std::size_t nextChild;
+    int column;
+  };
+  std::vector<Frame> stack;
+  auto push = [&](const history::NodeSummary& n, int depth) {
     TreeNodeView v;
     v.id = n.id;
     v.parent = n.parent;
@@ -213,18 +222,26 @@ std::vector<TreeNodeView> layoutHistoryTree(const std::vector<history::NodeSumma
     v.favorite = n.favorite;
     v.label = n.label;
     out.push_back(v);
-    int column;
-    auto it = children.find(n.id);
-    if (it == children.end() || it->second.empty()) {
-      column = nextColumn++;
-    } else {
-      column = visit(*it->second.front(), depth + 1);  // a parent sits above its first child
-      for (std::size_t i = 1; i < it->second.size(); ++i) visit(*it->second[i], depth + 1);
-    }
-    out[slot].column = column;
-    return column;
+    stack.push_back({&n, out.size() - 1, 0, -1});
   };
-  for (const history::NodeSummary* root : children[history::kNoNode]) visit(*root, 0);
+  for (const history::NodeSummary* root : children[history::kNoNode]) {
+    push(*root, 0);
+    while (!stack.empty()) {
+      Frame& f = stack.back();
+      auto it = children.find(f.node->id);
+      const std::size_t count = it == children.end() ? 0 : it->second.size();
+      if (count == 0) f.column = nextColumn++;
+      if (f.nextChild < count) {
+        const history::NodeSummary* child = it->second[f.nextChild++];
+        push(*child, static_cast<int>(stack.size()));
+        continue;
+      }
+      const Frame done = f;
+      out[done.slot].column = done.column;
+      stack.pop_back();
+      if (!stack.empty() && stack.back().column < 0) stack.back().column = done.column;  // first child finished
+    }
+  }
   return out;
 }
 

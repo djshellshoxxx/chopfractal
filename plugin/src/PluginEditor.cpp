@@ -162,6 +162,7 @@ ChopFractalEditor::ChopFractalEditor(ChopFractalProcessor& processor)
   savedSize_ = {saved.width, saved.height};
   syncHelpTree();
   model_.refresh(true, wave_.getWidth());
+  refreshAccessibility();  // names and descriptions exist before the first timer tick (slow hosts and CI runners)
   startTimerHz(10);
 }
 

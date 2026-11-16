@@ -140,7 +140,7 @@ void CommandRegistry::refreshPresets() {
     c.title = "Open " + title.toStdString() + " panel";
     c.category = "Action";
     c.keywords = {id.toStdString(), "drawer", "panel"};
-    c.run = [edp, id] { edp->openDrawer(id); };
+    c.run = [edp, drawer = id] { edp->openDrawer(drawer); };  // C++17: structured bindings cannot be captured
     commands_.push_back(std::move(c));
   }
 }

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 namespace chopfractal::composition {
 namespace {
@@ -261,6 +262,9 @@ void ProjectSession::recordHistory(const std::string& label) {
     return;
   }
   history_.setActive(r.value().id);
+  for (auto it = nodeOfPattern_.begin(); it != nodeOfPattern_.end();) it = it->second.first.expired() ? nodeOfPattern_.erase(it) : std::next(it);
+  const auto cur = patterns_.currentShared();
+  nodeOfPattern_[cur.get()] = {cur, r.value().id};  // Undo/Redo/recall return to exactly this node, even for identical payloads
   if (!r.value().pruned.empty())
     notice(Notice::Level::Info, "Removed " + std::to_string(r.value().pruned.size()) + " older snapshot(s) to stay within the history limit.");
   if (pendingActivation_ != history::kNoNode && !history_.contains(pendingActivation_)) pendingActivation_ = history::kNoNode;
@@ -528,6 +532,7 @@ bool ProjectSession::undo() {
   endMorph(true);
   stopScenesForEdit();
   pendingActivation_ = history::kNoNode;
+  syncActiveNodeToPattern();
   return true;
 }
 
@@ -541,19 +546,60 @@ bool ProjectSession::redo() {
   endMorph(true);
   stopScenesForEdit();
   pendingActivation_ = history::kNoNode;
+  syncActiveNodeToPattern();
   return true;
 }
 
-Status ProjectSession::recallSnapshot(std::size_t slot) {
-  Status s = patterns_.recallSnapshot(slot);
-  if (!s.ok()) return s;
-  if (!settleRestoredPattern()) {
-    patterns_.undo();
-    return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops");
+// The family tree follows Undo/Redo/recall: when the restored pattern is exactly the payload of a node near the
+// active one (its ancestors, then its children, then any node), that node becomes active. A pattern that matches no
+// node (an edit that was never snapshotted, or a pattern before the first one) leaves the active node alone.
+void ProjectSession::syncActiveNodeToPattern(std::shared_ptr<const pattern::Pattern> key) {
+  if (!patterns_.hasPattern()) return;
+  if (!key) key = patterns_.currentShared();
+  auto known = nodeOfPattern_.find(key.get());  // the node recorded with this very pattern object
+  if (known != nodeOfPattern_.end() && known->second.first.lock() == key && history_.contains(known->second.second)) {
+    history_.setActive(known->second.second);
+    return;
   }
+  const std::vector<std::uint8_t> bytes = pattern::serialize(patterns_.current());
+  const std::uint64_t hash = history::hashPayload(bytes);
+  auto matches = [&](history::NodeId id) {
+    auto snap = history_.getSnapshot(id);
+    return snap.ok() && snap.value().payloadHash == hash && *snap.value().payload == bytes;
+  };
+  const history::NodeId active = history_.active();
+  if (active != history::kNoNode && matches(active)) return;
+  std::vector<history::NodeId> order;
+  if (active != history::kNoNode) {
+    const std::vector<history::NodeId> anc = history_.ancestors(active);  // root first
+    order.assign(anc.rbegin(), anc.rend());                               // nearest ancestor first
+    for (const history::NodeSummary& c : history_.listChildren(active)) order.push_back(c.id);
+  }
+  for (const history::NodeSummary& n : history_.listAll()) order.push_back(n.id);
+  for (history::NodeId id : order)
+    if (matches(id)) {
+      history_.setActive(id);
+      return;
+    }
+}
+
+Status ProjectSession::recallSnapshot(std::size_t slot) {
+  if (slot >= 2) return makeError(ErrorCode::OutOfRange, "snapshot slot must be 0 (A) or 1 (B)");
+  const std::shared_ptr<const pattern::Pattern> stored = patterns_.slot(slot);
+  if (!stored) return makeError(ErrorCode::NotFound, "that snapshot slot is empty");
+  if (!chops_) return makeError(ErrorCode::InvalidArgument, "load a source first");
+  // Chops can have changed since the snapshot was stored: references to deleted chops are dropped (as for the
+  // family tree) and reported, instead of failing the recall.
+  pattern::Pattern restored = pattern::sanitize(*stored, *chops_);
+  const bool repaired = pattern::serialize(restored) != pattern::serialize(*stored);
+  Status v = installPlayback(restored);
+  if (!v.ok()) return makeError(ErrorCode::Conflict, "that snapshot no longer fits the current chops: " + v.error().message);
   endMorph(true);
   stopScenesForEdit();
+  patterns_.adopt(std::move(restored));  // one undo step
   pendingActivation_ = history::kNoNode;
+  if (repaired) notice(Notice::Level::Info, std::string("Snapshot ") + (slot == 0 ? "A" : "B") + " used chops that no longer exist; those events were adjusted or removed.");
+  syncActiveNodeToPattern(stored);
   return {};
 }
 

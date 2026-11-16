@@ -115,8 +115,13 @@ class Chooser {
   void startBar(int bar) {
     bar_ = bar;
     barSoFar_.clear();
+    existing_.clear();
     lastOfRole_.clear();
   }
+
+  // An event of the bar that survives (kept or retained). Mutate registers these so "at most N per bar" counts them,
+  // whether they come before or after a candidate.
+  void seedBarEvent(Ticks start, ChopId chop) { existing_.push_back({start, chop}); }
 
   void seedHistory(ChopId chop, DrumRole role) {
     recent_.push_back(chop);
@@ -137,13 +142,33 @@ class Chooser {
     std::vector<std::size_t> allowed;
     std::vector<double> weights;
     std::uint32_t blocked = 0;
+    CandidateQuery hitQuery, wholeBarQuery;
+    bool whole = false;
+    if (policy_) {
+      hitQuery = query(h.start, ChopId{});
+      for (const auto& [start, chop] : existing_)
+        if (start >= h.start) {
+          if (!whole) wholeBarQuery = hitQuery;
+          wholeBarQuery.barSoFar.push_back(chop);
+          whole = true;
+        }
+    }
     for (std::size_t i = 0; i < pool.size(); ++i) {
       if (!policy_) {
         allowed.push_back(i);
         weights.push_back(1.0);
         continue;
       }
-      const Decision d = policy_->evaluate(query(h.start, pool[i]));
+      hitQuery.chop = pool[i];
+      Decision d = policy_->evaluate(hitQuery);
+      if (d.allowed && whole) {
+        wholeBarQuery.chop = pool[i];
+        const Decision w = policy_->evaluate(wholeBarQuery);
+        if (!w.allowed) {
+          d.allowed = false;
+          d.blockedBy = w.blockedBy;
+        }
+      }
       if (d.allowed) {
         allowed.push_back(i);
         weights.push_back(d.weight);
@@ -223,8 +248,10 @@ class Chooser {
     q.scope.barCount = s_.bars;
     q.scope.beat = static_cast<int>(std::min<Ticks>(beats - 1, std::max<Ticks>(0, startInBar) / beatT));
     q.scope.beatsPerBar = beats;
-    q.barSoFar = barSoFar_;
-    q.firstInBar = barSoFar_.empty();
+    for (const auto& [start, chop] : existing_)
+      if (start < startInBar) q.barSoFar.push_back(chop);  // surviving events earlier in the bar (Mutate only)
+    q.barSoFar.insert(q.barSoFar.end(), barSoFar_.begin(), barSoFar_.end());
+    q.firstInBar = q.barSoFar.empty();
     const std::size_t from = recent_.size() > 16 ? recent_.size() - 16 : 0;
     q.recent.assign(recent_.begin() + static_cast<std::ptrdiff_t>(from), recent_.end());
     return q;
@@ -238,6 +265,7 @@ class Chooser {
   int bar_ = 0;
   int last_[kRoleSlots];
   std::vector<ChopId> recent_, barSoFar_;
+  std::vector<std::pair<Ticks, ChopId>> existing_;
   std::map<int, ChopId> lastOfRole_;
 };
 
@@ -500,6 +528,15 @@ Result<Pattern> mutateBreak(const Pattern& in, const ChopSnapshot& chops, const 
     q.scope.barCount = st.bars;
     q.scope.beat = beatIndexOf(start, beatT, beats);
     q.scope.beatsPerBar = beats;
+    // Earlier events of the bar, so position and count conditions see the same bar the generator saw.
+    const Bar& src = in.bars[static_cast<std::size_t>(bar)];
+    std::vector<std::pair<Ticks, ChopId>> before;
+    for (const Beat& bt : src.beats)
+      for (const Event& o : bt.events)
+        if (o.start < start) before.push_back({o.start, o.chop});
+    std::stable_sort(before.begin(), before.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (const auto& pr : before) q.barSoFar.push_back(pr.second);
+    q.firstInBar = q.barSoFar.empty();
     return q;
   };
 
@@ -570,7 +607,10 @@ Result<Pattern> mutateBreak(const Pattern& in, const ChopSnapshot& chops, const 
     // New content from the fresh plan for replaced cells.
     chooser.startBar(bar);
     for (const Old& o : olds)
-      if (!o.replaced) chooser.seedHistory(B.beats[o.beat].events[o.index].chop, o.info.role);
+      if (!o.replaced) {
+        chooser.seedHistory(B.beats[o.beat].events[o.index].chop, o.info.role);
+        chooser.seedBarEvent(B.beats[o.beat].events[o.index].start, B.beats[o.beat].events[o.index].chop);
+      }
     std::vector<Event> added;
     int ordinal = 0;
     const breakeng::PlanSettings& psr = ps;
